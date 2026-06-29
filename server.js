@@ -20,7 +20,7 @@ app.use(express.json());
 
 // Route principale
 app.get("/", (req, res) => {
-  res.json({ message: "Sixsence Backend API is running" });
+  res.redirect("https://sixsence.vercel.app");
 });
 
 // Routes d'authentification
