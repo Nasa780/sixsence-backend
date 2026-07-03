@@ -95,18 +95,25 @@ router.get("/auth/discord/callback", async (req, res) => {
     // ---------------------------------------------
     // 4) CRÉER UN TOKEN JWT POUR LE FRONTEND
     // ---------------------------------------------
-    const token = jwt.sign(
-      {
-        discord_id: discordUser.id,
-      },
-      process.env.JWT_SECRET, // ⭐ Unifié
-      { expiresIn: "7d" }
-    );
+const token = jwt.sign(
+  {
+    discord_id: discordUser.id,
+  },
+  process.env.JWT_SECRET,
+  { expiresIn: "7d" }
+);
 
-    console.log("FRONTEND_URL =", process.env.FRONTEND_URL);
+// 🔥 CRÉER LE COOKIE DE SESSION
+res.cookie("session", token, {
+  httpOnly: true,
+  secure: true,
+  sameSite: "none",
+});
 
-    // Redirection vers le frontend AVEC le token
-    res.redirect(`${process.env.FRONTEND_URL}/?token=${token}`);
+console.log("FRONTEND_URL =", process.env.FRONTEND_URL);
+
+// Redirection vers le frontend AVEC le token
+res.redirect(`${process.env.FRONTEND_URL}/?token=${token}`);
 
   } catch (err) {
     console.log("===== ERREUR DISCORD =====");
