@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
+const cookieParser = require("cookie-parser");
 
 const authRoutes = require("./src/routes/auth");
 const queueRoutes = require("./src/routes/queueRoutes");
@@ -15,7 +16,17 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(cors());
+// 🔥 Autoriser les cookies cross-site
+app.use(
+  cors({
+    origin: "https://sixsence.vercel.app",
+    credentials: true,
+  })
+);
+
+// 🔥 Lire les cookies
+app.use(cookieParser());
+
 app.use(express.json());
 
 // Route principale
