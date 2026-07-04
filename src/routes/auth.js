@@ -108,12 +108,16 @@ res.cookie("session", token, {
   httpOnly: true,
   secure: true,
   sameSite: "none",
+  domain: "sixsence.fr",
+  path: "/",
 });
 
 console.log("FRONTEND_URL =", process.env.FRONTEND_URL);
 
-// Redirection vers le frontend AVEC le token
-res.redirect(`${process.env.FRONTEND_URL}/?token=${token}`);
+// 🔥 Redirection propre (sans token dans l’URL)
+res.redirect(process.env.FRONTEND_URL);
+
+
 
   } catch (err) {
     console.log("===== ERREUR DISCORD =====");
