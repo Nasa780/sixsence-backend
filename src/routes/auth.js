@@ -115,7 +115,7 @@ res.cookie("session", token, {
 console.log("FRONTEND_URL =", process.env.FRONTEND_URL);
 
 // 🔥 Redirection propre (sans token dans l’URL)
-res.redirect(process.env.FRONTEND_URL);
+res.status(200).send("OK");
 
 
 
