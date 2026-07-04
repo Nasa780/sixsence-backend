@@ -108,14 +108,14 @@ res.cookie("session", token, {
   httpOnly: true,
   secure: true,
   sameSite: "none",
-  domain: "sixsence.fr",
+  domain: ".sixsence.fr",
   path: "/",
 });
 
 console.log("FRONTEND_URL =", process.env.FRONTEND_URL);
 
 // 🔥 Redirection propre (sans token dans l’URL)
-res.status(200).send("OK");
+res.redirect("https://sixsence.fr/auth/callback");
 
 
 
