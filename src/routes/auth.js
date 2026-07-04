@@ -108,7 +108,7 @@ res.cookie("session", token, {
   httpOnly: true,
   secure: true,
   sameSite: "none",
-  domain: ".sixsence.fr",
+  // domain supprimé
   path: "/",
 });
 
