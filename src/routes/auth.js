@@ -16,20 +16,16 @@ router.get("/auth/discord", (req, res) => {
     process.env.DISCORD_REDIRECT_URI
   )}&response_type=code&scope=identify%20email`;
 
-  console.log("REDIRECT_URI ENVOYÉ À DISCORD :", process.env.DISCORD_REDIRECT_URI);
-
   res.redirect(redirect);
 });
 
 // ---------------------------------------------
-// 2) CALLBACK DISCORD
+// 2) CALLBACK DISCORD (VERSION TOKEN)
 // ---------------------------------------------
 router.get("/auth/discord/callback", async (req, res) => {
   const code = req.query.code;
-  console.log("CODE REÇU :", code);
 
   if (!code) {
-    console.log("CALLBACK SANS CODE → IGNORÉ");
     return res.status(200).send("Callback ignoré");
   }
 
@@ -55,22 +51,18 @@ router.get("/auth/discord/callback", async (req, res) => {
     });
 
     const discordUser = userResponse.data;
-    console.log("Utilisateur Discord :", discordUser);
 
     // ---------------------------------------------
     // 3) INSÉRER / METTRE À JOUR L'UTILISATEUR DANS SUPABASE
     // ---------------------------------------------
-    const { data: existingUser, error: selectError } = await supabase
+    const { data: existingUser } = await supabase
       .from("users")
       .select("*")
       .eq("discord_id", discordUser.id)
       .single();
 
-    console.log("SELECT ERROR :", selectError);
-    console.log("EXISTING USER :", existingUser);
-
     if (!existingUser) {
-      const { error: insertError } = await supabase.from("users").insert([
+      await supabase.from("users").insert([
         {
           discord_id: discordUser.id,
           username: discordUser.username,
@@ -78,49 +70,29 @@ router.get("/auth/discord/callback", async (req, res) => {
           email: discordUser.email || null,
         },
       ]);
-
-      console.log("INSERT ERROR :", insertError);
     } else {
-      const { error: updateError } = await supabase
+      await supabase
         .from("users")
         .update({
           username: discordUser.username,
           avatar: `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`,
         })
         .eq("discord_id", discordUser.id);
-
-      console.log("UPDATE ERROR :", updateError);
     }
 
     // ---------------------------------------------
-    // 4) CRÉER UN TOKEN JWT POUR LE FRONTEND
+    // 4) CRÉER UN TOKEN JWT POUR LE FRONTEND (SANS COOKIE)
     // ---------------------------------------------
-const token = jwt.sign(
-  {
-    discord_id: discordUser.id,
-  },
-  process.env.JWT_SECRET,
-  { expiresIn: "7d" }
-);
+    const token = jwt.sign(
+      { discord_id: discordUser.id },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
 
-// 🔥 CRÉER LE COOKIE DE SESSION
-res.cookie("session", token, {
-  httpOnly: true,
-  secure: true,
-  sameSite: "none",
-  path: "/",
-});
-
-console.log("FRONTEND_URL =", process.env.FRONTEND_URL);
-
-// 🔥 Redirection propre (sans token dans l’URL)
-res.redirect("https://sixsence-backend.onrender.com/auth/ok");
-router.get("/auth/ok", (req, res) => {
-  res.redirect("https://sixsence.fr/auth/callback");
-});
-
-
-
+    // ---------------------------------------------
+    // 5) REDIRECTION VERS LE FRONTEND AVEC LE TOKEN DANS L’URL
+    // ---------------------------------------------
+    res.redirect(`https://sixsence.fr/auth/callback?token=${token}`);
 
   } catch (err) {
     console.log("===== ERREUR DISCORD =====");
@@ -131,7 +103,7 @@ router.get("/auth/ok", (req, res) => {
 });
 
 // ---------------------------------------------
-// 5) ROUTE /me → SÉCURISÉE AVEC authMiddleware
+// 6) ROUTE /me → VERSION TOKEN (PAS COOKIE)
 // ---------------------------------------------
 router.get("/me", authMiddleware, async (req, res) => {
   const { data: user, error } = await supabase
