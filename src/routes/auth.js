@@ -114,7 +114,11 @@ res.cookie("session", token, {
 console.log("FRONTEND_URL =", process.env.FRONTEND_URL);
 
 // 🔥 Redirection propre (sans token dans l’URL)
-res.redirect("https://sixsence.fr/auth/callback");
+res.redirect("https://sixsence-backend.onrender.com/auth/ok");
+router.get("/auth/ok", (req, res) => {
+  res.redirect("https://sixsence.fr/auth/callback");
+});
+
 
 
 
