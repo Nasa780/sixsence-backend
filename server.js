@@ -10,7 +10,7 @@ const queueRoutes = require("./src/routes/queueRoutes");
 const app = express();
 
 // 🔥 Indispensable pour Render → autorise les cookies secure
-app.set("trust proxy", 1);
+app.set("trust proxy", true);
 
 // 🔥 FIX : empêcher les réponses 304
 app.set("etag", false);
