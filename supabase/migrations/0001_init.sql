@@ -25,8 +25,13 @@
 -- 0. NETTOYAGE DE L'ANCIEN SCHÉMA
 -- -----------------------------------------------------------------------------
 -- L'ancienne table users (backend avant refonte) n'a pas la même structure.
--- On ne la supprime que si c'est bien l'ancienne version (pas de colonne "role").
+-- Si c'est bien l'ancienne version (pas de colonne "role"), on la RENOMME en
+-- users_legacy au lieu de la supprimer : rien n'est perdu. Elle garde RLS
+-- activé sans politique, donc reste illisible depuis le site (elle contient
+-- des e-mails). Elle pourra être supprimée à la main plus tard.
 do $$
+declare
+  r record;
 begin
   if exists (
     select 1 from information_schema.tables
@@ -35,7 +40,43 @@ begin
     select 1 from information_schema.columns
      where table_schema = 'public' and table_name = 'users' and column_name = 'role'
   ) then
-    drop table public.users cascade;
+    if exists (
+      select 1 from information_schema.tables
+       where table_schema = 'public' and table_name = 'users_legacy'
+    ) then
+      raise exception 'users_legacy existe déjà : vérifier la base avant de relancer';
+    end if;
+    alter table public.users rename to users_legacy;
+    alter table public.users_legacy enable row level security;
+
+    -- Les noms de contraintes et d'index sont uniques par schéma : on les
+    -- préfixe pour libérer users_pkey, etc. pour la nouvelle table users.
+    for r in
+      select conname from pg_constraint where conrelid = 'public.users_legacy'::regclass
+    loop
+      execute format('alter table public.users_legacy rename constraint %I to %I', r.conname, 'legacy_' || r.conname);
+    end loop;
+    for r in
+      select indexname from pg_indexes
+       where schemaname = 'public' and tablename = 'users_legacy' and indexname not like 'legacy\_%'
+    loop
+      execute format('alter index public.%I rename to %I', r.indexname, 'legacy_' || r.indexname);
+    end loop;
+  end if;
+
+  -- Ses anciennes règles laissaient n'importe qui lire / modifier / supprimer
+  -- les comptes avec la clé publique : on les retire (accès refusé à tous,
+  -- sauf la clé secrète et le tableau de bord Supabase).
+  if exists (
+    select 1 from information_schema.tables
+     where table_schema = 'public' and table_name = 'users_legacy'
+  ) then
+    for r in
+      select policyname from pg_policies where schemaname = 'public' and tablename = 'users_legacy'
+    loop
+      execute format('drop policy %I on public.users_legacy', r.policyname);
+    end loop;
+    revoke all on public.users_legacy from anon, authenticated;
   end if;
 end;
 $$;
