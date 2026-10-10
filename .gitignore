@@ -1,0 +1,18 @@
+# dépendances (réinstallées par `npm install`, y compris sur Render)
+node_modules/
+
+# secrets : à définir dans Render > Environment, jamais dans git
+.env
+.env.*
+!.env.example
+
+# logs
+npm-debug.log*
+*.log
+
+# système
+.DS_Store
+Thumbs.db
+
+# build TypeScript
+dist/
