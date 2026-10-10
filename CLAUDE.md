@@ -1,53 +1,58 @@
 # CLAUDE.md
 
-Guide pour Claude Code (et tout contributeur) travaillant sur le **backend de SixSence**, une plateforme de compétition avec matchmaking, mode Ranked et classement.
+Guide pour Claude Code (et tout contributeur) travaillant sur le **backend de SixSence**, une plateforme de compétition : classé Call of Duty 5v5 (file d'attente, matchmaking, points, classement) et événements GTA 6.
 
 Le site (Next.js) vit dans un dépôt séparé : `Nasa780/sixsence-frontend`.
 
 ## Stack
 
-- Node.js, Express 4 (CommonJS)
-- Supabase (PostgreSQL) via `@supabase/supabase-js`
-- Authentification Discord OAuth + JWT
-- Déployé sur Render (`https://sixsence-backend.onrender.com`) : chaque commit sur `main` est déployé automatiquement (build `npm install`, démarrage `npm start`).
+- Node.js, Express 4, WebSocket (`ws`), TypeScript (ESM)
+- Supabase (PostgreSQL + Auth Discord) via `@supabase/supabase-js`, avec la clé **secrète**
+- Déployé sur Render (`https://sixsence-backend.onrender.com`) : chaque commit sur `main` est déployé automatiquement. Render lance `npm install` (le `postinstall` compile TypeScript vers `dist/`) puis `npm start`.
 
 ## Commandes
 
 ```bash
-npm install
-npm run dev     # nodemon server.js (port 3001 par défaut, ou $PORT)
-npm start       # node server.js
+npm install          # installe et compile (postinstall)
+npm run dev          # tsx watch, lit .env (port 4000 par défaut)
+npm run typecheck
+npm start            # node dist/index.js
 ```
 
-Il n'y a pas encore de tests automatisés ni de linter configuré.
+Pas encore de tests automatisés. Pour tester un match seul, `COD_TEAM_SIZE=1` dans `.env` (un match à deux comptes).
 
 ## Structure
 
-- `server.js` : point d'entrée (CORS, cookies, désactivation du cache, montage des routes).
-- `middleware/auth.js` : vérification du JWT.
-- `src/routes/` → `src/controllers/` → `src/models/` : couches HTTP, logique de requête, accès aux données.
-- `src/services/` : logique métier (file d'attente, matchmaker, timer global, système de rang, fallback, validation).
-- `src/utils/` : client Supabase, logger, gestion du temps, carte aléatoire.
+- `src/index.ts` : point d'entrée (CORS, routes, WebSocket, ménage périodique des matchs).
+- `src/config.ts` : variables d'environnement, origines CORS autorisées (liste par défaut incluse).
+- `src/auth.ts` : vérification du jeton de session Supabase (exige le fournisseur Discord).
+- `src/routes/` : `cod.ts` (file, matchs, chat), `gta.ts` (événements).
+- `src/services/` : logique métier, qui appelle surtout les fonctions SQL.
+- `src/ws/hub.ts` : WebSocket de la file (protocole décrit en tête du fichier).
+- `supabase/migrations/0001_init.sql` : tables, RLS, fonctions SQL atomiques. À exécuter dans le SQL Editor de Supabase ; idempotent.
+
+## Règles métier
+
+- **Lecture publique** : tout le site est visible sans connexion (RLS `select` ouvert à `anon`).
+- **Écritures** : uniquement via le backend et les fonctions SQL (`cod_join_queue`, `cod_try_create_match`, `cod_finalize_match`, …). Seule exception : un joueur peut modifier son `activision_id` et sa `platform`.
+- **Barème** (aligné sur la page Ranked du site) : victoire +30 points et +500 XP ; défaite -10 (Bronze) à -30 (Champion) selon le rang, jamais sous 0. Voir `cod_loss_penalty` et `cod_finalize_match`.
+- Un résultat déclaré est validé d'office après 15 min sans réponse ; un match jamais déclaré est annulé après 3 h.
 
 ## Routes
 
-Montées dans `server.js` :
+Publiques : `GET /health`, `GET /stats`, `GET /cod/status`, `GET /cod/matches/:id`, `GET /gta/events`, `GET /gta/events/:id`.
 
-- Auth : `GET /auth/discord`, `GET /auth/discord/callback`, `GET /me`
-- Classement : `GET /leaderboard/top10`
-- File d'attente : `POST /queue/join`, `POST /queue/leave`, `GET /queue/status`, `GET /queue/list`
+Connexion Discord requise (`Authorization: Bearer <jeton Supabase>`) : `GET /cod/queue`, `POST /cod/queue/join|leave`, `POST /cod/matches/:id/report|confirm|messages`, `POST|DELETE /gta/events/:id/register`. Admin : `POST /cod/matches/:id/resolve`, `POST /gta/events`.
 
-`adminRoutes.js`, `matchRoutes.js` et `userRoutes.js` existent mais ne sont pas encore montées dans `server.js`.
-
-Les origines CORS autorisées sont codées en dur dans `server.js` (sixsence.fr, www.sixsence.fr, sixsence.vercel.app) : à mettre à jour si un nouveau domaine est ajouté.
+Erreurs : `{ "error": { "code": "EVENT_FULL", "message": "..." } }`.
 
 ## Variables d'environnement
 
-Lues via `dotenv` (fichier `.env` en local, onglet Environment sur Render) :
-`DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`, `SUPABASE_URL`, `SUPABASE_KEY`, `SESSION_SECRET`, `JWT_SECRET`, `FRONTEND_URL`, `BACKEND_URL`.
+Voir `.env.example`. Indispensables : `SUPABASE_URL` et la clé secrète `SUPABASE_SERVICE_ROLE_KEY` (l'ancien nom `SUPABASE_KEY` est accepté). Optionnelles : `CORS_ORIGINS`, `COD_TEAM_SIZE`, `COD_MAPS`, `COD_MODES`, `COD_CONFIRM_MINUTES`, `COD_CANCEL_MINUTES`.
 
-Ne jamais committer `.env` ni `node_modules/` (voir `.gitignore`).
+Ne jamais committer `.env`, `node_modules/` ni `dist/` (voir `.gitignore`).
 
 ## Conventions
 
 - Code et commentaires en français.
+- Une seule instance Render : les connexions WebSocket et le limiteur de débit vivent en mémoire.
