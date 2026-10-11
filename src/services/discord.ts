@@ -110,8 +110,28 @@ export async function onMatchStart(match: CodMatch): Promise<void> {
  * Tâche périodique : pour chaque match terminé ou annulé pas encore traité,
  * supprime ses salons vocaux et publie le résultat (matchs récents uniquement).
  */
+let sweeping = false;
+let sweepAgain = false;
+
 export async function sweepDiscord(): Promise<void> {
   if (!discordEnabled) return;
+  // Une seule passe à la fois (fin de match + tâche périodique) : sinon un résultat serait publié deux fois.
+  if (sweeping) {
+    sweepAgain = true;
+    return;
+  }
+  sweeping = true;
+  try {
+    do {
+      sweepAgain = false;
+      await sweepOnce();
+    } while (sweepAgain);
+  } finally {
+    sweeping = false;
+  }
+}
+
+async function sweepOnce(): Promise<void> {
   const { data, error } = await supabase
     .from('cod_matches')
     .select('*')
@@ -119,13 +139,17 @@ export async function sweepDiscord(): Promise<void> {
     .eq('discord_done', false)
     .order('completed_at', { ascending: true })
     .limit(20);
-  if (error || !data) return;
+  if (error || !data) {
+    if (error) console.warn('[discord] lecture des matchs terminés impossible', error.message);
+    return;
+  }
 
   for (const match of data as CodMatch[]) {
     for (const [key, channelId] of Object.entries(match.discord_channels ?? {})) {
       if (key === 'pending') continue;
       try {
         await discord(`/channels/${channelId}`, { method: 'DELETE' });
+        console.log(`[discord] salon ${channelId} du match ${match.id} supprimé`);
       } catch (deleteError) {
         console.warn('[discord] suppression du salon impossible', (deleteError as Error).message);
       }

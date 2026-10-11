@@ -51,6 +51,8 @@ interface BusEvents {
   'match:start': [match: CodMatch];
   /** Vérification expirée : match annulé. */
   'match:aborted': [failure: ReadyCheckFailure];
+  /** Un ou plusieurs matchs viennent de se terminer (résultat validé ou annulation). */
+  'match:closed': [];
 }
 
 class Bus {
