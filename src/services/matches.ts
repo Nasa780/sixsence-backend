@@ -35,15 +35,29 @@ interface ProfileRow {
   points: number;
 }
 
-/** Renvoie un match, la fiche de ses joueurs et les derniers messages du chat. */
+/** Capture d'écran envoyée comme preuve du résultat. */
+export interface MatchProof {
+  id: number;
+  user_id: string;
+  username: string;
+  url: string;
+  created_at: string;
+}
+
+/** Adresse publique d'un fichier du bucket des preuves. */
+function proofUrl(path: string): string {
+  return `${config.supabaseUrl}/storage/v1/object/public/match-proofs/${path.split('/').map(encodeURIComponent).join('/')}`;
+}
+
+/** Renvoie un match, la fiche de ses joueurs, le chat et les preuves. */
 export async function getMatch(
   matchId: string,
-): Promise<{ match: CodMatch; players: MatchPlayer[]; messages: MatchMessage[] }> {
+): Promise<{ match: CodMatch; players: MatchPlayer[]; messages: MatchMessage[]; proofs: MatchProof[] }> {
   const match = unwrap(await supabase.from('cod_matches').select('*').eq('id', matchId).maybeSingle()) as CodMatch | null;
   if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
 
   const ids = [...match.team_a, ...match.team_b];
-  const [users, profiles, messages] = await Promise.all([
+  const [users, profiles, messages, proofs] = await Promise.all([
     supabase.from('users').select('id, username, avatar_url').in('id', ids),
     supabase.from('cod_profiles').select('user_id, activision_id, platform, points').in('user_id', ids),
     supabase
@@ -52,10 +66,16 @@ export async function getMatch(
       .eq('match_id', matchId)
       .order('created_at', { ascending: true })
       .limit(200),
+    supabase
+      .from('cod_match_proofs')
+      .select('id, user_id, storage_path, created_at')
+      .eq('match_id', matchId)
+      .order('created_at', { ascending: true }),
   ]);
   if (users.error) throw fromDbError(users.error);
   if (profiles.error) throw fromDbError(profiles.error);
   if (messages.error) throw fromDbError(messages.error);
+  if (proofs.error) throw fromDbError(proofs.error);
 
   const userRows = (users.data ?? []) as UserRow[];
   const profileById = new Map(((profiles.data ?? []) as ProfileRow[]).map((profile) => [profile.user_id, profile]));
@@ -78,7 +98,34 @@ export async function getMatch(
     username: nameById.get(message.user_id) ?? 'Joueur',
   }));
 
-  return { match, players, messages: chat };
+  const proofList = ((proofs.data ?? []) as { id: number; user_id: string; storage_path: string; created_at: string }[]).map(
+    (proof) => ({
+      id: proof.id,
+      user_id: proof.user_id,
+      username: nameById.get(proof.user_id) ?? 'Joueur',
+      url: proofUrl(proof.storage_path),
+      created_at: proof.created_at,
+    }),
+  );
+
+  return { match, players, messages: chat, proofs: proofList };
+}
+
+/** Un joueur accepte le match trouvé (vérification « Prêt ? »). */
+export async function readyMatch(matchId: string, userId: string): Promise<CodMatch> {
+  return unwrap(await supabase.rpc('cod_ready', { p_match: matchId, p_user: userId })) as CodMatch;
+}
+
+/** Enregistre une preuve déjà envoyée par le joueur dans le bucket match-proofs. */
+export async function addProof(matchId: string, userId: string, path: string): Promise<void> {
+  unwrap(await supabase.rpc('cod_add_proof', { p_match: matchId, p_user: userId, p_path: path }));
+}
+
+/** Matchs contestés, du plus ancien au plus récent (administration). */
+export async function listDisputes(): Promise<CodMatch[]> {
+  return (unwrap(
+    await supabase.from('cod_matches').select('*').eq('status', 'disputed').order('reported_at', { ascending: true }).limit(100),
+  ) ?? []) as CodMatch[];
 }
 
 /** Un joueur du match déclare le vainqueur ('A' ou 'B'). */

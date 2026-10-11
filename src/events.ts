@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 /** Ligne de la table cod_matches, telle que renvoyée par Supabase. */
 export interface CodMatch {
   id: string;
-  status: 'in_progress' | 'awaiting_confirmation' | 'disputed' | 'completed' | 'cancelled';
+  status: 'ready_check' | 'in_progress' | 'awaiting_confirmation' | 'disputed' | 'completed' | 'cancelled';
   map: string;
   mode: string;
   team_size: number;
@@ -15,13 +15,27 @@ export interface CodMatch {
   reported_at: string | null;
   confirmed_by: string | null;
   points_changes: Record<string, number>;
+  ready_deadline: string | null;
+  ready_users: string[];
+  started_at: string | null;
+  cancel_reason: string | null;
+  season_id: number | null;
+  discord_channels: Record<string, string>;
+  discord_done: boolean;
   created_at: string;
   completed_at: string | null;
 }
 
+/** Vérification « Prêt ? » expirée : qui avait accepté, qui manquait. */
+export interface ReadyCheckFailure {
+  match_id: string;
+  accepted: string[];
+  missing: string[];
+}
+
 /**
  * Événements internes du serveur. Les services (file d'attente, matchs)
- * émettent ; le hub WebSocket écoute et prévient les navigateurs.
+ * émettent ; le hub WebSocket et l'intégration Discord écoutent.
  * Ce découplage évite que les services dépendent du WebSocket.
  */
 interface BusEvents {
@@ -29,8 +43,14 @@ interface BusEvents {
   'queue:changed': [];
   /** L'état d'un joueur précis a changé (entré ou sorti de la file). */
   'queue:user': [userId: string];
-  /** Un match vient d'être créé : prévenir ses joueurs. */
+  /** Un match vient d'être créé (vérification « Prêt ? » ouverte) : prévenir ses joueurs. */
   'match:found': [match: CodMatch];
+  /** Un joueur a accepté : nouveau décompte. */
+  'match:ready': [match: CodMatch];
+  /** Tous les joueurs ont accepté : le match démarre. */
+  'match:start': [match: CodMatch];
+  /** Vérification expirée : match annulé. */
+  'match:aborted': [failure: ReadyCheckFailure];
 }
 
 class Bus {
