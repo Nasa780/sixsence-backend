@@ -65,6 +65,9 @@ bus.on('match:start', (match) => {
   hub.sendToUsers([...match.team_a, ...match.team_b], { type: 'match:start', matchId: match.id });
   void onMatchStart(match);
 });
+// Match terminé : salons vocaux supprimés et résultat publié tout de suite (sans attendre la tâche périodique).
+bus.on('match:closed', () => sweepDiscord());
+
 bus.on('match:aborted', async (failure) => {
   // Ceux qui avaient accepté sont remis en tête de file ; les absents sont sanctionnés.
   for (const userId of failure.accepted) {

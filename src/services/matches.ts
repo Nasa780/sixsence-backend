@@ -1,6 +1,6 @@
 import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
-import type { CodMatch } from '../events.js';
+import { bus, type CodMatch } from '../events.js';
 import { supabase } from '../supabase.js';
 
 /** Joueur tel qu'affiché dans la salle de match. */
@@ -137,14 +137,23 @@ export async function reportMatch(matchId: string, userId: string, winner: 'A' |
 
 /** L'équipe adverse confirme (accept = true) ou conteste le résultat déclaré. */
 export async function confirmMatch(matchId: string, userId: string, accept: boolean): Promise<CodMatch> {
-  return unwrap(
+  const match = unwrap(
     await supabase.rpc('cod_confirm_match', { p_match: matchId, p_user: userId, p_accept: accept }),
   ) as CodMatch;
+  announceIfClosed(match);
+  return match;
 }
 
 /** Arbitrage admin : valide un vainqueur, ou annule le match si winner vaut null. */
 export async function resolveMatch(matchId: string, winner: 'A' | 'B' | null): Promise<CodMatch> {
-  return unwrap(await supabase.rpc('cod_resolve_match', { p_match: matchId, p_winner: winner })) as CodMatch;
+  const match = unwrap(await supabase.rpc('cod_resolve_match', { p_match: matchId, p_winner: winner })) as CodMatch;
+  announceIfClosed(match);
+  return match;
+}
+
+/** Match terminé ou annulé : prévient le reste du serveur (salons Discord à supprimer, résultat à publier). */
+function announceIfClosed(match: CodMatch | null): void {
+  if (match && (match.status === 'completed' || match.status === 'cancelled')) bus.emit('match:closed');
 }
 
 /** Message dans le chat du match (joueurs du match uniquement, vérifié en SQL). */
@@ -167,5 +176,6 @@ export async function sweepMatches(): Promise<void> {
   }
   if (typeof data === 'number' && data > 0) {
     console.log(`[sweep] ${data} match(s) clôturé(s) automatiquement`);
+    bus.emit('match:closed');
   }
 }
