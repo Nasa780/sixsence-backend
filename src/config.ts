@@ -61,9 +61,28 @@ export const config = {
     modes: list('COD_MODES', ['Recherche & Destruction']),
     confirmMinutes: integer('COD_CONFIRM_MINUTES', 15, 1),
     cancelMinutes: integer('COD_CANCEL_MINUTES', 180, 5),
+    /** Temps laissé à chaque joueur pour accepter un match trouvé (vérification « Prêt ? »). */
+    readySeconds: integer('COD_READY_SECONDS', 60, 10),
     /** Délai de grâce après une déconnexion avant de retirer le joueur de la file. */
     disconnectGraceMs: 30_000,
   },
+
+  /**
+   * Intégration Discord (facultative : désactivée tant que DISCORD_BOT_TOKEN est vide).
+   * Le bot doit être membre du serveur DISCORD_GUILD_ID avec les droits « Gérer les salons »
+   * et « Envoyer des messages ».
+   */
+  discord: {
+    botToken: process.env.DISCORD_BOT_TOKEN?.trim() || '',
+    guildId: process.env.DISCORD_GUILD_ID?.trim() || '',
+    /** Catégorie où créer les salons vocaux des matchs (facultatif). */
+    matchCategoryId: process.env.DISCORD_MATCH_CATEGORY_ID?.trim() || '',
+    /** Salon où publier les résultats (facultatif). */
+    resultsChannelId: process.env.DISCORD_RESULTS_CHANNEL_ID?.trim() || '',
+  },
+
+  /** Adresse publique du site (liens envoyés sur Discord). */
+  siteUrl: (process.env.SITE_URL?.trim() || 'https://www.sixsence.fr').replace(/\/$/, ''),
 } as const;
 
 /** Nombre de joueurs nécessaires pour lancer un match. */

@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { currentUser, requireAdmin, requireAuth } from '../auth.js';
 import { playersNeeded } from '../config.js';
 import { HttpError, asyncHandler, uuidParam } from '../errors.js';
-import { confirmMatch, getMatch, postMessage, reportMatch, resolveMatch } from '../services/matches.js';
+import { bus } from '../events.js';
+import { addProof, confirmMatch, getMatch, postMessage, readyMatch, reportMatch, resolveMatch } from '../services/matches.js';
 import { getQueueSize, getQueueState, joinQueue, leaveQueue } from '../services/queue.js';
 import { getSiteStats } from '../services/stats.js';
 import type { QueueHub } from '../ws/hub.js';
@@ -18,6 +19,8 @@ import type { QueueHub } from '../ws/hub.js';
  *   GET  /cod/queue                 état de la file pour le joueur
  *   POST /cod/queue/join            entrer dans la file
  *   POST /cod/queue/leave           quitter la file
+ *   POST /cod/matches/:id/ready     accepter le match trouvé (vérification « Prêt ? », 1 min)
+ *   POST /cod/matches/:id/proofs    enregistrer une capture déjà envoyée { path }
  *   POST /cod/matches/:id/report    déclarer le vainqueur   { winner: "A" | "B" }
  *   POST /cod/matches/:id/confirm   confirmer ou contester  { accept: boolean }
  *   POST /cod/matches/:id/messages  écrire dans le chat     { body: string }
@@ -80,6 +83,29 @@ export function codRouter(hub: QueueHub): Router {
       const user = currentUser(res);
       await leaveQueue(user.id);
       res.json(await getQueueState(user.id));
+    }),
+  );
+
+  router.post(
+    '/matches/:id/ready',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const match = await readyMatch(uuidParam(req, 'id'), currentUser(res).id);
+      bus.emit(match.status === 'in_progress' && match.started_at && Date.now() - new Date(match.started_at).getTime() < 5000 ? 'match:start' : 'match:ready', match);
+      res.json({ match });
+    }),
+  );
+
+  router.post(
+    '/matches/:id/proofs',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const path = (req.body as { path?: unknown } | undefined)?.path;
+      if (typeof path !== 'string' || path.length > 300) {
+        throw new HttpError(400, 'INVALID_PROOF', 'Fichier de preuve invalide.');
+      }
+      await addProof(uuidParam(req, 'id'), currentUser(res).id, path);
+      res.status(201).json({ saved: true });
     }),
   );
 

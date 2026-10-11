@@ -1,6 +1,6 @@
 import { config, playersNeeded } from '../config.js';
 import { fromDbError, unwrap } from '../errors.js';
-import { bus, type CodMatch } from '../events.js';
+import { bus, type CodMatch, type ReadyCheckFailure } from '../events.js';
 import { supabase } from '../supabase.js';
 
 /** Ce qu'un joueur a besoin de savoir pour afficher la page de file d'attente. */
@@ -13,6 +13,8 @@ export interface QueueState {
   joinedAt: string | null;
   /** Match en cours du joueur, s'il en a un (il doit le terminer avant de relancer). */
   activeMatchId: string | null;
+  /** Fin de l'exclusion temporaire de la file (sanction), ou null. */
+  bannedUntil: string | null;
 }
 
 export async function getQueueSize(): Promise<number> {
@@ -22,20 +24,24 @@ export async function getQueueSize(): Promise<number> {
 }
 
 export async function getQueueState(userId: string): Promise<QueueState> {
-  const [size, entry, active] = await Promise.all([
+  const [size, entry, active, profile] = await Promise.all([
     getQueueSize(),
     supabase.from('cod_queue').select('joined_at').eq('user_id', userId).maybeSingle(),
     supabase.rpc('cod_active_match_id', { p_user: userId }),
+    supabase.from('cod_profiles').select('banned_until').eq('user_id', userId).maybeSingle(),
   ]);
   if (entry.error) throw fromDbError(entry.error);
   if (active.error) throw fromDbError(active.error);
+  if (profile.error) throw fromDbError(profile.error);
 
+  const bannedUntil = (profile.data?.banned_until as string | null | undefined) ?? null;
   return {
     size,
     needed: playersNeeded,
     inQueue: Boolean(entry.data),
     joinedAt: (entry.data?.joined_at as string | undefined) ?? null,
     activeMatchId: (active.data as string | null) ?? null,
+    bannedUntil: bannedUntil && new Date(bannedUntil).getTime() > Date.now() ? bannedUntil : null,
   };
 }
 
@@ -65,6 +71,7 @@ export async function leaveQueue(userId: string): Promise<boolean> {
  * Crée autant de matchs que la file le permet. La fonction SQL
  * cod_try_create_match fait tout le travail de façon atomique : choix des
  * joueurs les plus anciens, équipes aléatoires, carte et mode aléatoires.
+ * Chaque match démarre par une vérification « Prêt ? » (config.cod.readySeconds).
  */
 export async function runMatchmaking(): Promise<void> {
   // Garde-fou : on ne boucle jamais indéfiniment, même en cas de comportement inattendu.
@@ -74,15 +81,38 @@ export async function runMatchmaking(): Promise<void> {
         p_team_size: config.cod.teamSize,
         p_maps: config.cod.maps,
         p_modes: config.cod.modes,
+        p_ready_seconds: config.cod.readySeconds,
       }),
     ) as CodMatch[] | null;
 
     const match = created?.[0];
     if (!match) return;
 
-    console.log(`[matchmaking] match ${match.id} créé : ${match.map} / ${match.mode}`);
+    console.log(`[matchmaking] match ${match.id} trouvé : ${match.map} / ${match.mode}, vérification ouverte`);
     bus.emit('match:found', match);
   }
+}
+
+/**
+ * Clôt les vérifications « Prêt ? » expirées (appelé toutes les quelques secondes) :
+ * match annulé, joueurs prêts remis en tête de file, absents sanctionnés.
+ * Relance ensuite le matchmaking, puisque la file a pu se remplir.
+ */
+export async function expireReadyChecks(): Promise<void> {
+  const { data, error } = await supabase.rpc('cod_expire_ready_checks');
+  if (error) {
+    console.error('[ready]', error.message);
+    return;
+  }
+  const failures = (data ?? []) as ReadyCheckFailure[];
+  if (failures.length === 0) return;
+
+  for (const failure of failures) {
+    console.log(`[ready] match ${failure.match_id} annulé : ${failure.missing.length} joueur(s) absent(s)`);
+    bus.emit('match:aborted', failure);
+  }
+  await runMatchmaking();
+  bus.emit('queue:changed');
 }
 
 /** Vide la file. Appelé au démarrage : après un redémarrage, plus personne n'est connecté. */
