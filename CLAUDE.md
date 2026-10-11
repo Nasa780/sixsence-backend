@@ -29,7 +29,7 @@ Pas encore de tests automatisés. Pour tester un match seul, `COD_TEAM_SIZE=1` d
 - `src/routes/` : `cod.ts` (file, matchs, chat, preuves), `gta.ts` (événements), `admin.ts` (administration, rôle admin).
 - `src/services/` : logique métier, qui appelle surtout les fonctions SQL ; `discord.ts` : intégration Discord (DM, salons vocaux, résultats), désactivée sans `DISCORD_BOT_TOKEN`.
 - `src/ws/hub.ts` : WebSocket de la file (protocole décrit en tête du fichier).
-- `supabase/migrations/` : `0001_init.sql` (tables, RLS, fonctions atomiques) puis `0002_ready_sanctions_saisons.sql`. À exécuter dans l'ordre dans le SQL Editor de Supabase ; idempotents.
+- `supabase/migrations/` : `0001_init.sql` (tables, RLS, fonctions atomiques) puis `0002_ready_sanctions_saisons.sql` et `0003_activision_unique.sql`. À exécuter dans l'ordre dans le SQL Editor de Supabase ; idempotents.
 
 ## Règles métier
 
@@ -40,6 +40,7 @@ Pas encore de tests automatisés. Pour tester un match seul, `COD_TEAM_SIZE=1` d
 - **Sanctions** (`cod_apply_strike`) : sur 24 h glissantes, 1er avertissement sans effet, 2e = 15 min sans file, 3e = 1 h, ensuite 24 h.
 - **Preuves** : captures dans le bucket Storage `match-proofs` (`<match>/<joueur>/fichier`), enregistrées par `cod_add_proof`.
 - **Saisons** : `cod_close_season` archive le classement (`season_results`), donne les badges `s<id>-top10` / `s<id>-champion`, remet points et victoires à zéro (XP conservée).
+- **Identifiant Activision unique** : un même identifiant (sans tenir compte des majuscules ni des espaces) ne peut servir qu'à un seul compte (index `cod_profiles_activision_unique`, erreur 23505).
 - Un résultat déclaré est validé d'office après 15 min sans réponse ; un match jamais déclaré est annulé après 3 h.
 
 ## Routes
