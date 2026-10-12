@@ -45,7 +45,7 @@ npm start            # node dist/index.js
 - **Barème selon le groupe** : victoire +30 (+26 en groupe de 3 ou plus), défaite réduite de 25 % pour un joueur seul (`cod_win_points`, `cod_loss_points`).
 - **MVP** : chaque joueur d'un match terminé vote pour un joueur de l'équipe gagnante, lui-même compris (24 h). À égalité, les votes reçus des autres joueurs départagent ; sinon co-MVP. Le plus élu du mois écoulé reçoit le badge `mvp-AAAA-MM` (`cod_award_monthly_mvp`, vérifié toutes les heures).
 - **Arbitrages et signalements** : privés (pas de lecture publique), traités dans `/admin`, annoncés dans `DISCORD_STAFF_CHANNEL_ID` s'il est défini.
-- **Discord** : rôles de rang (Bronze … Champion) et « COD » mis à jour après chaque match, « GTA » à la première inscription à un événement (rôles créés par le bot s'ils manquent) ; annonces de file à la moitié des places puis à une place (10 min mini entre deux annonces d'une file, files de test ignorées) ; annonces GTA et rappel 1 h avant (DM aux inscrits).
+- **Discord** : rôles de rang (Bronze … Champion) et « Player COD » mis à jour après chaque match, « Player GTA » à la première inscription à un événement (rôles créés par le bot s'ils manquent) ; annonces de file à la moitié des places puis à une place (10 min mini entre deux annonces d'une file, files de test ignorées) ; annonces GTA et rappel 1 h avant (DM aux inscrits).
 - Un résultat déclaré est validé d'office après 15 min sans réponse ; un match jamais déclaré est annulé après 3 h.
 
 ## Routes
