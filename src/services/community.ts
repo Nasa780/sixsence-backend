@@ -10,12 +10,12 @@ import type { QueueSummary } from './queue.js';
  *
  *   Rôles automatiques
  *     - un rôle par rang (Bronze … Champion), tenu à jour après chaque match ;
- *     - « COD » dès le premier match classé, « GTA » dès la première inscription à un événement.
+ *     - « Player COD » dès le premier match classé, « Player GTA » dès la première inscription à un événement.
  *     Les rôles manquants sont créés par le bot (droit « Gérer les rôles » requis ; le rôle
  *     du bot doit être placé au-dessus de ces rôles dans la liste des rôles du serveur).
  *   Annonces
- *     - salon COD : file qui se remplit (avec mention @COD), MVP du mois, fin de saison ;
- *     - salon GTA : nouvel événement, événement annulé, rappel 1 h avant (avec mention @GTA) ;
+ *     - salon COD : file qui se remplit (avec mention @Player COD), MVP du mois, fin de saison ;
+ *     - salon GTA : nouvel événement, événement annulé, rappel 1 h avant (avec mention @Player GTA) ;
  *     - message privé aux inscrits 1 h avant un événement GTA.
  */
 
@@ -29,9 +29,13 @@ const RANK_ROLES = [
   { name: 'Argent', min: 500, color: 0x94a3b8 },
   { name: 'Bronze', min: 0, color: 0xc97b4b },
 ];
+/**
+ * Rôles de communauté : `key` est le nom utilisé dans le code, `name` celui affiché
+ * sur Discord ; `formerNames` sont d'anciens noms, renommés automatiquement.
+ */
 const COMMUNITY_ROLES = [
-  { name: 'COD', color: 0xd4af37 },
-  { name: 'GTA', color: 0xff9a5c },
+  { key: 'COD', name: 'Player COD', formerNames: ['COD'], color: 0xd4af37 },
+  { key: 'GTA', name: 'Player GTA', formerNames: ['GTA'], color: 0xff9a5c },
 ];
 
 const { guildId, codChannelId, gtaChannelId } = config.discord;
@@ -46,18 +50,28 @@ async function managedRoles(): Promise<Map<string, string>> {
   if (rolesCache && Date.now() - rolesCache.at < 10 * 60_000) return rolesCache.ids;
   const existing = (await discord(`/guilds/${guildId}/roles`)) as { id: string; name: string }[];
   const ids = new Map<string, string>();
-  for (const wanted of [...RANK_ROLES, ...COMMUNITY_ROLES]) {
-    let role = existing.find((item) => item.name.toLowerCase() === wanted.name.toLowerCase());
+  const byName = (name: string) => existing.find((item) => item.name.toLowerCase() === name.toLowerCase());
+  const wantedRoles = [
+    ...RANK_ROLES.map((rank) => ({ key: rank.name, name: rank.name, formerNames: [] as string[], color: rank.color, community: false })),
+    ...COMMUNITY_ROLES.map((role) => ({ ...role, community: true })),
+  ];
+  for (const wanted of wantedRoles) {
+    let role = byName(wanted.name);
+    // Ancien nom (ex. « COD » devenu « Player COD ») : on renomme le rôle, les joueurs le gardent.
+    const former = role ? undefined : wanted.formerNames.map(byName).find(Boolean);
+    if (former) {
+      role = (await discord(`/guilds/${guildId}/roles/${former.id}`, { method: 'PATCH', body: { name: wanted.name } })) as { id: string; name: string };
+      console.log(`[discord] rôle « ${former.name} » renommé en « ${wanted.name} »`);
+    }
     if (!role) {
-      const community = COMMUNITY_ROLES.some((item) => item.name === wanted.name);
       role = (await discord(`/guilds/${guildId}/roles`, {
         method: 'POST',
-        // Les rôles COD et GTA sont mentionnables : les annonces peuvent les prévenir.
-        body: { name: wanted.name, color: wanted.color, hoist: !community, mentionable: community },
+        // Les rôles de communauté sont mentionnables : les annonces peuvent les prévenir.
+        body: { name: wanted.name, color: wanted.color, hoist: !wanted.community, mentionable: wanted.community },
       })) as { id: string; name: string };
       console.log(`[discord] rôle « ${wanted.name} » créé`);
     }
-    ids.set(wanted.name, role.id);
+    ids.set(wanted.key, role.id);
   }
   rolesCache = { ids, at: Date.now() };
   return ids;
@@ -124,7 +138,7 @@ export async function syncAllRankRoles(): Promise<number> {
   return syncRankRoles(((data ?? []) as { user_id: string }[]).map((row) => row.user_id));
 }
 
-/** Donne le rôle « GTA » (inscription à un événement). */
+/** Donne le rôle « Player GTA » (inscription à un événement). */
 export async function giveGtaRole(userId: string): Promise<void> {
   if (!discordEnabled) return;
   try {
