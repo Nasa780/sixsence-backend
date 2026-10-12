@@ -1,5 +1,6 @@
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
+import { openCounts } from './moderation.js';
 
 /**
  * Validation des formulaires de l'administration. Chaque fonction renvoie un
@@ -120,7 +121,7 @@ export function parseEventPatch(body: unknown) {
 
 /** Badges attribuables à la main (les badges de saison s<id>-… sont posés par la clôture). */
 export const STAFF_BADGES = ['founder', 'beta', 'partner', 'staff', 'mvp'];
-const BADGE_PATTERN = /^(founder|beta|partner|staff|mvp|s\d+-(top10|champion))$/;
+const BADGE_PATTERN = /^(founder|beta|partner|staff|mvp|s\d+-(top10|champion)|mvp-\d{4}-\d{2})$/;
 
 export function parseBadges(body: unknown): string[] {
   const badges = (body as { badges?: unknown } | null)?.badges;
@@ -149,18 +150,21 @@ export async function searchPlayers(query: string) {
 /** Vue d'ensemble du tableau de bord. */
 export async function overview() {
   const now = new Date().toISOString();
-  const [disputes, players, upcoming, season, banned] = await Promise.all([
+  const [disputes, players, upcoming, season, banned, cases] = await Promise.all([
     supabase.from('cod_matches').select('id', { count: 'exact', head: true }).eq('status', 'disputed'),
     supabase.from('users').select('id', { count: 'exact', head: true }),
     supabase.from('gta_events').select('id', { count: 'exact', head: true }).gte('starts_at', now).neq('status', 'cancelled'),
     supabase.from('seasons').select('id, name, starts_at').eq('is_active', true).maybeSingle(),
     supabase.from('cod_profiles').select('user_id', { count: 'exact', head: true }).gt('banned_until', now),
+    openCounts(),
   ]);
   return {
     disputes: disputes.count ?? 0,
     players: players.count ?? 0,
     upcomingEvents: upcoming.count ?? 0,
     bannedPlayers: banned.count ?? 0,
+    openArbitrations: cases.arbitrations,
+    openReports: cases.reports,
     season: season.data ?? null,
   };
 }

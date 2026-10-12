@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { currentUser, requireAdmin, requireAuth } from '../auth.js';
+import { config } from '../config.js';
 import { HttpError, asyncHandler, uuidParam } from '../errors.js';
 import { bus } from '../events.js';
+import { notifyStaff } from '../services/discord.js';
+import { ARBITRATION_REASONS, REPORT_REASONS, myArbitrations, reportPlayer, requestArbitration, usernameOf, voteMvp } from '../services/moderation.js';
+import { supabase } from '../supabase.js';
 import { addProof, confirmMatch, getMatch, postMessage, readyMatch, reportMatch, resolveMatch } from '../services/matches.js';
 import { createParty, getPartyOf, joinParty, kickMember, leaveParty, previewInvite, setPartyFormat } from '../services/parties.js';
 import { getQueueState, getQueueSummaries, joinQueue, leaveQueue } from '../services/queue.js';
@@ -223,6 +227,62 @@ export function codRouter(hub: QueueHub): Router {
         throw new HttpError(400, 'INVALID_WINNER', 'Vainqueur invalide.');
       }
       res.json({ match: await resolveMatch(uuidParam(req, 'id'), winner) });
+    }),
+  );
+
+  // --- MVP, arbitrage, signalements -------------------------------------------
+
+  router.get(
+    '/matches/:id/me',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const matchId = uuidParam(req, 'id');
+      const userId = currentUser(res).id;
+      const [vote, arbitrations] = await Promise.all([
+        supabase.from('cod_mvp_votes').select('target_id').eq('match_id', matchId).eq('voter_id', userId).maybeSingle(),
+        myArbitrations(matchId, userId),
+      ]);
+      res.json({ myVote: (vote.data as { target_id: string } | null)?.target_id ?? null, arbitrations });
+    }),
+  );
+
+  router.post(
+    '/matches/:id/mvp',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      await voteMvp(uuidParam(req, 'id'), currentUser(res).id, (req.body as { targetId?: unknown } | undefined)?.targetId);
+      res.json({ voted: true });
+    }),
+  );
+
+  router.post(
+    '/matches/:id/arbitration',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const user = currentUser(res);
+      const matchId = uuidParam(req, 'id');
+      const request = await requestArbitration(matchId, user.id, req.body);
+      void notifyStaff(
+        `🛡️ **Demande d'arbitrage** — ${ARBITRATION_REASONS[request.reason]}\n` +
+          `Par ${await usernameOf(user.id)}${request.details ? ` : « ${request.details} »` : ''}\n` +
+          `${config.siteUrl}/cod/match/${matchId} · ${config.siteUrl}/admin?onglet=arbitrages`,
+      );
+      res.status(201).json({ request });
+    }),
+  );
+
+  router.post(
+    '/reports',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const user = currentUser(res);
+      const report = await reportPlayer(user.id, req.body);
+      void notifyStaff(
+        `🚩 **Signalement** — ${REPORT_REASONS[report.reason]} : ${await usernameOf(report.target_id)}\n` +
+          `Par ${await usernameOf(user.id)}${report.details ? ` : « ${report.details} »` : ''}\n` +
+          `${config.siteUrl}/admin?onglet=signalements`,
+      );
+      res.status(201).json({ reported: true });
     }),
   );
 

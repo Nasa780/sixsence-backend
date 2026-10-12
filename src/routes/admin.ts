@@ -4,6 +4,7 @@ import { HttpError, asyncHandler, unwrap, uuidParam } from '../errors.js';
 import { STAFF_BADGES, overview, parseBadges, parseEventPatch, parseFounder, parsePartner, searchPlayers } from '../services/admin.js';
 import { createEvent, parseNewEvent } from '../services/gtaEvents.js';
 import { listDisputes, resolveMatch } from '../services/matches.js';
+import { closeCase, listForAdmin } from '../services/moderation.js';
 import { supabase } from '../supabase.js';
 
 /**
@@ -11,6 +12,10 @@ import { supabase } from '../supabase.js';
  *
  *   GET    /admin/overview                 chiffres du tableau de bord
  *   GET    /admin/disputes                 matchs contestés
+ *   GET    /admin/arbitrations?status=     demandes d'arbitrage (open | resolved | rejected)
+ *   POST   /admin/arbitrations/:id         { status, resolution } traiter une demande
+ *   GET    /admin/reports?status=          signalements de joueurs
+ *   POST   /admin/reports/:id              { status, resolution } traiter un signalement
  *   POST   /admin/matches/:id/cancel       annuler un match
  *   POST   /admin/events                   créer un événement GTA 6
  *   PATCH  /admin/events/:id               modifier (titre, dates, places, statut…)
@@ -34,6 +39,20 @@ export function adminRouter(): Router {
   // --- Matchs ----------------------------------------------------------------
   router.get('/disputes', asyncHandler(async (_req, res) => {
     res.json({ matches: await listDisputes() });
+  }));
+
+  // --- Arbitrages et signalements ------------------------------------------------
+  router.get('/arbitrations', asyncHandler(async (req, res) => {
+    res.json({ items: await listForAdmin('cod_arbitration_requests', req.query.status) });
+  }));
+  router.post('/arbitrations/:id', asyncHandler(async (req, res) => {
+    res.json({ item: await closeCase('cod_arbitration_requests', req.params.id, currentUser(res).id, req.body) });
+  }));
+  router.get('/reports', asyncHandler(async (req, res) => {
+    res.json({ items: await listForAdmin('cod_player_reports', req.query.status) });
+  }));
+  router.post('/reports/:id', asyncHandler(async (req, res) => {
+    res.json({ item: await closeCase('cod_player_reports', req.params.id, currentUser(res).id, req.body) });
   }));
 
   router.post('/matches/:id/cancel', asyncHandler(async (req, res) => {

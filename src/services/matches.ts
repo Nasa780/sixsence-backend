@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { bus, type CodMatch } from '../events.js';
 import { supabase } from '../supabase.js';
+import { mvpVotesOf } from './moderation.js';
 
 /** Joueur tel qu'affiché dans la salle de match. */
 export interface MatchPlayer {
@@ -52,7 +53,7 @@ function proofUrl(path: string): string {
 /** Renvoie un match, la fiche de ses joueurs, le chat et les preuves. */
 export async function getMatch(
   matchId: string,
-): Promise<{ match: CodMatch; players: MatchPlayer[]; messages: MatchMessage[]; proofs: MatchProof[] }> {
+): Promise<{ match: CodMatch; players: MatchPlayer[]; messages: MatchMessage[]; proofs: MatchProof[]; mvpVotes: Record<string, number> }> {
   const match = unwrap(await supabase.from('cod_matches').select('*').eq('id', matchId).maybeSingle()) as CodMatch | null;
   if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
 
@@ -108,7 +109,7 @@ export async function getMatch(
     }),
   );
 
-  return { match, players, messages: chat, proofs: proofList };
+  return { match, players, messages: chat, proofs: proofList, mvpVotes: await mvpVotesOf(matchId) };
 }
 
 /** Un joueur accepte le match trouvé (vérification « Prêt ? »). */

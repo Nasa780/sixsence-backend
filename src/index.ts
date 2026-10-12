@@ -11,6 +11,7 @@ import { codRouter } from './routes/cod.js';
 import { gtaRouter } from './routes/gta.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { sweepMatches } from './services/matches.js';
+import { awardPreviousMonthMvp } from './services/moderation.js';
 import { clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
 import { QueueHub } from './ws/hub.js';
@@ -157,6 +158,13 @@ const sweeper = setInterval(() => void sweepMatches(), 60_000);
 const readyTimer = setInterval(() => void expireReadyChecks(), 3_000);
 // Discord : suppression des salons vocaux et publication des résultats.
 const discordTimer = setInterval(() => void sweepDiscord(), 30_000);
+// MVP du mois : attribué dès le début du mois suivant (vérifié au démarrage puis toutes les heures).
+const awardMvp = () =>
+  awardPreviousMonthMvp()
+    .then((award) => award && console.log(`[mvp] MVP du mois ${award.month.slice(0, 7)} : ${award.userId}`))
+    .catch((error) => console.error('[mvp]', error));
+void awardMvp();
+const mvpTimer = setInterval(awardMvp, 60 * 60_000);
 
 server.listen(config.port, () => {
   console.log(`[boot] SixSence API en écoute sur le port ${config.port}`);
@@ -170,6 +178,7 @@ function shutdown(signal: string): void {
   clearInterval(sweeper);
   clearInterval(readyTimer);
   clearInterval(discordTimer);
+  clearInterval(mvpTimer);
   hub.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5_000).unref();
