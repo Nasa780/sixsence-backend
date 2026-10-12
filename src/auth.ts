@@ -55,6 +55,30 @@ export const requireAuth: RequestHandler = (req, res, next) => {
     .catch(next);
 };
 
+/**
+ * Middleware : identifie le joueur s'il envoie un jeton valide, sans l'exiger
+ * (pages publiques dont une partie est réservée, comme le salon de match).
+ */
+export const optionalAuth: RequestHandler = (req, res, next) => {
+  const header = req.headers.authorization ?? '';
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  if (!token) {
+    next();
+    return;
+  }
+  verifyAccessToken(token)
+    .then((user) => {
+      if (user) res.locals.user = user;
+      next();
+    })
+    .catch(next);
+};
+
+/** Joueur de la requête s'il est connecté (posé par requireAuth ou optionalAuth), sinon null. */
+export function viewerOf(res: Response): AuthUser | null {
+  return (res.locals.user as AuthUser | undefined) ?? null;
+}
+
 /** Middleware : exige en plus le rôle admin (table users). À placer après requireAuth. */
 export const requireAdmin: RequestHandler = (_req, res, next) => {
   isAdmin(currentUser(res).id)
@@ -68,7 +92,7 @@ export const requireAdmin: RequestHandler = (_req, res, next) => {
     .catch(next);
 };
 
-async function isAdmin(userId: string): Promise<boolean> {
+export async function isAdmin(userId: string): Promise<boolean> {
   const { data, error } = await supabase.from('users').select('role').eq('id', userId).maybeSingle();
   return !error && data?.role === 'admin';
 }

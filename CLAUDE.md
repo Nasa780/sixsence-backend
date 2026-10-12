@@ -29,11 +29,11 @@ npm start            # node dist/index.js
 - `src/routes/` : `cod.ts` (file, matchs, chat, preuves), `gta.ts` (événements), `admin.ts` (administration, rôle admin).
 - `src/services/` : logique métier, qui appelle surtout les fonctions SQL ; `discord.ts` : intégration Discord (DM, salons vocaux, résultats), désactivée sans `DISCORD_BOT_TOKEN` ; `community.ts` : rôles automatiques (rangs, COD, GTA), annonces et rappels GTA ; `announcePolicy.ts` : règles anti-spam des annonces (testées).
 - `src/ws/hub.ts` : WebSocket de la file (protocole décrit en tête du fichier).
-- `supabase/migrations/` : `0001_init.sql` (tables, RLS, fonctions atomiques) puis `0002_ready_sanctions_saisons.sql`, `0003_activision_unique.sql` `0004_formats_groupes.sql` (files par format, groupes, barème selon la taille du groupe) `0005_mvp_moderation.sql` (vote du MVP, arbitrages, signalements) et `0006_mvp_gagnants.sql` (MVP choisi dans l'équipe gagnante) `0007_rappels_gta.sql` (rappels des événements GTA) et `0008_notifications_push.sql` (abonnements push, clés VAPID). À exécuter dans l'ordre dans le SQL Editor de Supabase ; idempotents.
+- `supabase/migrations/` : `0001_init.sql` (tables, RLS, fonctions atomiques) puis `0002_ready_sanctions_saisons.sql`, `0003_activision_unique.sql` `0004_formats_groupes.sql` (files par format, groupes, barème selon la taille du groupe) `0005_mvp_moderation.sql` (vote du MVP, arbitrages, signalements) et `0006_mvp_gagnants.sql` (MVP choisi dans l'équipe gagnante) `0007_rappels_gta.sql` (rappels des événements GTA) `0008_notifications_push.sql` (abonnements push, clés VAPID), `0009_search_path.sql` et `0010_match_prive.sql` (chat, preuves et avertissements privés). À exécuter dans l'ordre dans le SQL Editor de Supabase ; idempotents.
 
 ## Règles métier
 
-- **Lecture publique** : tout le site est visible sans connexion (RLS `select` ouvert à `anon`).
+- **Lecture publique** : tout le site est visible sans connexion (RLS `select` ouvert à `anon`), sauf le chat et les preuves d'un match (joueurs du match et admins : `getMatch` renvoie `privateAccess`, bucket `match-proofs` privé avec liens signés d'1 h) et les avertissements (privés).
 - **Écritures** : uniquement via le backend et les fonctions SQL (`cod_join_queue`, `cod_try_create_match`, `cod_finalize_match`, …). Seule exception : un joueur peut modifier son `activision_id` et sa `platform`.
 - **Barème** (aligné sur la page Ranked du site) : victoire +30 points et +500 XP ; défaite -10 (Bronze) à -30 (Champion) selon le rang, jamais sous 0. Voir `cod_loss_penalty` et `cod_finalize_match`.
 - **Vérification « Prêt ? »** : un match trouvé démarre en `ready_check` ; chaque joueur a 60 s (`COD_READY_SECONDS`) pour accepter. Délai dépassé : match annulé, joueurs prêts remis en tête de file, absents sanctionnés.
@@ -51,7 +51,7 @@ npm start            # node dist/index.js
 
 ## Routes
 
-Publiques : `GET /health`, `GET /stats`, `GET /cod/status`, `GET /cod/matches/:id`, `GET /gta/events`, `GET /gta/events/:id`.
+Publiques : `GET /health`, `GET /stats`, `GET /cod/status`, `GET /cod/matches/:id` (chat et preuves seulement pour les joueurs du match et les admins, jeton facultatif), `GET /gta/events`, `GET /gta/events/:id`.
 
 Connexion Discord requise (`Authorization: Bearer <jeton Supabase>`) : `GET /cod/queue`, `POST /cod/queue/join|leave`, `GET|POST /cod/party`, `POST /cod/party/join|leave|kick|format`, `GET /cod/matches/:id/me`, `POST /cod/matches/:id/mvp|arbitration`, `POST /cod/reports`, `POST /cod/matches/:id/ready|report|confirm|messages|proofs`, `POST|DELETE /gta/events/:id/register`.
 

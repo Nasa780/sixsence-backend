@@ -1,3 +1,4 @@
+import { isAdmin } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { bus, type CodMatch } from '../events.js';
@@ -45,33 +46,60 @@ export interface MatchProof {
   created_at: string;
 }
 
-/** Adresse publique d'un fichier du bucket des preuves. */
-function proofUrl(path: string): string {
-  return `${config.supabaseUrl}/storage/v1/object/public/match-proofs/${path.split('/').map(encodeURIComponent).join('/')}`;
+/** Durée de validité des liens vers les captures (bucket privé). */
+const PROOF_URL_SECONDS = 60 * 60;
+
+/** Liens temporaires vers les captures du bucket privé des preuves (chemin -> adresse). */
+async function proofUrls(paths: string[]): Promise<Map<string, string>> {
+  if (paths.length === 0) return new Map();
+  const { data, error } = await supabase.storage.from('match-proofs').createSignedUrls(paths, PROOF_URL_SECONDS);
+  if (error) throw new HttpError(500, 'PROOFS_UNAVAILABLE', 'Captures momentanément indisponibles.');
+  const urls = new Map<string, string>();
+  for (const item of data ?? []) if (item.path && item.signedUrl) urls.set(item.path, item.signedUrl);
+  return urls;
 }
 
-/** Renvoie un match, la fiche de ses joueurs, le chat et les preuves. */
+/**
+ * Renvoie un match, la fiche de ses joueurs, le chat et les preuves.
+ *
+ * Le chat et les captures ne sont envoyés qu'aux joueurs du match et aux admins
+ * (privateAccess) ; les autres visiteurs voient le match, les équipes et le résultat.
+ */
 export async function getMatch(
   matchId: string,
-): Promise<{ match: CodMatch; players: MatchPlayer[]; messages: MatchMessage[]; proofs: MatchProof[]; mvpVotes: Record<string, number>; mvpVotesFromOthers: Record<string, number> }> {
+  viewerId: string | null = null,
+): Promise<{
+  match: CodMatch;
+  players: MatchPlayer[];
+  messages: MatchMessage[];
+  proofs: MatchProof[];
+  privateAccess: boolean;
+  mvpVotes: Record<string, number>;
+  mvpVotesFromOthers: Record<string, number>;
+}> {
   const match = unwrap(await supabase.from('cod_matches').select('*').eq('id', matchId).maybeSingle()) as CodMatch | null;
   if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
 
   const ids = [...match.team_a, ...match.team_b];
+  const privateAccess = Boolean(viewerId && (ids.includes(viewerId) || (await isAdmin(viewerId))));
   const [users, profiles, messages, proofs] = await Promise.all([
     supabase.from('users').select('id, username, avatar_url').in('id', ids),
     supabase.from('cod_profiles').select('user_id, activision_id, platform, points').in('user_id', ids),
-    supabase
-      .from('cod_match_messages')
-      .select('id, user_id, body, created_at')
-      .eq('match_id', matchId)
-      .order('created_at', { ascending: true })
-      .limit(200),
-    supabase
-      .from('cod_match_proofs')
-      .select('id, user_id, storage_path, created_at')
-      .eq('match_id', matchId)
-      .order('created_at', { ascending: true }),
+    privateAccess
+      ? supabase
+          .from('cod_match_messages')
+          .select('id, user_id, body, created_at')
+          .eq('match_id', matchId)
+          .order('created_at', { ascending: true })
+          .limit(200)
+      : { data: [], error: null },
+    privateAccess
+      ? supabase
+          .from('cod_match_proofs')
+          .select('id, user_id, storage_path, created_at')
+          .eq('match_id', matchId)
+          .order('created_at', { ascending: true })
+      : { data: [], error: null },
   ]);
   if (users.error) throw fromDbError(users.error);
   if (profiles.error) throw fromDbError(profiles.error);
@@ -99,18 +127,20 @@ export async function getMatch(
     username: nameById.get(message.user_id) ?? 'Joueur',
   }));
 
-  const proofList = ((proofs.data ?? []) as { id: number; user_id: string; storage_path: string; created_at: string }[]).map(
-    (proof) => ({
+  const proofRows = (proofs.data ?? []) as { id: number; user_id: string; storage_path: string; created_at: string }[];
+  const urls = await proofUrls(proofRows.map((proof) => proof.storage_path));
+  const proofList = proofRows
+    .filter((proof) => urls.has(proof.storage_path))
+    .map((proof) => ({
       id: proof.id,
       user_id: proof.user_id,
       username: nameById.get(proof.user_id) ?? 'Joueur',
-      url: proofUrl(proof.storage_path),
+      url: urls.get(proof.storage_path) as string,
       created_at: proof.created_at,
-    }),
-  );
+    }));
 
   const votes = await mvpVotesOf(matchId);
-  return { match, players, messages: chat, proofs: proofList, mvpVotes: votes.total, mvpVotesFromOthers: votes.fromOthers };
+  return { match, players, messages: chat, proofs: proofList, privateAccess, mvpVotes: votes.total, mvpVotesFromOthers: votes.fromOthers };
 }
 
 /** Un joueur accepte le match trouvé (vérification « Prêt ? »). */
