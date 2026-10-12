@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { currentUser, requireAdmin, requireAuth } from '../auth.js';
+import { currentUser, optionalAuth, requireAdmin, requireAuth, viewerOf } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, asyncHandler, uuidParam } from '../errors.js';
 import { bus } from '../events.js';
@@ -57,8 +57,10 @@ export function codRouter(hub: QueueHub): Router {
 
   router.get(
     '/matches/:id',
+    optionalAuth,
     asyncHandler(async (req, res) => {
-      res.json(await getMatch(uuidParam(req, 'id')));
+      // Chat et captures : réservés aux joueurs du match et aux admins (voir getMatch).
+      res.json(await getMatch(uuidParam(req, 'id'), viewerOf(res)?.id ?? null));
     }),
   );
 
