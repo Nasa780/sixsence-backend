@@ -5,6 +5,7 @@ import { STAFF_BADGES, overview, parseBadges, parseEventPatch, parseFounder, par
 import { createEvent, parseNewEvent } from '../services/gtaEvents.js';
 import { listDisputes, resolveMatch } from '../services/matches.js';
 import { closeCase, listForAdmin } from '../services/moderation.js';
+import { announceEventCancelled, announceNewEvent, announceSeasonClosed, syncAllRankRoles } from '../services/community.js';
 import { supabase } from '../supabase.js';
 
 /**
@@ -27,6 +28,7 @@ import { supabase } from '../supabase.js';
  *   POST   /admin/players/:id/role         { role: "member" | "admin" }
  *   POST   /admin/players/:id/unban        lever une exclusion de la file
  *   POST   /admin/season/close             { nextName } clôturer la saison
+ *   POST   /admin/discord/sync-roles       remettre à jour les rôles Discord de tous les joueurs classés
  */
 export function adminRouter(): Router {
   const router = Router();
@@ -61,13 +63,33 @@ export function adminRouter(): Router {
 
   // --- Événements GTA 6 --------------------------------------------------------
   router.post('/events', asyncHandler(async (req, res) => {
-    res.status(201).json({ event: await createEvent(parseNewEvent(req.body), currentUser(res).id) });
+    const event = await createEvent(parseNewEvent(req.body), currentUser(res).id);
+    void announceNewEvent(event);
+    res.status(201).json({ event });
   }));
 
   router.patch('/events/:id', asyncHandler(async (req, res) => {
-    const patch = parseEventPatch(req.body);
-    const event = unwrap(await supabase.from('gta_events').update(patch).eq('id', uuidParam(req, 'id')).select('*').maybeSingle());
+    const id = uuidParam(req, 'id');
+    const patch: Record<string, unknown> = parseEventPatch(req.body);
+    const before = unwrap(await supabase.from('gta_events').select('status, starts_at').eq('id', id).maybeSingle()) as {
+      status: string;
+      starts_at: string;
+    } | null;
+    if (!before) throw new HttpError(404, 'EVENT_NOT_FOUND', 'Événement introuvable.');
+    // Nouvelle date : le rappel 1 h avant sera renvoyé pour le nouvel horaire.
+    if (typeof patch.starts_at === 'string' && new Date(patch.starts_at).getTime() !== new Date(before.starts_at).getTime()) {
+      patch.reminder_sent_at = null;
+    }
+    const event = unwrap(await supabase.from('gta_events').update(patch).eq('id', id).select('*').maybeSingle()) as {
+      id: string;
+      title: string;
+      starts_at: string;
+      location: string | null;
+      status: string;
+    } | null;
     if (!event) throw new HttpError(404, 'EVENT_NOT_FOUND', 'Événement introuvable.');
+    if (before.status !== 'published' && event.status === 'published') void announceNewEvent(event);
+    if (before.status === 'published' && event.status === 'cancelled') void announceEventCancelled(event);
     res.json({ event });
   }));
 
@@ -124,8 +146,16 @@ export function adminRouter(): Router {
   // --- Saison ------------------------------------------------------------------
   router.post('/season/close', asyncHandler(async (req, res) => {
     const nextName = (req.body as { nextName?: unknown } | undefined)?.nextName;
-    const archived = unwrap(await supabase.rpc('cod_close_season', { p_next_name: typeof nextName === 'string' ? nextName : '' }));
+    const archived = unwrap(await supabase.rpc('cod_close_season', { p_next_name: typeof nextName === 'string' ? nextName : '' })) as number;
+    void announceSeasonClosed(archived, String(nextName).trim());
+    // Points remis à zéro : les rangs Discord suivent.
+    void syncAllRankRoles();
     res.json({ archived });
+  }));
+
+  // --- Discord -------------------------------------------------------------------
+  router.post('/discord/sync-roles', asyncHandler(async (_req, res) => {
+    res.json({ updated: await syncAllRankRoles() });
   }));
 
   return router;

@@ -11,7 +11,8 @@ import { codRouter } from './routes/cod.js';
 import { gtaRouter } from './routes/gta.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { sweepMatches } from './services/matches.js';
-import { awardPreviousMonthMvp } from './services/moderation.js';
+import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
+import { announceMonthlyMvp, onQueueChanged, sendEventReminders, syncAllRankRoles, syncRankRoles } from './services/community.js';
 import { clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
 import { QueueHub } from './ws/hub.js';
@@ -36,7 +37,13 @@ const hub = new QueueHub({
 
 // Les services émettent des événements ; on les relaie aux navigateurs.
 bus.on('queue:changed', async () => {
-  hub.broadcast({ type: 'queue:update', queues: await getQueueSummaries() });
+  const queues = await getQueueSummaries();
+  hub.broadcast({ type: 'queue:update', queues });
+  onQueueChanged(queues);
+});
+// Rangs Discord des joueurs à jour après chaque match.
+bus.on('match:finalized', (match) => {
+  void syncRankRoles([...match.team_a, ...match.team_b]);
 });
 bus.on('queue:user', async (userId) => {
   const state = await getQueueState(userId);
@@ -161,10 +168,18 @@ const discordTimer = setInterval(() => void sweepDiscord(), 30_000);
 // MVP du mois : attribué dès le début du mois suivant (vérifié au démarrage puis toutes les heures).
 const awardMvp = () =>
   awardPreviousMonthMvp()
-    .then((award) => award && console.log(`[mvp] MVP du mois ${award.month.slice(0, 7)} : ${award.userId}`))
+    .then(async (award) => {
+      if (!award) return;
+      console.log(`[mvp] MVP du mois ${award.month.slice(0, 7)} : ${award.userId}`);
+      await announceMonthlyMvp(await usernameOf(award.userId), award.month);
+    })
     .catch((error) => console.error('[mvp]', error));
 void awardMvp();
 const mvpTimer = setInterval(awardMvp, 60 * 60_000);
+// Rappels Discord 1 h avant les événements GTA 6.
+const reminderTimer = setInterval(() => void sendEventReminders(), 5 * 60_000);
+// Rôles Discord de tous les joueurs classés, une fois au démarrage.
+setTimeout(() => void syncAllRankRoles().then((count) => count && console.log(`[discord] rôles mis à jour pour ${count} joueur(s)`)), 20_000);
 
 server.listen(config.port, () => {
   console.log(`[boot] SixSence API en écoute sur le port ${config.port}`);
@@ -179,6 +194,7 @@ function shutdown(signal: string): void {
   clearInterval(readyTimer);
   clearInterval(discordTimer);
   clearInterval(mvpTimer);
+  clearInterval(reminderTimer);
   hub.close();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5_000).unref();

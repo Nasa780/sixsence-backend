@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { currentUser, requireAdmin, requireAuth } from '../auth.js';
 import { asyncHandler, uuidParam } from '../errors.js';
+import { announceNewEvent, giveGtaRole } from '../services/community.js';
 import {
   createEvent,
   getEvent,
@@ -48,6 +49,7 @@ export function gtaRouter(): Router {
     requireAdmin,
     asyncHandler(async (req, res) => {
       const event = await createEvent(parseNewEvent(req.body), currentUser(res).id);
+      void announceNewEvent(event);
       res.status(201).json({ event });
     }),
   );
@@ -57,6 +59,7 @@ export function gtaRouter(): Router {
     requireAuth,
     asyncHandler(async (req, res) => {
       const registeredCount = await registerToEvent(uuidParam(req, 'id'), currentUser(res).id);
+      void giveGtaRole(currentUser(res).id);
       res.json({ registered: true, registered_count: registeredCount });
     }),
   );

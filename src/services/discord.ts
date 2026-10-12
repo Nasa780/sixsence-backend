@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import type { CodMatch } from '../events.js';
+import { bus, type CodMatch } from '../events.js';
 import { supabase } from '../supabase.js';
 
 /**
@@ -15,12 +15,12 @@ import { supabase } from '../supabase.js';
 
 const API = 'https://discord.com/api/v10';
 /** Pas d'aperçu de lien sous les messages du bot (les liens restent cliquables). */
-const SUPPRESS_EMBEDS = 1 << 2;
+export const SUPPRESS_EMBEDS = 1 << 2;
 const { botToken, guildId, matchCategoryId, resultsChannelId, staffChannelId } = config.discord;
 
 export const discordEnabled = Boolean(botToken && guildId);
 
-async function discord(path: string, init: { method?: string; body?: unknown } = {}): Promise<unknown> {
+export async function discord(path: string, init: { method?: string; body?: unknown } = {}): Promise<unknown> {
   const res = await fetch(`${API}${path}`, {
     method: init.method ?? 'GET',
     headers: { Authorization: `Bot ${botToken}`, 'Content-Type': 'application/json' },
@@ -36,7 +36,7 @@ async function discord(path: string, init: { method?: string; body?: unknown } =
 }
 
 /** Identifiants Discord des joueurs (colonne users.discord_id, remplie à la connexion). */
-async function discordIds(userIds: string[]): Promise<Map<string, string>> {
+export async function discordIds(userIds: string[]): Promise<Map<string, string>> {
   const { data } = await supabase.from('users').select('id, discord_id, username').in('id', userIds);
   return new Map(((data ?? []) as { id: string; discord_id: string | null }[]).filter((row) => row.discord_id).map((row) => [row.id, row.discord_id as string]));
 }
@@ -47,7 +47,7 @@ async function usernames(userIds: string[]): Promise<Map<string, string>> {
 }
 
 /** Envoie un message privé à chaque joueur ; ignore ceux qui refusent les DM. */
-async function dm(userIds: string[], content: string): Promise<void> {
+export async function dm(userIds: string[], content: string): Promise<void> {
   const ids = await discordIds(userIds);
   for (const discordId of ids.values()) {
     try {
@@ -193,5 +193,6 @@ async function sweepOnce(): Promise<void> {
     }
 
     await supabase.from('cod_matches').update({ discord_done: true }).eq('id', match.id);
+    if (match.status === 'completed') bus.emit('match:finalized', match);
   }
 }
