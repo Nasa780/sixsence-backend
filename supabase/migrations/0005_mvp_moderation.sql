@@ -164,3 +164,16 @@ revoke execute on function public.cod_vote_mvp(uuid, uuid, uuid)  from public, a
 revoke execute on function public.cod_award_monthly_mvp(date)     from public, anon, authenticated;
 grant execute on function public.cod_vote_mvp(uuid, uuid, uuid)  to service_role;
 grant execute on function public.cod_award_monthly_mvp(date)     to service_role;
+
+-- Temps réel : le décompte des votes se met à jour en direct dans le salon de match.
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+     and not exists (
+       select 1 from pg_publication_tables
+        where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'cod_mvp_votes'
+     ) then
+    alter publication supabase_realtime add table public.cod_mvp_votes;
+  end if;
+end;
+$$;
