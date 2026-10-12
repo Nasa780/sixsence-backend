@@ -14,6 +14,8 @@ import { supabase } from '../supabase.js';
  */
 
 const API = 'https://discord.com/api/v10';
+/** Pas d'aperçu de lien sous les messages du bot (les liens restent cliquables). */
+const SUPPRESS_EMBEDS = 1 << 2;
 const { botToken, guildId, matchCategoryId, resultsChannelId, staffChannelId } = config.discord;
 
 export const discordEnabled = Boolean(botToken && guildId);
@@ -50,7 +52,7 @@ async function dm(userIds: string[], content: string): Promise<void> {
   for (const discordId of ids.values()) {
     try {
       const channel = (await discord('/users/@me/channels', { method: 'POST', body: { recipient_id: discordId } })) as { id: string };
-      await discord(`/channels/${channel.id}/messages`, { method: 'POST', body: { content } });
+      await discord(`/channels/${channel.id}/messages`, { method: 'POST', body: { content, flags: SUPPRESS_EMBEDS } });
     } catch (error) {
       console.warn('[discord] message privé impossible', (error as Error).message);
     }
@@ -65,7 +67,7 @@ export async function notifyStaff(content: string): Promise<void> {
   try {
     await discord(`/channels/${staffChannelId}/messages`, {
       method: 'POST',
-      body: { content: content.slice(0, 1900), allowed_mentions: { parse: [] } },
+      body: { content: content.slice(0, 1900), allowed_mentions: { parse: [] }, flags: SUPPRESS_EMBEDS },
     });
   } catch (error) {
     console.warn('[discord] message à l’équipe impossible', (error as Error).message);
@@ -182,6 +184,7 @@ async function sweepOnce(): Promise<void> {
             content:
               `**${match.map}** · ${match.mode} — victoire de l'Équipe ${match.winner === 'A' ? '1' : '2'}\n` +
               `Gagnants : ${team(winners)}\nPerdants : ${team(losers)}\n${matchUrl(match)}`,
+            flags: SUPPRESS_EMBEDS,
           },
         });
       } catch (postError) {
