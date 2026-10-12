@@ -86,7 +86,8 @@ export const config = {
       'Vault',
       'Vorkuta',
     ]),
-    modes: list('COD_MODES', ['Recherche & Destruction']),
+    /** Mode du classé : Recherche & Destruction en réglage Hardcore uniquement. */
+    modes: list('COD_MODES', ['Recherche & Destruction Hardcore']),
     confirmMinutes: integer('COD_CONFIRM_MINUTES', 15, 1),
     cancelMinutes: integer('COD_CANCEL_MINUTES', 180, 5),
     /** Temps laissé à chaque joueur pour accepter un match trouvé (vérification « Prêt ? »). */
