@@ -9,12 +9,14 @@ import { rateLimit } from './rateLimit.js';
 import { adminRouter } from './routes/admin.js';
 import { codRouter } from './routes/cod.js';
 import { gtaRouter } from './routes/gta.js';
+import { pushRouter } from './routes/push.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { sweepMatches } from './services/matches.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, onQueueChanged, sendEventReminders, syncAllRankRoles, syncRankRoles } from './services/community.js';
 import { clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
+import { pushPublicKey, pushToUsers } from './services/push.js';
 import { QueueHub } from './ws/hub.js';
 
 /**
@@ -73,6 +75,14 @@ bus.on('match:found', (match) => {
     total: match.team_size * 2,
   });
   void onMatchFound(match);
+  // Notification sur téléphone / ordinateur, même site fermé (appli installée).
+  void pushToUsers([...match.team_a, ...match.team_b], {
+    title: '⚡ Match trouvé !',
+    body: `${match.format ?? ''} · ${match.map} — accepte dans la minute.`,
+    url: `/cod/match/${match.id}`,
+    tag: `match-${match.id}`,
+    urgent: true,
+  });
 });
 bus.on('match:ready', (match) => {
   hub.sendToUsers([...match.team_a, ...match.team_b], {
@@ -146,6 +156,7 @@ app.get(
 
 app.use('/cod', codRouter(hub));
 app.use('/gta', gtaRouter());
+app.use('/push', pushRouter());
 app.use('/admin', adminRouter());
 app.use(notFoundHandler);
 app.use(errorHandler);
@@ -158,6 +169,8 @@ hub.attach(server);
 // Après un redémarrage plus personne n'est connecté : la file repart de zéro.
 // Les navigateurs encore ouverts se reconnectent seuls et affichent "hors file".
 clearQueue().catch((error) => console.error('[boot] purge de la file impossible', error));
+// Clés des notifications push (générées et gardées en base au premier démarrage).
+void pushPublicKey();
 
 // Ménage des matchs sans réponse ou abandonnés, une fois par minute.
 const sweeper = setInterval(() => void sweepMatches(), 60_000);
