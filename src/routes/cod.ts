@@ -8,7 +8,7 @@ import { ARBITRATION_REASONS, REPORT_REASONS, myArbitrations, reportPlayer, requ
 import { supabase } from '../supabase.js';
 import { addProof, confirmMatch, getMatch, postMessage, readyMatch, reportMatch, resolveMatch } from '../services/matches.js';
 import { createParty, getPartyOf, joinParty, kickMember, leaveParty, previewInvite, setPartyFormat } from '../services/parties.js';
-import { getQueueState, getQueueSummaries, joinQueue, leaveQueue } from '../services/queue.js';
+import { getQueueState, getQueueSummaries, joinQueue, leaveQueue, stayInQueue } from '../services/queue.js';
 import { getSiteStats } from '../services/stats.js';
 import type { QueueHub } from '../ws/hub.js';
 
@@ -24,6 +24,7 @@ import type { QueueHub } from '../ws/hub.js';
  *   GET  /cod/queue                 état de la file et du groupe pour le joueur
  *   POST /cod/queue/join            entrer dans la file { format } (seul) ; un chef y fait entrer tout son groupe
  *   POST /cod/queue/leave           quitter la file (avec tout son groupe)
+ *   POST /cod/queue/stay            « Rester en file » : confirmer sa présence (compteur remis à zéro)
  *   GET  /cod/party                 mon groupe
  *   POST /cod/party                 créer un groupe          { format }
  *   POST /cod/party/join            rejoindre un groupe      { code }
@@ -93,6 +94,16 @@ export function codRouter(hub: QueueHub): Router {
     asyncHandler(async (_req, res) => {
       const user = currentUser(res);
       await leaveQueue(user.id);
+      res.json(await getQueueState(user.id));
+    }),
+  );
+
+  router.post(
+    '/queue/stay',
+    requireAuth,
+    asyncHandler(async (_req, res) => {
+      const user = currentUser(res);
+      await stayInQueue(user.id);
       res.json(await getQueueState(user.id));
     }),
   );

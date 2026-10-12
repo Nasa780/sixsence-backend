@@ -14,7 +14,7 @@ import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './serv
 import { sweepMatches } from './services/matches.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, onQueueChanged, sendEventReminders, syncAllRankRoles, syncRankRoles } from './services/community.js';
-import { clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
+import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
 import { QueueHub } from './ws/hub.js';
@@ -77,6 +77,26 @@ bus.on('queue:user', async (userId) => {
     format: state.format,
     groupSize: state.groupSize,
     joinedAt: state.joinedAt,
+    expiresAt: state.expiresAt,
+    stillThere: state.stillThere,
+  });
+});
+// Durée maximale de recherche : « Toujours là ? » puis arrêt, avec notification.
+bus.on('queue:warned', (userIds) => {
+  void pushToUsers(userIds, {
+    title: 'Toujours là ?',
+    body: `Aucun match pour l'instant : ta recherche s'arrête dans ${config.cod.queueWarnMinutes} min. Touche ici pour rester en file.`,
+    url: '/cod/ranked',
+    tag: 'file',
+    urgent: true,
+  });
+});
+bus.on('queue:expired', (userIds) => {
+  void pushToUsers(userIds, {
+    title: 'Recherche arrêtée',
+    body: `Aucun match trouvé en ${config.cod.queueMaxMinutes} min. Touche ici pour relancer une recherche.`,
+    url: '/cod/ranked',
+    tag: 'file',
   });
 });
 bus.on('party:changed', (party, alsoNotify) => {
@@ -198,6 +218,8 @@ void pushPublicKey();
 const sweeper = setInterval(() => void sweepMatches(), 60_000);
 // Vérifications « Prêt ? » expirées : contrôlées toutes les 3 secondes.
 const readyTimer = setInterval(() => void expireReadyChecks(), 3_000);
+// Durée maximale de recherche : contrôlée toutes les 20 secondes.
+const queueTimer = setInterval(() => void checkQueueTimeouts(), 20_000);
 // Discord : suppression des salons vocaux et publication des résultats.
 const discordTimer = setInterval(() => void sweepDiscord(), 30_000);
 // MVP du mois : attribué dès le début du mois suivant (vérifié au démarrage puis toutes les heures).
@@ -227,6 +249,7 @@ function shutdown(signal: string): void {
   console.log(`[boot] ${signal} reçu, arrêt en cours`);
   clearInterval(sweeper);
   clearInterval(readyTimer);
+  clearInterval(queueTimer);
   clearInterval(discordTimer);
   clearInterval(mvpTimer);
   clearInterval(reminderTimer);

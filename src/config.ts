@@ -99,6 +99,9 @@ export const config = {
      * change d'appli : il garde sa place plus longtemps et la notification push le prévient.
      */
     mobileGraceMinutes: integer('COD_MOBILE_GRACE_MINUTES', 30, 1),
+    /** Durée maximale d'une recherche sans confirmer sa présence (« Toujours là ? » 5 min avant). */
+    queueMaxMinutes: integer('COD_QUEUE_MAX_MINUTES', 30, 10),
+    queueWarnMinutes: 5,
   },
 
   /**
