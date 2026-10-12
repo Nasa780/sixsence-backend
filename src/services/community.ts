@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { supabase } from '../supabase.js';
 import { SUPPRESS_EMBEDS, discord, discordEnabled, discordIds, dm } from './discord.js';
+import { pushToUsers } from './push.js';
 import { queueLevel, shouldAnnounce } from './announcePolicy.js';
 import type { QueueSummary } from './queue.js';
 
@@ -235,7 +236,6 @@ export function announceEventCancelled(event: EventInfo): Promise<void> {
  * qu'une fois (colonne reminder_sent_at).
  */
 export async function sendEventReminders(): Promise<void> {
-  if (!discordEnabled) return;
   const now = Date.now();
   const { data, error } = await supabase
     .from('gta_events')
@@ -259,6 +259,13 @@ export async function sendEventReminders(): Promise<void> {
     const { data: registrations } = await supabase.from('gta_registrations').select('user_id').eq('event_id', event.id);
     const userIds = ((registrations ?? []) as { user_id: string }[]).map((row) => row.user_id);
     const minutes = Math.max(1, Math.round((new Date(event.starts_at).getTime() - now) / 60_000));
+    await pushToUsers(userIds, {
+      title: `⏰ ${event.title}`,
+      body: `Commence dans ${minutes} min. Tu es inscrit.`,
+      url: `/gta6/events/${event.id}`,
+      tag: `event-${event.id}`,
+    });
+    if (!discordEnabled) continue;
     await dm(
       userIds,
       `⏰ **${event.title}** commence dans ${minutes} min (${eventDate(event.starts_at)})${event.location ? ` · 📍 ${event.location}` : ''}.\nTu es inscrit : ${site}/gta6/events/${event.id}`,
