@@ -53,6 +53,10 @@ interface BusEvents {
   'queue:changed': [];
   /** L'état d'un joueur précis a changé (entré ou sorti de la file). */
   'queue:user': [userId: string];
+  /** « Toujours là ? » : la recherche de ces joueurs s'arrête bientôt sans confirmation. */
+  'queue:warned': [userIds: string[]];
+  /** Recherche arrêtée faute de confirmation (durée maximale atteinte). */
+  'queue:expired': [userIds: string[]];
   /** Un match vient d'être créé (vérification « Prêt ? » ouverte) : prévenir ses joueurs. */
   'match:found': [match: CodMatch];
   /** Un joueur a accepté : nouveau décompte. */

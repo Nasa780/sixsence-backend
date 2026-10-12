@@ -5,6 +5,13 @@ import { bus, type CodMatch, type ReadyCheckFailure } from '../events.js';
 import { supabase } from '../supabase.js';
 import { findMatch, membersOf, type QueueGroup } from './matchmaker.js';
 import { getPartyOf, type Party } from './parties.js';
+import { expiresAt, queueTimeouts, type TimeoutRules } from './queuePolicy.js';
+
+/** Durée maximale de recherche (voir queuePolicy.ts). */
+const TIMEOUT_RULES: TimeoutRules = {
+  maxMs: config.cod.queueMaxMinutes * 60_000,
+  warnMs: config.cod.queueWarnMinutes * 60_000,
+};
 
 /** Une file telle qu'affichée sur la page Ranked. */
 export interface QueueSummary {
@@ -26,6 +33,10 @@ export interface QueueState {
   /** Taille de son groupe dans la file (1 = seul). */
   groupSize: number;
   joinedAt: string | null;
+  /** Heure d'arrêt de la recherche sans nouvelle confirmation, ou null. */
+  expiresAt: string | null;
+  /** Message « Toujours là ? » en attente de réponse. */
+  stillThere: boolean;
   /** Match en cours du joueur, s'il en a un (il doit le terminer avant de relancer). */
   activeMatchId: string | null;
   /** Fin de l'exclusion temporaire de la file (sanction), ou null. */
@@ -54,7 +65,7 @@ export async function getQueueSize(): Promise<number> {
 export async function getQueueState(userId: string): Promise<QueueState> {
   const [queues, entry, active, profile, party] = await Promise.all([
     getQueueSummaries(),
-    supabase.from('cod_queue').select('joined_at, format, group_size').eq('user_id', userId).maybeSingle(),
+    supabase.from('cod_queue').select('joined_at, format, group_size, confirmed_at, warned_at').eq('user_id', userId).maybeSingle(),
     supabase.rpc('cod_active_match_id', { p_user: userId }),
     supabase.from('cod_profiles').select('banned_until').eq('user_id', userId).maybeSingle(),
     getPartyOf(userId),
@@ -63,7 +74,7 @@ export async function getQueueState(userId: string): Promise<QueueState> {
   if (active.error) throw fromDbError(active.error);
   if (profile.error) throw fromDbError(profile.error);
 
-  const row = entry.data as { joined_at: string; format: string; group_size: number } | null;
+  const row = entry.data as { joined_at: string; format: string; group_size: number; confirmed_at: string; warned_at: string | null } | null;
   const bannedUntil = (profile.data?.banned_until as string | null | undefined) ?? null;
   return {
     queues,
@@ -71,6 +82,8 @@ export async function getQueueState(userId: string): Promise<QueueState> {
     format: row?.format ?? null,
     groupSize: row?.group_size ?? 1,
     joinedAt: row?.joined_at ?? null,
+    expiresAt: row ? new Date(expiresAt(new Date(row.confirmed_at).getTime(), TIMEOUT_RULES)).toISOString() : null,
+    stillThere: Boolean(row?.warned_at),
     activeMatchId: (active.data as string | null) ?? null,
     bannedUntil: bannedUntil && new Date(bannedUntil).getTime() > Date.now() ? bannedUntil : null,
     party,
@@ -149,6 +162,87 @@ export async function leaveQueue(userId: string, reason?: string): Promise<strin
   if (others.length > 0) bus.emit('notice', others, reason ?? 'Un membre du groupe a quitté la file : recherche annulée.');
   if (removed.length > 0) bus.emit('queue:changed');
   return removed;
+}
+
+/**
+ * « Rester en file » : le joueur (ou un membre de son groupe) confirme sa présence.
+ * Le compteur repart pour la durée maximale ; la place dans la file est conservée.
+ */
+export async function stayInQueue(userId: string): Promise<void> {
+  const entry = unwrap(await supabase.from('cod_queue').select('group_id').eq('user_id', userId).maybeSingle()) as { group_id: string } | null;
+  if (!entry) throw new HttpError(409, 'NOT_IN_QUEUE', "Tu n'es plus dans la file : relance une recherche.");
+  const members = ((unwrap(
+    await supabase
+      .from('cod_queue')
+      .update({ confirmed_at: new Date().toISOString(), warned_at: null })
+      .eq('group_id', entry.group_id)
+      .select('user_id'),
+  ) ?? []) as { user_id: string }[]).map((row) => row.user_id);
+  for (const member of members) bus.emit('queue:user', member);
+}
+
+/**
+ * Durée maximale de recherche (appelé toutes les 20 secondes) : « Toujours là ? »
+ * 5 min avant la fin, puis arrêt de la recherche des groupes qui n'ont pas répondu.
+ */
+export async function checkQueueTimeouts(): Promise<void> {
+  const { data, error } = await supabase.from('cod_queue').select('user_id, group_id, confirmed_at, warned_at');
+  if (error) {
+    console.error('[file] durée maximale', error.message);
+    return;
+  }
+  const rows = (data ?? []) as { user_id: string; group_id: string; confirmed_at: string; warned_at: string | null }[];
+  if (rows.length === 0) return;
+
+  const groups = new Map<string, { groupId: string; confirmedAt: number; warnedAt: number | null }>();
+  for (const row of rows) {
+    if (!groups.has(row.group_id)) {
+      groups.set(row.group_id, {
+        groupId: row.group_id,
+        confirmedAt: new Date(row.confirmed_at).getTime(),
+        warnedAt: row.warned_at ? new Date(row.warned_at).getTime() : null,
+      });
+    }
+  }
+  const now = Date.now();
+  const { warn, expire } = queueTimeouts([...groups.values()], now, TIMEOUT_RULES);
+
+  for (const groupId of warn) {
+    // Conditions répétées dans la requête : un « Rester en file » arrivé entre-temps l'emporte.
+    const warned = ((unwrap(
+      await supabase
+        .from('cod_queue')
+        .update({ warned_at: new Date(now).toISOString() })
+        .eq('group_id', groupId)
+        .is('warned_at', null)
+        .lte('confirmed_at', new Date(now - (TIMEOUT_RULES.maxMs - TIMEOUT_RULES.warnMs)).toISOString())
+        .select('user_id'),
+    ) ?? []) as { user_id: string }[]).map((row) => row.user_id);
+    if (warned.length === 0) continue;
+    for (const member of warned) bus.emit('queue:user', member);
+    bus.emit('queue:warned', warned);
+  }
+
+  let expired = 0;
+  for (const groupId of expire) {
+    const removed = ((unwrap(
+      await supabase
+        .from('cod_queue')
+        .delete()
+        .eq('group_id', groupId)
+        .lte('confirmed_at', new Date(now - TIMEOUT_RULES.maxMs).toISOString())
+        .select('user_id'),
+    ) ?? []) as { user_id: string }[]).map((row) => row.user_id);
+    if (removed.length === 0) continue;
+    expired += removed.length;
+    for (const member of removed) bus.emit('queue:user', member);
+    bus.emit('notice', removed, `Aucun match trouvé en ${config.cod.queueMaxMinutes} min : ta recherche est arrêtée. Relance-la quand tu veux.`);
+    bus.emit('queue:expired', removed);
+  }
+  if (expired > 0) {
+    console.log(`[file] ${expired} joueur(s) sorti(s) de la file après ${config.cod.queueMaxMinutes} min sans confirmation`);
+    bus.emit('queue:changed');
+  }
 }
 
 /** Lit la file d'un format, regroupée par groupe. */
