@@ -34,13 +34,13 @@ export interface QueueFormat {
 }
 
 /**
- * Files proposées. COD_FORMATS liste les formats (« 2v2,5v5 » par défaut).
+ * Files proposées. COD_FORMATS liste les formats (« 2v2,3v3,4v4,5v5 » par défaut).
  * COD_TEAM_SIZE (ancien réglage de test) ajoute en plus une file « NvN (test) »,
  * par exemple 1v1 pour tester à deux comptes.
  */
 function parseFormats(): QueueFormat[] {
   const formats: QueueFormat[] = [];
-  for (const raw of list('COD_FORMATS', ['2v2', '5v5'])) {
+  for (const raw of list('COD_FORMATS', ['2v2', '3v3', '4v4', '5v5'])) {
     const match = /^([1-5])v\1$/.exec(raw);
     if (match && !formats.some((format) => format.id === raw)) {
       formats.push({ id: raw, teamSize: Number(match[1]), label: raw });

@@ -71,6 +71,20 @@ describe('findMatch', () => {
     check(queue(4, 4, 1, 1), 5);
   });
 
+  it('3v3 : un trio contre trois solos', () => {
+    const match = check(queue(3, 1, 1, 1), 3);
+    assert.deepEqual(ids(match.teamA).length === 1 ? ids(match.teamA) : ids(match.teamB), ['g0']);
+  });
+
+  it('4v4 : 3 + 1 contre 2 + 2', () => {
+    const match = check(queue(3, 2, 2, 1), 4);
+    assert.equal(ids(match.teamA).length + ids(match.teamB).length, 4);
+  });
+
+  it("4v4 : un groupe de 3 attend un solo plutôt que d'être séparé", () => {
+    assert.equal(findMatch(queue(3, 3, 2), 4), null);
+  });
+
   it('trouve une combinaison quand le placement naïf échoue', () => {
     // Placement « au plus vide » : 3 | 2, puis 2 -> B (4), puis 3 ne rentre plus.
     // La recherche doit trouver 3+2 | 2+3.
@@ -116,7 +130,7 @@ describe('findMatch', () => {
     let seed = 42;
     const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
     for (let round = 0; round < 3000; round += 1) {
-      const teamSize = random() < 0.5 ? 2 : 5;
+      const teamSize = 2 + Math.floor(random() * 4); // 2v2, 3v3, 4v4 ou 5v5
       const count = 1 + Math.floor(random() * 9);
       const sizes = Array.from({ length: count }, () => 1 + Math.floor(random() * teamSize));
       const groups = queue(...sizes);
