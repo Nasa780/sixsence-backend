@@ -53,7 +53,7 @@ function proofUrl(path: string): string {
 /** Renvoie un match, la fiche de ses joueurs, le chat et les preuves. */
 export async function getMatch(
   matchId: string,
-): Promise<{ match: CodMatch; players: MatchPlayer[]; messages: MatchMessage[]; proofs: MatchProof[]; mvpVotes: Record<string, number> }> {
+): Promise<{ match: CodMatch; players: MatchPlayer[]; messages: MatchMessage[]; proofs: MatchProof[]; mvpVotes: Record<string, number>; mvpVotesFromOthers: Record<string, number> }> {
   const match = unwrap(await supabase.from('cod_matches').select('*').eq('id', matchId).maybeSingle()) as CodMatch | null;
   if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
 
@@ -109,7 +109,8 @@ export async function getMatch(
     }),
   );
 
-  return { match, players, messages: chat, proofs: proofList, mvpVotes: await mvpVotesOf(matchId) };
+  const votes = await mvpVotesOf(matchId);
+  return { match, players, messages: chat, proofs: proofList, mvpVotes: votes.total, mvpVotesFromOthers: votes.fromOthers };
 }
 
 /** Un joueur accepte le match trouvé (vérification « Prêt ? »). */

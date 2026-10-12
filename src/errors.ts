@@ -36,7 +36,7 @@ const DB_ERRORS: Record<string, [status: number, message: string]> = {
   EVENT_NOT_FOUND: [404, 'Événement introuvable.'],
   EVENT_CLOSED: [409, 'Les inscriptions sont closes pour cet événement.'],
   EVENT_FULL: [409, 'Cet événement est complet.'],
-  INVALID_MVP: [400, 'Choisis un autre joueur du match (tu ne peux pas voter pour toi).'],
+  INVALID_MVP: [400, "Le MVP se choisit parmi les joueurs de l'équipe gagnante."],
   MVP_VOTE_CLOSED: [409, 'Le vote du MVP est fermé pour ce match (24 h après la fin).'],
   // Files et groupes ({detail} = pseudo du joueur concerné)
   INVALID_FORMAT: [400, 'Format de file inconnu.'],

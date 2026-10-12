@@ -50,12 +50,22 @@ export async function voteMvp(matchId: string, voterId: string, targetId: unknow
   unwrap(await supabase.rpc('cod_vote_mvp', { p_match: matchId, p_voter: voterId, p_target: targetId }));
 }
 
-/** Votes d'un match : { joueur: nombre de votes }. */
-export async function mvpVotesOf(matchId: string): Promise<Record<string, number>> {
-  const rows = (unwrap(await supabase.from('cod_mvp_votes').select('target_id').eq('match_id', matchId)) ?? []) as { target_id: string }[];
-  const counts: Record<string, number> = {};
-  for (const row of rows) counts[row.target_id] = (counts[row.target_id] ?? 0) + 1;
-  return counts;
+/**
+ * Votes d'un match : total par joueur, et votes reçus des autres joueurs (hors vote
+ * pour soi), qui départagent une égalité. Toujours à égalité : co-MVP.
+ */
+export async function mvpVotesOf(matchId: string): Promise<{ total: Record<string, number>; fromOthers: Record<string, number> }> {
+  const rows = (unwrap(await supabase.from('cod_mvp_votes').select('voter_id, target_id').eq('match_id', matchId)) ?? []) as {
+    voter_id: string;
+    target_id: string;
+  }[];
+  const total: Record<string, number> = {};
+  const fromOthers: Record<string, number> = {};
+  for (const row of rows) {
+    total[row.target_id] = (total[row.target_id] ?? 0) + 1;
+    if (row.voter_id !== row.target_id) fromOthers[row.target_id] = (fromOthers[row.target_id] ?? 0) + 1;
+  }
+  return { total, fromOthers };
 }
 
 /**
