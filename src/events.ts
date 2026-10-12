@@ -63,6 +63,8 @@ interface BusEvents {
   'match:aborted': [failure: ReadyCheckFailure];
   /** Un ou plusieurs matchs viennent de se terminer (résultat validé ou annulation). */
   'match:closed': [];
+  /** Un match terminé vient d'être traité (salons supprimés, résultat publié) : rôles Discord à jour. */
+  'match:finalized': [match: CodMatch];
   /** Un groupe a changé (null = dissous) ; alsoNotify : joueurs qui viennent de le quitter. */
   'party:changed': [party: Party | null, alsoNotify: string[]];
   /** Message d'information à afficher à certains joueurs (recherche annulée…). */

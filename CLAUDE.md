@@ -27,9 +27,9 @@ npm start            # node dist/index.js
 - `src/config.ts` : variables d'environnement, origines CORS autorisées (liste par défaut incluse).
 - `src/auth.ts` : vérification du jeton de session Supabase (exige le fournisseur Discord).
 - `src/routes/` : `cod.ts` (file, matchs, chat, preuves), `gta.ts` (événements), `admin.ts` (administration, rôle admin).
-- `src/services/` : logique métier, qui appelle surtout les fonctions SQL ; `discord.ts` : intégration Discord (DM, salons vocaux, résultats), désactivée sans `DISCORD_BOT_TOKEN`.
+- `src/services/` : logique métier, qui appelle surtout les fonctions SQL ; `discord.ts` : intégration Discord (DM, salons vocaux, résultats), désactivée sans `DISCORD_BOT_TOKEN` ; `community.ts` : rôles automatiques (rangs, COD, GTA), annonces et rappels GTA ; `announcePolicy.ts` : règles anti-spam des annonces (testées).
 - `src/ws/hub.ts` : WebSocket de la file (protocole décrit en tête du fichier).
-- `supabase/migrations/` : `0001_init.sql` (tables, RLS, fonctions atomiques) puis `0002_ready_sanctions_saisons.sql`, `0003_activision_unique.sql` `0004_formats_groupes.sql` (files par format, groupes, barème selon la taille du groupe) `0005_mvp_moderation.sql` (vote du MVP, arbitrages, signalements) et `0006_mvp_gagnants.sql` (MVP choisi dans l'équipe gagnante). À exécuter dans l'ordre dans le SQL Editor de Supabase ; idempotents.
+- `supabase/migrations/` : `0001_init.sql` (tables, RLS, fonctions atomiques) puis `0002_ready_sanctions_saisons.sql`, `0003_activision_unique.sql` `0004_formats_groupes.sql` (files par format, groupes, barème selon la taille du groupe) `0005_mvp_moderation.sql` (vote du MVP, arbitrages, signalements) et `0006_mvp_gagnants.sql` (MVP choisi dans l'équipe gagnante) et `0007_rappels_gta.sql` (rappels des événements GTA). À exécuter dans l'ordre dans le SQL Editor de Supabase ; idempotents.
 
 ## Règles métier
 
@@ -45,6 +45,7 @@ npm start            # node dist/index.js
 - **Barème selon le groupe** : victoire +30 (+26 en groupe de 3 ou plus), défaite réduite de 25 % pour un joueur seul (`cod_win_points`, `cod_loss_points`).
 - **MVP** : chaque joueur d'un match terminé vote pour un joueur de l'équipe gagnante, lui-même compris (24 h). À égalité, les votes reçus des autres joueurs départagent ; sinon co-MVP. Le plus élu du mois écoulé reçoit le badge `mvp-AAAA-MM` (`cod_award_monthly_mvp`, vérifié toutes les heures).
 - **Arbitrages et signalements** : privés (pas de lecture publique), traités dans `/admin`, annoncés dans `DISCORD_STAFF_CHANNEL_ID` s'il est défini.
+- **Discord** : rôles de rang (Bronze … Champion) et « COD » mis à jour après chaque match, « GTA » à la première inscription à un événement (rôles créés par le bot s'ils manquent) ; annonces de file à la moitié des places puis à une place (10 min mini entre deux annonces d'une file, files de test ignorées) ; annonces GTA et rappel 1 h avant (DM aux inscrits).
 - Un résultat déclaré est validé d'office après 15 min sans réponse ; un match jamais déclaré est annulé après 3 h.
 
 ## Routes
@@ -59,7 +60,7 @@ Erreurs : `{ "error": { "code": "EVENT_FULL", "message": "..." } }`.
 
 ## Variables d'environnement
 
-Voir `.env.example`. Indispensables : `SUPABASE_URL` et la clé secrète `SUPABASE_SERVICE_ROLE_KEY` (l'ancien nom `SUPABASE_KEY` est accepté). Optionnelles : `CORS_ORIGINS`, `COD_FORMATS`, `COD_TEAM_SIZE`, `COD_MAPS`, `COD_MODES`, `COD_CONFIRM_MINUTES`, `COD_CANCEL_MINUTES`, `COD_READY_SECONDS`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MATCH_CATEGORY_ID`, `DISCORD_RESULTS_CHANNEL_ID`, `DISCORD_STAFF_CHANNEL_ID`, `SITE_URL`.
+Voir `.env.example`. Indispensables : `SUPABASE_URL` et la clé secrète `SUPABASE_SERVICE_ROLE_KEY` (l'ancien nom `SUPABASE_KEY` est accepté). Optionnelles : `CORS_ORIGINS`, `COD_FORMATS`, `COD_TEAM_SIZE`, `COD_MAPS`, `COD_MODES`, `COD_CONFIRM_MINUTES`, `COD_CANCEL_MINUTES`, `COD_READY_SECONDS`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MATCH_CATEGORY_ID`, `DISCORD_RESULTS_CHANNEL_ID`, `DISCORD_STAFF_CHANNEL_ID`, `DISCORD_COD_CHANNEL_ID`, `DISCORD_GTA_CHANNEL_ID`, `SITE_URL`.
 
 Une vérification automatique (`.github/workflows/ci.yml`) compile le projet à chaque PR.
 
