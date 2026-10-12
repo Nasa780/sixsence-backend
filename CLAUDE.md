@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guide pour Claude Code (et tout contributeur) travaillant sur le **backend de SixSence**, une plateforme de compétition : classé Call of Duty en files 2v2 et 5v5, seul ou en groupe (file d'attente, matchmaking, points, classement) et événements GTA 6.
+Guide pour Claude Code (et tout contributeur) travaillant sur le **backend de SixSence**, une plateforme de compétition : classé Call of Duty en files 2v2, 3v3, 4v4 et 5v5, seul ou en groupe (file d'attente, matchmaking, points, classement) et événements GTA 6.
 
 Le site (Next.js) vit dans un dépôt séparé : `Nasa780/sixsence-frontend`.
 
@@ -41,7 +41,7 @@ npm start            # node dist/index.js
 - **Preuves** : captures dans le bucket Storage `match-proofs` (`<match>/<joueur>/fichier`), enregistrées par `cod_add_proof`.
 - **Saisons** : `cod_close_season` archive le classement (`season_results`), donne les badges `s<id>-top10` / `s<id>-champion`, remet points et victoires à zéro (XP conservée).
 - **Identifiant Activision unique** : un même identifiant (sans tenir compte des majuscules ni des espaces) ne peut servir qu'à un seul compte (index `cod_profiles_activision_unique`, erreur 23505).
-- **Files et groupes** : une file par format (`COD_FORMATS`, « 2v2,5v5 » par défaut). On joue seul ou en groupe (`cod_parties`, code d'invitation) ; le chef lance la file pour tout le groupe, qui n'est jamais séparé. Le serveur propose les équipes (`services/matchmaker.ts`, le groupe le plus ancien est servi en premier) et `cod_create_group_match` revérifie tout sous verrou.
+- **Files et groupes** : une file par format (`COD_FORMATS`, « 2v2,3v3,4v4,5v5 » par défaut). On joue seul ou en groupe (`cod_parties`, code d'invitation) ; le chef lance la file pour tout le groupe, qui n'est jamais séparé. Le serveur propose les équipes (`services/matchmaker.ts`, le groupe le plus ancien est servi en premier) et `cod_create_group_match` revérifie tout sous verrou.
 - **Barème selon le groupe** : victoire +30 (+26 en groupe de 3 ou plus), défaite réduite de 25 % pour un joueur seul (`cod_win_points`, `cod_loss_points`).
 - **MVP** : chaque joueur d'un match terminé vote pour un joueur de l'équipe gagnante, lui-même compris (24 h). À égalité, les votes reçus des autres joueurs départagent ; sinon co-MVP. Le plus élu du mois écoulé reçoit le badge `mvp-AAAA-MM` (`cod_award_monthly_mvp`, vérifié toutes les heures).
 - **Arbitrages et signalements** : privés (pas de lecture publique), traités dans `/admin`, annoncés dans `DISCORD_STAFF_CHANNEL_ID` s'il est défini.
