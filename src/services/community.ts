@@ -217,13 +217,35 @@ interface EventInfo {
 const eventDate = (iso: string) =>
   new Date(iso).toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
 
-export function announceNewEvent(event: EventInfo): Promise<void> {
-  if (event.status !== 'published') return Promise.resolve();
-  return announce(
-    gtaChannelId,
-    `🌴 **Nouvel événement GTA 6 : ${event.title}**\n📅 ${eventDate(event.starts_at)}${event.location ? ` · 📍 ${event.location}` : ''}\nInscriptions : ${site}/gta6/events/${event.id}`,
-    'GTA',
-  );
+export async function announceNewEvent(event: EventInfo): Promise<void> {
+  if (event.status !== 'published') return;
+  await Promise.all([
+    announce(
+      gtaChannelId,
+      `🌴 **Nouvel événement GTA 6 : ${event.title}**\n📅 ${eventDate(event.starts_at)}${event.location ? ` · 📍 ${event.location}` : ''}\nInscriptions : ${site}/gta6/events/${event.id}`,
+      'GTA',
+    ),
+    pushToGtaPlayers(event),
+  ]);
+}
+
+/**
+ * Notification « Nouvel événement » aux joueurs GTA : ceux qui se sont déjà inscrits à un
+ * événement (et qui ont activé les notifications sur au moins un appareil).
+ */
+async function pushToGtaPlayers(event: EventInfo): Promise<void> {
+  try {
+    const { data } = await supabase.from('gta_registrations').select('user_id').limit(5000);
+    const userIds = [...new Set(((data ?? []) as { user_id: string }[]).map((row) => row.user_id))];
+    await pushToUsers(userIds, {
+      title: `🌴 Nouvel événement GTA 6`,
+      body: `${event.title} — ${eventDate(event.starts_at)}. Inscris-toi !`,
+      url: `/gta6/events/${event.id}`,
+      tag: `new-event-${event.id}`,
+    });
+  } catch (error) {
+    console.warn('[push] annonce d’événement impossible', (error as Error).message);
+  }
 }
 
 export function announceEventCancelled(event: EventInfo): Promise<void> {
