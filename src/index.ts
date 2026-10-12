@@ -31,10 +31,32 @@ import { QueueHub } from './ws/hub.js';
 const hub = new QueueHub({
   authenticate: verifyAccessToken,
   getState: async (userId) => ({ ...(await getQueueState(userId)) }),
-  // Joueur parti sans revenir : on libère sa place dans la file (avec son groupe).
-  onUserGone: (userId) => leaveQueue(userId, 'Un membre du groupe a fermé le site : recherche annulée.'),
+  // Joueur parti sans revenir : on libère sa place dans la file (avec son groupe)
+  // et on prévient par notification ceux dont la recherche s'arrête.
+  onUserGone: async (userId, { mobile }) => {
+    const removed = await leaveQueue(userId, 'Un membre du groupe a quitté le site : recherche annulée.');
+    if (removed.length === 0) return;
+    void pushToUsers([userId], {
+      title: 'Recherche arrêtée',
+      body: mobile
+        ? `Tu n'es plus sur SixSence depuis ${config.cod.mobileGraceMinutes} min : ta recherche est arrêtée. Touche ici pour la relancer.`
+        : 'Tu as quitté SixSence : ta recherche est arrêtée. Touche ici pour la relancer.',
+      url: '/cod/ranked',
+      tag: 'file',
+    });
+    void pushToUsers(
+      removed.filter((member) => member !== userId),
+      {
+        title: 'Recherche du groupe arrêtée',
+        body: "Un membre de ton groupe n'est plus sur SixSence : votre recherche est arrêtée. Touche ici pour la relancer.",
+        url: '/cod/ranked',
+        tag: 'file',
+      },
+    );
+  },
   isOriginAllowed,
   graceMs: config.cod.disconnectGraceMs,
+  mobileGraceMs: config.cod.mobileGraceMinutes * 60_000,
 });
 
 // Les services émettent des événements ; on les relaie aux navigateurs.

@@ -31,11 +31,13 @@ export interface HubDeps {
   authenticate(token: string): Promise<{ id: string } | null>;
   /** État complet envoyé à un joueur juste après son authentification. */
   getState(userId: string): Promise<Record<string, unknown>>;
-  /** Appelé quand un joueur n'a plus aucune connexion depuis graceMs. */
-  onUserGone(userId: string): Promise<unknown>;
+  /** Appelé quand un joueur n'a plus aucune connexion depuis graceMs (mobileGraceMs sur téléphone). */
+  onUserGone(userId: string, info: { mobile: boolean }): Promise<unknown>;
   isOriginAllowed(origin: string | undefined): boolean;
   /** Délai de grâce après la dernière déconnexion d'un joueur. */
   graceMs: number;
+  /** Délai de grâce quand cette dernière connexion venait d'un téléphone (graceMs par défaut). */
+  mobileGraceMs?: number;
   /** Délai accordé pour envoyer le message "auth" (10 s par défaut). */
   authTimeoutMs?: number;
   /** Intervalle des pings de surveillance (30 s par défaut). */
@@ -49,6 +51,8 @@ interface ClientState {
   authenticating: boolean;
   alive: boolean;
   authTimer: NodeJS.Timeout | null;
+  /** Connexion ouverte depuis un téléphone ou une tablette (en-tête User-Agent). */
+  mobile: boolean;
   /** Compteur anti-abus : messages reçus dans la fenêtre en cours. */
   messageCount: number;
   windowStart: number;
@@ -66,7 +70,7 @@ export class QueueHub {
   private heartbeat: NodeJS.Timeout | null = null;
 
   constructor(private readonly deps: HubDeps) {
-    this.wss.on('connection', (socket: WebSocket) => this.onConnection(socket));
+    this.wss.on('connection', (socket: WebSocket, request?: IncomingMessage) => this.onConnection(socket, request));
   }
 
   /** Branche le hub sur le serveur HTTP : seules les requêtes vers /ws sont acceptées. */
@@ -145,12 +149,13 @@ export class QueueHub {
 
   // ---------------------------------------------------------------------------
 
-  private onConnection(socket: WebSocket): void {
+  private onConnection(socket: WebSocket, request?: IncomingMessage): void {
     const state: ClientState = {
       userId: null,
       authenticating: false,
       alive: true,
       authTimer: null,
+      mobile: /Android|iPhone|iPad|iPod|Mobi/i.test(request?.headers['user-agent'] ?? ''),
       messageCount: 0,
       windowStart: Date.now(),
     };
@@ -251,12 +256,14 @@ export class QueueHub {
     this.socketsByUser.delete(userId);
 
     // Dernière connexion fermée : on laisse au joueur le temps de revenir
-    // (rechargement de page, micro-coupure) avant de libérer sa place.
+    // (rechargement de page, micro-coupure) avant de libérer sa place. Sur téléphone,
+    // le délai est plus long : écran verrouillé ou autre appli ouverte.
+    const mobile = state.mobile;
     const timer = setTimeout(() => {
       this.graceTimers.delete(userId);
       if (this.isConnected(userId)) return;
-      this.deps.onUserGone(userId).catch((error) => console.error('[ws] onUserGone', error));
-    }, this.deps.graceMs);
+      this.deps.onUserGone(userId, { mobile }).catch((error) => console.error('[ws] onUserGone', error));
+    }, mobile ? (this.deps.mobileGraceMs ?? this.deps.graceMs) : this.deps.graceMs);
     this.graceTimers.set(userId, timer);
   }
 
