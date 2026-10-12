@@ -36,17 +36,25 @@ const DB_ERRORS: Record<string, [status: number, message: string]> = {
   EVENT_NOT_FOUND: [404, 'Événement introuvable.'],
   EVENT_CLOSED: [409, 'Les inscriptions sont closes pour cet événement.'],
   EVENT_FULL: [409, 'Cet événement est complet.'],
+  // Files et groupes ({detail} = pseudo du joueur concerné)
+  INVALID_FORMAT: [400, 'Format de file inconnu.'],
+  INVALID_GROUP_SIZE: [400, 'Ton groupe est trop grand pour ce format.'],
+  PARTY_CHANGED: [409, 'Ton groupe vient de changer : réessaie.'],
+  MEMBER_PROFILE_INCOMPLETE: [409, "{detail} doit renseigner son identifiant Activision avant que le groupe puisse rejoindre la file."],
+  MEMBER_BANNED: [403, '{detail} est temporairement exclu de la file : le groupe ne peut pas la rejoindre.'],
+  MEMBER_IN_MATCH: [409, '{detail} a déjà un match en cours.'],
+  MEMBER_IN_QUEUE: [409, '{detail} est déjà dans une file.'],
 };
 
-export function fromDbError(error: { message: string }): HttpError {
+export function fromDbError(error: { message: string; details?: string | null }): HttpError {
   const known = DB_ERRORS[error.message];
-  if (known) return new HttpError(known[0], error.message, known[1]);
+  if (known) return new HttpError(known[0], error.message, known[1].replace('{detail}', error.details || 'Un joueur'));
   console.error('[db]', error);
   return new HttpError(500, 'INTERNAL_ERROR', 'Erreur interne. Réessaie dans un instant.');
 }
 
 /** Renvoie les données d'une réponse Supabase, ou lève l'erreur traduite. */
-export function unwrap<T>(result: { data: T | null; error: { message: string } | null }): T {
+export function unwrap<T>(result: { data: T | null; error: { message: string; details?: string | null } | null }): T {
   if (result.error) throw fromDbError(result.error);
   return result.data as T;
 }

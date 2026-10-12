@@ -26,6 +26,34 @@ function integer(name: string, fallback: number, min: number): number {
   return Number.isFinite(parsed) && parsed >= min ? parsed : fallback;
 }
 
+/** Une file classée : « 2v2 », « 5v5 »… (teamSize joueurs par équipe). */
+export interface QueueFormat {
+  id: string;
+  teamSize: number;
+  label: string;
+}
+
+/**
+ * Files proposées. COD_FORMATS liste les formats (« 2v2,5v5 » par défaut).
+ * COD_TEAM_SIZE (ancien réglage de test) ajoute en plus une file « NvN (test) »,
+ * par exemple 1v1 pour tester à deux comptes.
+ */
+function parseFormats(): QueueFormat[] {
+  const formats: QueueFormat[] = [];
+  for (const raw of list('COD_FORMATS', ['2v2', '5v5'])) {
+    const match = /^([1-5])v\1$/.exec(raw);
+    if (match && !formats.some((format) => format.id === raw)) {
+      formats.push({ id: raw, teamSize: Number(match[1]), label: raw });
+    }
+  }
+  const testSize = Number.parseInt(process.env.COD_TEAM_SIZE ?? '', 10);
+  const testId = `${testSize}v${testSize}`;
+  if (testSize >= 1 && testSize <= 5 && !formats.some((format) => format.id === testId)) {
+    formats.unshift({ id: testId, teamSize: testSize, label: `${testId} (test)` });
+  }
+  return formats.length > 0 ? formats : [{ id: '5v5', teamSize: 5, label: '5v5' }];
+}
+
 /** Origines du site autorisées par défaut (production, aperçus Vercel, local). */
 const DEFAULT_ORIGINS = [
   'https://sixsence.fr',
@@ -43,8 +71,8 @@ export const config = {
   corsOrigins: list('CORS_ORIGINS', DEFAULT_ORIGINS),
 
   cod: {
-    /** Joueurs par équipe. 5 => un match démarre dès que 10 joueurs sont en file. */
-    teamSize: integer('COD_TEAM_SIZE', 5, 1),
+    /** Files classées proposées (formats et taille des équipes). */
+    formats: parseFormats(),
     maps: list('COD_MAPS', [
       'Babylon',
       'Derelict',
@@ -85,8 +113,10 @@ export const config = {
   siteUrl: (process.env.SITE_URL?.trim() || 'https://www.sixsence.fr').replace(/\/$/, ''),
 } as const;
 
-/** Nombre de joueurs nécessaires pour lancer un match. */
-export const playersNeeded = config.cod.teamSize * 2;
+/** Format de file par identifiant (« 2v2 »), ou undefined s'il n'existe pas. */
+export function findFormat(id: unknown): QueueFormat | undefined {
+  return typeof id === 'string' ? config.cod.formats.find((format) => format.id === id) : undefined;
+}
 
 /**
  * Vérifie qu'une origine (en-tête Origin du navigateur) fait partie de la liste

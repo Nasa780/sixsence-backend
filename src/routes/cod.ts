@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { currentUser, requireAdmin, requireAuth } from '../auth.js';
-import { playersNeeded } from '../config.js';
 import { HttpError, asyncHandler, uuidParam } from '../errors.js';
 import { bus } from '../events.js';
 import { addProof, confirmMatch, getMatch, postMessage, readyMatch, reportMatch, resolveMatch } from '../services/matches.js';
-import { getQueueSize, getQueueState, joinQueue, leaveQueue } from '../services/queue.js';
+import { createParty, getPartyOf, joinParty, kickMember, leaveParty, previewInvite, setPartyFormat } from '../services/parties.js';
+import { getQueueState, getQueueSummaries, joinQueue, leaveQueue } from '../services/queue.js';
 import { getSiteStats } from '../services/stats.js';
 import type { QueueHub } from '../ws/hub.js';
 
@@ -12,13 +12,20 @@ import type { QueueHub } from '../ws/hub.js';
  * Endpoints du classé COD.
  *
  * Publics (le site est visible sans connexion) :
- *   GET  /cod/status                compteurs de la page Ranked (file, matchs, joueurs en ligne)
+ *   GET  /cod/status                compteurs de la page Ranked (files, matchs, joueurs en ligne)
  *   GET  /cod/matches/:id           détail d'un match, de ses joueurs et de son chat
+ *   GET  /cod/party/invite/:code    aperçu d'une invitation de groupe (chef, format, places)
  *
  * Connexion Discord requise :
- *   GET  /cod/queue                 état de la file pour le joueur
- *   POST /cod/queue/join            entrer dans la file
- *   POST /cod/queue/leave           quitter la file
+ *   GET  /cod/queue                 état de la file et du groupe pour le joueur
+ *   POST /cod/queue/join            entrer dans la file { format } (seul) ; un chef y fait entrer tout son groupe
+ *   POST /cod/queue/leave           quitter la file (avec tout son groupe)
+ *   GET  /cod/party                 mon groupe
+ *   POST /cod/party                 créer un groupe          { format }
+ *   POST /cod/party/join            rejoindre un groupe      { code }
+ *   POST /cod/party/leave           quitter son groupe
+ *   POST /cod/party/kick            retirer un membre (chef) { userId }
+ *   POST /cod/party/format          changer de format (chef) { format }
  *   POST /cod/matches/:id/ready     accepter le match trouvé (vérification « Prêt ? », 1 min)
  *   POST /cod/matches/:id/proofs    enregistrer une capture déjà envoyée { path }
  *   POST /cod/matches/:id/report    déclarer le vainqueur   { winner: "A" | "B" }
@@ -34,10 +41,10 @@ export function codRouter(hub: QueueHub): Router {
   router.get(
     '/status',
     asyncHandler(async (_req, res) => {
-      const [playersInQueue, stats] = await Promise.all([getQueueSize(), getSiteStats()]);
+      const [queues, stats] = await Promise.all([getQueueSummaries(), getSiteStats()]);
       res.json({
-        playersInQueue,
-        needed: playersNeeded,
+        queues,
+        playersInQueue: queues.reduce((sum, queue) => sum + queue.size, 0),
         matchesInProgress: stats.matchesInProgress,
         playersOnline: hub.onlineCount(),
       });
@@ -64,14 +71,12 @@ export function codRouter(hub: QueueHub): Router {
   router.post(
     '/queue/join',
     requireAuth,
-    asyncHandler(async (_req, res) => {
+    asyncHandler(async (req, res) => {
       const user = currentUser(res);
-      // Le match trouvé est annoncé par WebSocket : sans connexion ouverte, le
-      // joueur occuperait une place sans jamais être prévenu.
-      if (!hub.isConnected(user.id)) {
-        throw new HttpError(409, 'SOCKET_REQUIRED', 'Connexion temps réel indisponible. Recharge la page et réessaie.');
-      }
-      await joinQueue(user.id);
+      // Le match trouvé est annoncé par WebSocket : chaque membre doit avoir le site
+      // ouvert, sinon il occuperait une place sans jamais être prévenu.
+      const format = (req.body as { format?: unknown } | undefined)?.format;
+      await joinQueue(user.id, format, (id) => hub.isConnected(id));
       res.json(await getQueueState(user.id));
     }),
   );
@@ -83,6 +88,68 @@ export function codRouter(hub: QueueHub): Router {
       const user = currentUser(res);
       await leaveQueue(user.id);
       res.json(await getQueueState(user.id));
+    }),
+  );
+
+  // --- Groupes -----------------------------------------------------------------
+
+  router.get(
+    '/party/invite/:code',
+    asyncHandler(async (req, res) => {
+      res.json(await previewInvite(String(req.params.code ?? '')));
+    }),
+  );
+
+  router.get(
+    '/party',
+    requireAuth,
+    asyncHandler(async (_req, res) => {
+      res.json({ party: await getPartyOf(currentUser(res).id) });
+    }),
+  );
+
+  router.post(
+    '/party',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const format = (req.body as { format?: unknown } | undefined)?.format;
+      res.status(201).json({ party: await createParty(currentUser(res).id, format) });
+    }),
+  );
+
+  router.post(
+    '/party/join',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const code = (req.body as { code?: unknown } | undefined)?.code;
+      res.json({ party: await joinParty(currentUser(res).id, code) });
+    }),
+  );
+
+  router.post(
+    '/party/leave',
+    requireAuth,
+    asyncHandler(async (_req, res) => {
+      await leaveParty(currentUser(res).id);
+      res.json({ party: null });
+    }),
+  );
+
+  router.post(
+    '/party/kick',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const userId = (req.body as { userId?: unknown } | undefined)?.userId;
+      res.json({ party: await kickMember(currentUser(res).id, userId) });
+    }),
+  );
+
+  router.post(
+    '/party/format',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const format = (req.body as { format?: unknown } | undefined)?.format;
+      res.json({ party: await setPartyFormat(currentUser(res).id, format) });
     }),
   );
 
