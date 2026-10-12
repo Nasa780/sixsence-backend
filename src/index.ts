@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { verifyAccessToken } from './auth.js';
-import { config, isOriginAllowed, playersNeeded } from './config.js';
+import { config, isOriginAllowed } from './config.js';
 import { asyncHandler, errorHandler, notFoundHandler } from './errors.js';
 import { bus } from './events.js';
 import { rateLimit } from './rateLimit.js';
@@ -11,7 +11,7 @@ import { codRouter } from './routes/cod.js';
 import { gtaRouter } from './routes/gta.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { sweepMatches } from './services/matches.js';
-import { clearQueue, expireReadyChecks, getQueueSize, getQueueState, leaveQueue } from './services/queue.js';
+import { clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
 import { QueueHub } from './ws/hub.js';
 
@@ -27,24 +27,38 @@ import { QueueHub } from './ws/hub.js';
 const hub = new QueueHub({
   authenticate: verifyAccessToken,
   getState: async (userId) => ({ ...(await getQueueState(userId)) }),
-  // Joueur parti sans revenir : on libère sa place dans la file.
-  onUserGone: (userId) => leaveQueue(userId),
+  // Joueur parti sans revenir : on libère sa place dans la file (avec son groupe).
+  onUserGone: (userId) => leaveQueue(userId, 'Un membre du groupe a fermé le site : recherche annulée.'),
   isOriginAllowed,
   graceMs: config.cod.disconnectGraceMs,
 });
 
 // Les services émettent des événements ; on les relaie aux navigateurs.
 bus.on('queue:changed', async () => {
-  hub.broadcast({ type: 'queue:update', size: await getQueueSize(), needed: playersNeeded });
+  hub.broadcast({ type: 'queue:update', queues: await getQueueSummaries() });
 });
 bus.on('queue:user', async (userId) => {
   const state = await getQueueState(userId);
-  hub.sendToUser(userId, { type: 'queue:state', inQueue: state.inQueue, joinedAt: state.joinedAt });
+  hub.sendToUser(userId, {
+    type: 'queue:state',
+    inQueue: state.inQueue,
+    format: state.format,
+    groupSize: state.groupSize,
+    joinedAt: state.joinedAt,
+  });
+});
+bus.on('party:changed', (party, alsoNotify) => {
+  if (party) hub.sendToUsers(party.members.map((member) => member.id), { type: 'party:update', party });
+  hub.sendToUsers(alsoNotify, { type: 'party:update', party: null });
+});
+bus.on('notice', (userIds, message) => {
+  hub.sendToUsers(userIds, { type: 'notice', message });
 });
 bus.on('match:found', (match) => {
   hub.sendToUsers([...match.team_a, ...match.team_b], {
     type: 'match:found',
     matchId: match.id,
+    format: match.format,
     map: match.map,
     mode: match.mode,
     deadline: match.ready_deadline,
@@ -72,6 +86,11 @@ bus.on('match:aborted', async (failure) => {
   // Ceux qui avaient accepté sont remis en tête de file ; les absents sont sanctionnés.
   for (const userId of failure.accepted) {
     hub.sendToUser(userId, { type: 'match:aborted', matchId: failure.match_id, reason: 'requeued' });
+    bus.emit('queue:user', userId);
+  }
+  // Avaient accepté, mais un coéquipier manquait : ils restent groupés, hors file.
+  for (const userId of failure.released ?? []) {
+    hub.sendToUser(userId, { type: 'match:aborted', matchId: failure.match_id, reason: 'released' });
     bus.emit('queue:user', userId);
   }
   for (const userId of failure.missing) {
@@ -141,7 +160,7 @@ const discordTimer = setInterval(() => void sweepDiscord(), 30_000);
 
 server.listen(config.port, () => {
   console.log(`[boot] SixSence API en écoute sur le port ${config.port}`);
-  console.log(`[boot] classé COD en ${config.cod.teamSize}v${config.cod.teamSize}, origines : ${config.corsOrigins.join(', ')}`);
+  console.log(`[boot] files : ${config.cod.formats.map((format) => format.label).join(', ')} · origines : ${config.corsOrigins.join(', ')}`);
   console.log(`[boot] vérification « Prêt ? » : ${config.cod.readySeconds} s · Discord : ${discordEnabled ? 'activé' : 'désactivé'}`);
 });
 
