@@ -29,7 +29,7 @@ npm start            # node dist/index.js
 - `src/routes/` : `cod.ts` (file, matchs, chat, preuves), `gta.ts` (événements), `admin.ts` (administration, rôle admin).
 - `src/services/` : logique métier, qui appelle surtout les fonctions SQL ; `discord.ts` : intégration Discord (DM, salons vocaux, résultats), désactivée sans `DISCORD_BOT_TOKEN`.
 - `src/ws/hub.ts` : WebSocket de la file (protocole décrit en tête du fichier).
-- `supabase/migrations/` : `0001_init.sql` (tables, RLS, fonctions atomiques) puis `0002_ready_sanctions_saisons.sql`, `0003_activision_unique.sql` et `0004_formats_groupes.sql` (files par format, groupes, barème selon la taille du groupe). À exécuter dans l'ordre dans le SQL Editor de Supabase ; idempotents.
+- `supabase/migrations/` : `0001_init.sql` (tables, RLS, fonctions atomiques) puis `0002_ready_sanctions_saisons.sql`, `0003_activision_unique.sql` `0004_formats_groupes.sql` (files par format, groupes, barème selon la taille du groupe) et `0005_mvp_moderation.sql` (vote du MVP, arbitrages, signalements). À exécuter dans l'ordre dans le SQL Editor de Supabase ; idempotents.
 
 ## Règles métier
 
@@ -43,13 +43,15 @@ npm start            # node dist/index.js
 - **Identifiant Activision unique** : un même identifiant (sans tenir compte des majuscules ni des espaces) ne peut servir qu'à un seul compte (index `cod_profiles_activision_unique`, erreur 23505).
 - **Files et groupes** : une file par format (`COD_FORMATS`, « 2v2,5v5 » par défaut). On joue seul ou en groupe (`cod_parties`, code d'invitation) ; le chef lance la file pour tout le groupe, qui n'est jamais séparé. Le serveur propose les équipes (`services/matchmaker.ts`, le groupe le plus ancien est servi en premier) et `cod_create_group_match` revérifie tout sous verrou.
 - **Barème selon le groupe** : victoire +30 (+26 en groupe de 3 ou plus), défaite réduite de 25 % pour un joueur seul (`cod_win_points`, `cod_loss_points`).
+- **MVP** : chaque joueur d'un match terminé vote pour un autre joueur (24 h). Le plus élu du mois écoulé reçoit le badge `mvp-AAAA-MM` (`cod_award_monthly_mvp`, vérifié toutes les heures).
+- **Arbitrages et signalements** : privés (pas de lecture publique), traités dans `/admin`, annoncés dans `DISCORD_STAFF_CHANNEL_ID` s'il est défini.
 - Un résultat déclaré est validé d'office après 15 min sans réponse ; un match jamais déclaré est annulé après 3 h.
 
 ## Routes
 
 Publiques : `GET /health`, `GET /stats`, `GET /cod/status`, `GET /cod/matches/:id`, `GET /gta/events`, `GET /gta/events/:id`.
 
-Connexion Discord requise (`Authorization: Bearer <jeton Supabase>`) : `GET /cod/queue`, `POST /cod/queue/join|leave`, `GET|POST /cod/party`, `POST /cod/party/join|leave|kick|format`, `POST /cod/matches/:id/ready|report|confirm|messages|proofs`, `POST|DELETE /gta/events/:id/register`.
+Connexion Discord requise (`Authorization: Bearer <jeton Supabase>`) : `GET /cod/queue`, `POST /cod/queue/join|leave`, `GET|POST /cod/party`, `POST /cod/party/join|leave|kick|format`, `GET /cod/matches/:id/me`, `POST /cod/matches/:id/mvp|arbitration`, `POST /cod/reports`, `POST /cod/matches/:id/ready|report|confirm|messages|proofs`, `POST|DELETE /gta/events/:id/register`.
 
 Admin (`users.role = 'admin'`) : `POST /cod/matches/:id/resolve`, `POST /gta/events`, et tout `/admin/*` (voir l'en-tête de `src/routes/admin.ts`).
 
@@ -57,7 +59,7 @@ Erreurs : `{ "error": { "code": "EVENT_FULL", "message": "..." } }`.
 
 ## Variables d'environnement
 
-Voir `.env.example`. Indispensables : `SUPABASE_URL` et la clé secrète `SUPABASE_SERVICE_ROLE_KEY` (l'ancien nom `SUPABASE_KEY` est accepté). Optionnelles : `CORS_ORIGINS`, `COD_FORMATS`, `COD_TEAM_SIZE`, `COD_MAPS`, `COD_MODES`, `COD_CONFIRM_MINUTES`, `COD_CANCEL_MINUTES`, `COD_READY_SECONDS`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MATCH_CATEGORY_ID`, `DISCORD_RESULTS_CHANNEL_ID`, `SITE_URL`.
+Voir `.env.example`. Indispensables : `SUPABASE_URL` et la clé secrète `SUPABASE_SERVICE_ROLE_KEY` (l'ancien nom `SUPABASE_KEY` est accepté). Optionnelles : `CORS_ORIGINS`, `COD_FORMATS`, `COD_TEAM_SIZE`, `COD_MAPS`, `COD_MODES`, `COD_CONFIRM_MINUTES`, `COD_CANCEL_MINUTES`, `COD_READY_SECONDS`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MATCH_CATEGORY_ID`, `DISCORD_RESULTS_CHANNEL_ID`, `DISCORD_STAFF_CHANNEL_ID`, `SITE_URL`.
 
 Une vérification automatique (`.github/workflows/ci.yml`) compile le projet à chaque PR.
 

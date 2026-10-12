@@ -107,6 +107,8 @@ export const config = {
     matchCategoryId: process.env.DISCORD_MATCH_CATEGORY_ID?.trim() || '',
     /** Salon où publier les résultats (facultatif). */
     resultsChannelId: process.env.DISCORD_RESULTS_CHANNEL_ID?.trim() || '',
+    /** Salon privé de l'équipe : demandes d'arbitrage et signalements (facultatif). */
+    staffChannelId: process.env.DISCORD_STAFF_CHANNEL_ID?.trim() || '',
   },
 
   /** Adresse publique du site (liens envoyés sur Discord). */

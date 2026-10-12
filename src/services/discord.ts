@@ -14,7 +14,7 @@ import { supabase } from '../supabase.js';
  */
 
 const API = 'https://discord.com/api/v10';
-const { botToken, guildId, matchCategoryId, resultsChannelId } = config.discord;
+const { botToken, guildId, matchCategoryId, resultsChannelId, staffChannelId } = config.discord;
 
 export const discordEnabled = Boolean(botToken && guildId);
 
@@ -58,6 +58,19 @@ async function dm(userIds: string[], content: string): Promise<void> {
 }
 
 const matchUrl = (match: CodMatch) => `${config.siteUrl}/cod/match/${match.id}`;
+
+/** Message dans le salon privé de l'équipe (arbitrages, signalements). Sans salon configuré : rien. */
+export async function notifyStaff(content: string): Promise<void> {
+  if (!discordEnabled || !staffChannelId) return;
+  try {
+    await discord(`/channels/${staffChannelId}/messages`, {
+      method: 'POST',
+      body: { content: content.slice(0, 1900), allowed_mentions: { parse: [] } },
+    });
+  } catch (error) {
+    console.warn('[discord] message à l’équipe impossible', (error as Error).message);
+  }
+}
 
 /** Match trouvé : prévenir chaque joueur qu'il a une minute pour accepter. */
 export async function onMatchFound(match: CodMatch): Promise<void> {
