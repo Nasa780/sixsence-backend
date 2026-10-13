@@ -2,13 +2,13 @@
 -- SixSence — migration 0013 : nouvelle échelle, niveau adverse, placement, séries
 -- -----------------------------------------------------------------------------
 -- Rangs tous les 300 points : Bronze 0, Argent 300, Or 600, Platine 900, Diamant 1200,
--- Maître 1500, Grand Maître 1800, Champion 2100.
+-- Maître 1500, Grand Maître 1800, Champion 2100 ; puis Légende à 3000.
 -- Niveau d'une équipe = moyenne des points de ses joueurs. Pour un joueur :
 --   f = 0,5 - 1 / (1 + 10^((niveau adverse - niveau de son équipe) / 600))   (de -0,5 à +0,5)
---   victoire = arrondi(50 + 30 f)                       -> de +35 (bien plus faible) à +65 (bien plus fort)
+--   victoire = arrondi(50 + 10 f)                       -> de +45 (bien plus faible) à +55 (bien plus fort)
 --   défaite  = arrondi(pénalité du rang × (1 - 0,6 f) × 0,75 si seul)
 -- Pénalité du rang (même niveau) : Bronze 15, Argent 20, Or 25, Platine 30, Diamant 35,
--- Maître, Grand Maître et Champion 50.
+-- Maître, Grand Maître, Champion et Légende 50.
 -- Placement : les 10 premiers matchs terminés de la saison comptent double.
 -- Série : 3e victoire d'affilée +5, 4e +10, 5e et suivantes +15 (non doublé).
 -- Jamais sous 0 point.
@@ -24,7 +24,7 @@ immutable
 set search_path = public
 as $$
   select case
-    when p_points >= 1500 then 50  -- Maître, Grand Maître, Champion
+    when p_points >= 1500 then 50  -- Maître, Grand Maître, Champion, Légende
     when p_points >= 1200 then 35  -- Diamant
     when p_points >= 900  then 30  -- Platine
     when p_points >= 600  then 25  -- Or
@@ -80,7 +80,7 @@ begin
 
     v_size  := coalesce((m.group_sizes ->> r.user_id::text)::integer, 1);
     v_bonus := case when r.win_streak + 1 >= 5 then 15 when r.win_streak + 1 = 4 then 10 when r.win_streak + 1 = 3 then 5 else 0 end;
-    v_win   := round(50 + 30 * v_f)::integer * v_mult + v_bonus;
+    v_win   := round(50 + 10 * v_f)::integer * v_mult + v_bonus;
     v_loss  := least(
       r.points,
       round(public.cod_loss_penalty(r.points) * (1 - 0.6 * v_f) * (case when v_size = 1 then 0.75 else 1 end))::integer * v_mult
