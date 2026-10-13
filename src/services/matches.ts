@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { bus, type CodMatch } from '../events.js';
 import { supabase } from '../supabase.js';
+import { noticeMatchResolved } from './matchNotices.js';
 import { mvpVotesOf } from './moderation.js';
 
 /** Joueur tel qu'affiché dans la salle de match. */
@@ -211,10 +212,11 @@ export async function confirmMatch(matchId: string, userId: string, accept: bool
   return match;
 }
 
-/** Arbitrage admin : valide un vainqueur, ou annule le match si winner vaut null. */
+/** Arbitrage de l'équipe : valide un vainqueur, ou annule le match si winner vaut null. Les joueurs sont prévenus. */
 export async function resolveMatch(matchId: string, winner: 'A' | 'B' | null): Promise<CodMatch> {
   const match = unwrap(await supabase.rpc('cod_resolve_match', { p_match: matchId, p_winner: winner })) as CodMatch;
   announceIfClosed(match);
+  if (match) void noticeMatchResolved(match);
   return match;
 }
 

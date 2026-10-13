@@ -19,6 +19,7 @@ import { announceMonthlyMvp, onQueueChanged, sendEventReminders, syncAllRankRole
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
+import { noticeMatchFinished, noticeMatchMissed } from './services/matchNotices.js';
 import { QueueHub } from './ws/hub.js';
 
 /**
@@ -67,9 +68,10 @@ bus.on('queue:changed', async () => {
   hub.broadcast({ type: 'queue:update', queues });
   onQueueChanged(queues);
 });
-// Rangs Discord des joueurs à jour après chaque match.
+// Rangs Discord des joueurs à jour après chaque match, et résultat envoyé à chacun.
 bus.on('match:finalized', (match) => {
   void syncRankRoles([...match.team_a, ...match.team_b]);
+  void noticeMatchFinished(match);
 });
 bus.on('queue:user', async (userId) => {
   const state = await getQueueState(userId);
@@ -163,6 +165,7 @@ bus.on('match:aborted', async (failure) => {
   for (const userId of failure.missing) {
     const state = await getQueueState(userId);
     hub.sendToUser(userId, { type: 'match:aborted', matchId: failure.match_id, reason: 'missed', bannedUntil: state.bannedUntil });
+    void noticeMatchMissed(userId, state.bannedUntil);
   }
 });
 
