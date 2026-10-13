@@ -1,6 +1,9 @@
 import type { RequestHandler, Response } from 'express';
 import { HttpError } from './errors.js';
+import { MATCH_REFEREES, ROLES, type Role } from './roles.js';
 import { supabase } from './supabase.js';
+
+export { MATCH_REFEREES, MODERATORS, ROLES, type Role } from './roles.js';
 
 export interface AuthUser {
   id: string;
@@ -93,8 +96,33 @@ export const requireAdmin: RequestHandler = (_req, res, next) => {
 };
 
 export async function isAdmin(userId: string): Promise<boolean> {
+  return (await roleOf(userId)) === 'admin';
+}
+
+export async function roleOf(userId: string): Promise<Role> {
   const { data, error } = await supabase.from('users').select('role').eq('id', userId).maybeSingle();
-  return !error && data?.role === 'admin';
+  return !error && ROLES.includes(data?.role as Role) ? (data?.role as Role) : 'member';
+}
+
+/** Vrai pour l'admin, le staff et les arbitres (lecture du chat et des preuves des matchs). */
+export async function isReferee(userId: string): Promise<boolean> {
+  return MATCH_REFEREES.includes(await roleOf(userId));
+}
+
+/** Middleware : exige l'un des rôles donnés. À placer après requireAuth. */
+export function requireRoles(...roles: Role[]): RequestHandler {
+  return (_req, res, next) => {
+    roleOf(currentUser(res).id)
+      .then((role) => {
+        if (!roles.includes(role)) {
+          next(new HttpError(403, 'FORBIDDEN', "Action réservée à l'équipe SixSence."));
+          return;
+        }
+        res.locals.role = role;
+        next();
+      })
+      .catch(next);
+  };
 }
 
 /** Joueur authentifié de la requête en cours (posé par requireAuth). */

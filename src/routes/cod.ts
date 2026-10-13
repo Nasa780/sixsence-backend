@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { currentUser, optionalAuth, requireAdmin, requireAuth, viewerOf } from '../auth.js';
+import { MATCH_REFEREES, currentUser, optionalAuth, requireAuth, requireRoles, viewerOf } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, asyncHandler, uuidParam } from '../errors.js';
 import { bus } from '../events.js';
@@ -36,7 +36,7 @@ import type { QueueHub } from '../ws/hub.js';
  *   POST /cod/matches/:id/report    déclarer le vainqueur   { winner: "A" | "B" }
  *   POST /cod/matches/:id/confirm   confirmer ou contester  { accept: boolean }
  *   POST /cod/matches/:id/messages  écrire dans le chat     { body: string }
- *   POST /cod/matches/:id/resolve   arbitrage admin         { winner: "A" | "B" | null }
+ *   POST /cod/matches/:id/resolve   arbitrage (admin, staff, arbitre) { winner: "A" | "B" | null }
  */
 export function codRouter(hub: QueueHub): Router {
   const router = Router();
@@ -233,7 +233,7 @@ export function codRouter(hub: QueueHub): Router {
   router.post(
     '/matches/:id/resolve',
     requireAuth,
-    requireAdmin,
+    requireRoles(...MATCH_REFEREES),
     asyncHandler(async (req, res) => {
       const winner = (req.body as { winner?: unknown } | undefined)?.winner ?? null;
       if (winner !== 'A' && winner !== 'B' && winner !== null) {
