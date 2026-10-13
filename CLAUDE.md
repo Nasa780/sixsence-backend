@@ -27,7 +27,7 @@ npm start            # node dist/index.js
 - `src/config.ts` : variables d'environnement, origines CORS autorisées (liste par défaut incluse).
 - `src/auth.ts` : vérification du jeton de session Supabase (exige le fournisseur Discord).
 - `src/routes/` : `cod.ts` (file, matchs, chat, preuves), `gta.ts` (événements), `admin.ts` (administration, rôle admin).
-- `src/services/` : logique métier, qui appelle surtout les fonctions SQL ; `discord.ts` : intégration Discord (DM, salons vocaux, résultats), désactivée sans `DISCORD_BOT_TOKEN` ; `community.ts` : rôles automatiques (rangs, COD, GTA), annonces et rappels GTA ; `announcePolicy.ts` : règles anti-spam des annonces (testées).
+- `src/services/` : logique métier, qui appelle surtout les fonctions SQL ; `discord.ts` : intégration Discord (DM, salons vocaux, résultats), désactivée sans `DISCORD_BOT_TOKEN` ; `community.ts` : rôles automatiques (rangs, COD, GTA), annonces et rappels GTA ; `announcePolicy.ts` : règles anti-spam des annonces (testées) ; `alerts.ts` + `alertPolicy.ts` : alertes d'erreurs dans Discord (testées).
 - `src/ws/hub.ts` : WebSocket de la file (protocole décrit en tête du fichier).
 - `supabase/migrations/` : `0001_init.sql` (tables, RLS, fonctions atomiques) puis `0002_ready_sanctions_saisons.sql`, `0003_activision_unique.sql` `0004_formats_groupes.sql` (files par format, groupes, barème selon la taille du groupe) `0005_mvp_moderation.sql` (vote du MVP, arbitrages, signalements) et `0006_mvp_gagnants.sql` (MVP choisi dans l'équipe gagnante) `0007_rappels_gta.sql` (rappels des événements GTA) `0008_notifications_push.sql` (abonnements push, clés VAPID), `0009_search_path.sql` et `0010_match_prive.sql` (chat, preuves et avertissements privés), `0011_file_duree_max.sql` (durée maximale de recherche), `0012_victoire_30.sql` (victoire +30 pour tous). À exécuter dans l'ordre dans le SQL Editor de Supabase ; idempotents.
 
@@ -49,11 +49,12 @@ npm start            # node dist/index.js
 - **Notifications push** (`services/push.ts`, `/push/*`) : match trouvé, rappels GTA et nouvel événement GTA (aux joueurs déjà inscrits à un événement) envoyés aux appareils abonnés, même site fermé ; abonnements refusés (404/410) supprimés, 10 appareils max par joueur.
 - **Départ du site** : un joueur sans connexion WebSocket quitte la file (avec son groupe) après 30 s sur ordinateur, `COD_MOBILE_GRACE_MINUTES` (30 min) sur téléphone (écran verrouillé, autre appli) ; une notification push « Recherche arrêtée » prévient les joueurs concernés.
 - **Durée maximale de recherche** (`services/queuePolicy.ts`, testée) : 30 min (`COD_QUEUE_MAX_MINUTES`) depuis la dernière confirmation (`cod_queue.confirmed_at`) ; « Toujours là ? » 5 min avant (`warned_at`, notification push) ; `POST /cod/queue/stay` relance le compteur sans changer `joined_at` (place conservée) ; sans réponse, le groupe sort de la file avec une notification.
+- **Surveillance des erreurs** : erreurs 500, promesses non gérées et exceptions (suivies d'un redémarrage) signalées dans `DISCORD_ALERTS_CHANNEL_ID` (sinon `DISCORD_STAFF_CHANNEL_ID`) ; le site envoie les siennes à `POST /errors` (public, 10/min par adresse, bruit des navigateurs ignoré). Une alerte par erreur toutes les 15 min, 20 par heure au plus, sans données personnelles.
 - Un résultat déclaré est validé d'office après 15 min sans réponse ; un match jamais déclaré est annulé après 3 h.
 
 ## Routes
 
-Publiques : `GET /health`, `GET /stats`, `GET /cod/status`, `GET /cod/matches/:id` (chat et preuves seulement pour les joueurs du match et les admins, jeton facultatif), `GET /gta/events`, `GET /gta/events/:id`.
+Publiques : `GET /health`, `GET /stats`, `POST /errors`, `GET /cod/status`, `GET /cod/matches/:id` (chat et preuves seulement pour les joueurs du match et les admins, jeton facultatif), `GET /gta/events`, `GET /gta/events/:id`.
 
 Connexion Discord requise (`Authorization: Bearer <jeton Supabase>`) : `GET /cod/queue`, `POST /cod/queue/join|leave|stay`, `GET|POST /cod/party`, `POST /cod/party/join|leave|kick|format`, `GET /cod/matches/:id/me`, `POST /cod/matches/:id/mvp|arbitration`, `POST /cod/reports`, `POST /cod/matches/:id/ready|report|confirm|messages|proofs`, `POST|DELETE /gta/events/:id/register`.
 
@@ -63,7 +64,7 @@ Erreurs : `{ "error": { "code": "EVENT_FULL", "message": "..." } }`.
 
 ## Variables d'environnement
 
-Voir `.env.example`. Indispensables : `SUPABASE_URL` et la clé secrète `SUPABASE_SERVICE_ROLE_KEY` (l'ancien nom `SUPABASE_KEY` est accepté). Optionnelles : `CORS_ORIGINS`, `COD_FORMATS`, `COD_TEAM_SIZE`, `COD_MAPS`, `COD_MODES`, `COD_CONFIRM_MINUTES`, `COD_CANCEL_MINUTES`, `COD_READY_SECONDS`, `COD_MOBILE_GRACE_MINUTES` (30 par défaut), `COD_QUEUE_MAX_MINUTES` (30 par défaut), `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MATCH_CATEGORY_ID`, `DISCORD_RESULTS_CHANNEL_ID`, `DISCORD_STAFF_CHANNEL_ID`, `DISCORD_COD_CHANNEL_ID`, `DISCORD_GTA_CHANNEL_ID`, `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` (sinon générées et gardées en base), `SITE_URL`.
+Voir `.env.example`. Indispensables : `SUPABASE_URL` et la clé secrète `SUPABASE_SERVICE_ROLE_KEY` (l'ancien nom `SUPABASE_KEY` est accepté). Optionnelles : `CORS_ORIGINS`, `COD_FORMATS`, `COD_TEAM_SIZE`, `COD_MAPS`, `COD_MODES`, `COD_CONFIRM_MINUTES`, `COD_CANCEL_MINUTES`, `COD_READY_SECONDS`, `COD_MOBILE_GRACE_MINUTES` (30 par défaut), `COD_QUEUE_MAX_MINUTES` (30 par défaut), `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MATCH_CATEGORY_ID`, `DISCORD_RESULTS_CHANNEL_ID`, `DISCORD_STAFF_CHANNEL_ID`, `DISCORD_ALERTS_CHANNEL_ID`, `DISCORD_COD_CHANNEL_ID`, `DISCORD_GTA_CHANNEL_ID`, `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` (sinon générées et gardées en base), `SITE_URL`.
 
 Une vérification automatique (`.github/workflows/ci.yml`) compile le projet à chaque PR.
 

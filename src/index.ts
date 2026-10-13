@@ -3,13 +3,15 @@ import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { verifyAccessToken } from './auth.js';
 import { config, isOriginAllowed } from './config.js';
-import { asyncHandler, errorHandler, notFoundHandler } from './errors.js';
+import { asyncHandler, errorHandler, isUnexpected, notFoundHandler } from './errors.js';
 import { bus } from './events.js';
 import { rateLimit } from './rateLimit.js';
 import { adminRouter } from './routes/admin.js';
 import { codRouter } from './routes/cod.js';
+import { errorsRouter } from './routes/errors.js';
 import { gtaRouter } from './routes/gta.js';
 import { pushRouter } from './routes/push.js';
+import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { sweepMatches } from './services/matches.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
@@ -200,8 +202,16 @@ app.use('/cod', codRouter(hub));
 app.use('/gta', gtaRouter());
 app.use('/push', pushRouter());
 app.use('/admin', adminRouter());
+app.use('/errors', errorsRouter());
 app.use(notFoundHandler);
-app.use(errorHandler);
+// Erreurs imprévues : signalées dans le salon Discord des alertes avant la réponse 500.
+app.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
+  if (isUnexpected(error)) {
+    const { message, stack } = describeError(error);
+    reportError('serveur', message, { where: `${req.method} ${req.baseUrl}${req.route?.path ?? req.path}`, stack });
+  }
+  errorHandler(error, req, res, next);
+});
 
 const server = createServer(app);
 hub.attach(server);
@@ -257,5 +267,16 @@ function shutdown(signal: string): void {
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 5_000).unref();
 }
+// Erreurs hors requête : signalées. Une exception non rattrapée laisse le serveur dans un
+// état incertain : on la signale puis on redémarre (Render relance le service).
+process.on('unhandledRejection', (reason) => {
+  const { message, stack } = describeError(reason);
+  reportError('serveur', message, { where: 'promesse non gérée', stack });
+});
+process.on('uncaughtException', (error) => {
+  const { message, stack } = describeError(error);
+  reportError('serveur', message, { where: 'exception non rattrapée (redémarrage)', stack });
+  setTimeout(() => process.exit(1), 2_000).unref();
+});
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
