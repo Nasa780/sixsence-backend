@@ -15,7 +15,7 @@ import { WebSocket, WebSocketServer, type RawData } from 'ws';
  *     { type: "ready", size, needed, inQueue, joinedAt, activeMatchId }
  *     { type: "queue:update", size, needed }       la file a bougé (envoyé à tous)
  *     { type: "queue:state", inQueue, joinedAt }   ton propre état a changé
- *     { type: "match:found", matchId, map, mode }  ton match est prêt
+ *     { type: "match:found", matchId, map, mode, points }  ton match est prêt (points : { win, loss, bonus, placement })
  *     { type: "error", code, message }
  *     { type: "pong" }
  *

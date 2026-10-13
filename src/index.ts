@@ -13,7 +13,7 @@ import { gtaRouter } from './routes/gta.js';
 import { pushRouter } from './routes/push.js';
 import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
-import { sweepMatches } from './services/matches.js';
+import { pointsPreview, sweepMatches } from './services/matches.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, onQueueChanged, sendEventReminders, syncAllRankRoles, syncRankRoles } from './services/community.js';
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
@@ -108,16 +108,21 @@ bus.on('party:changed', (party, alsoNotify) => {
 bus.on('notice', (userIds, message) => {
   hub.sendToUsers(userIds, { type: 'notice', message });
 });
-bus.on('match:found', (match) => {
-  hub.sendToUsers([...match.team_a, ...match.team_b], {
-    type: 'match:found',
-    matchId: match.id,
-    format: match.format,
-    map: match.map,
-    mode: match.mode,
-    deadline: match.ready_deadline,
-    total: match.team_size * 2,
-  });
+bus.on('match:found', async (match) => {
+  // Chaque joueur reçoit ses propres points en jeu (« Victoire +35 · Défaite -9 »).
+  const stakes = await pointsPreview(match.id);
+  for (const userId of [...match.team_a, ...match.team_b]) {
+    hub.sendToUser(userId, {
+      type: 'match:found',
+      matchId: match.id,
+      format: match.format,
+      map: match.map,
+      mode: match.mode,
+      deadline: match.ready_deadline,
+      total: match.team_size * 2,
+      points: stakes[userId] ?? null,
+    });
+  }
   void onMatchFound(match);
   // Notification sur téléphone / ordinateur, même site fermé (appli installée).
   void pushToUsers([...match.team_a, ...match.team_b], {

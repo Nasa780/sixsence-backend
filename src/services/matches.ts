@@ -46,6 +46,29 @@ export interface MatchProof {
   created_at: string;
 }
 
+/** Points en jeu pour un joueur : gain en cas de victoire, perte en cas de défaite. */
+export interface PointsAtStake {
+  win: number;
+  loss: number;
+  /** Bonus de série compris dans win. */
+  bonus: number;
+  /** Numéro du match de placement (1 à 10), ou null. */
+  placement: number | null;
+}
+
+/**
+ * Points en jeu de chaque joueur d'un match (cod_points_preview) : exactement ceux
+ * qu'appliquera cod_finalize_match. Vide si le calcul échoue (affichage seulement).
+ */
+export async function pointsPreview(matchId: string): Promise<Record<string, PointsAtStake>> {
+  const { data, error } = await supabase.rpc('cod_points_preview', { p_match: matchId });
+  if (error) {
+    console.warn('[points] aperçu indisponible', error.message);
+    return {};
+  }
+  return (data ?? {}) as Record<string, PointsAtStake>;
+}
+
 /** Durée de validité des liens vers les captures (bucket privé). */
 const PROOF_URL_SECONDS = 60 * 60;
 
@@ -76,6 +99,8 @@ export async function getMatch(
   privateAccess: boolean;
   mvpVotes: Record<string, number>;
   mvpVotesFromOthers: Record<string, number>;
+  /** Points en jeu par joueur, tant que le match n'est pas terminé. */
+  pointsAtStake: Record<string, PointsAtStake> | null;
 }> {
   const match = unwrap(await supabase.from('cod_matches').select('*').eq('id', matchId).maybeSingle()) as CodMatch | null;
   if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
@@ -139,8 +164,18 @@ export async function getMatch(
       created_at: proof.created_at,
     }));
 
-  const votes = await mvpVotesOf(matchId);
-  return { match, players, messages: chat, proofs: proofList, privateAccess, mvpVotes: votes.total, mvpVotesFromOthers: votes.fromOthers };
+  const finished = match.status === 'completed' || match.status === 'cancelled';
+  const [votes, pointsAtStake] = await Promise.all([mvpVotesOf(matchId), finished ? Promise.resolve(null) : pointsPreview(matchId)]);
+  return {
+    match,
+    players,
+    messages: chat,
+    proofs: proofList,
+    privateAccess,
+    mvpVotes: votes.total,
+    mvpVotesFromOthers: votes.fromOthers,
+    pointsAtStake,
+  };
 }
 
 /** Un joueur accepte le match trouvé (vérification « Prêt ? »). */
