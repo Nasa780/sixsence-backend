@@ -118,6 +118,8 @@ export const config = {
     resultsChannelId: process.env.DISCORD_RESULTS_CHANNEL_ID?.trim() || '',
     /** Salon privé de l'équipe : demandes d'arbitrage et signalements (facultatif). */
     staffChannelId: process.env.DISCORD_STAFF_CHANNEL_ID?.trim() || '',
+    /** Salon privé des alertes d'erreurs (facultatif, sinon le salon de l'équipe). */
+    alertsChannelId: process.env.DISCORD_ALERTS_CHANNEL_ID?.trim() || '',
     /** Salon des annonces COD : file qui se remplit, MVP du mois, fin de saison (facultatif). */
     codChannelId: process.env.DISCORD_COD_CHANNEL_ID?.trim() || '',
     /** Salon des annonces GTA 6 : nouveaux événements, rappels (facultatif). */

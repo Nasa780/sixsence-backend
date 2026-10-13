@@ -84,6 +84,13 @@ export function notFoundHandler(_req: Request, res: Response): void {
 }
 
 // Les 4 paramètres sont obligatoires : c'est ainsi qu'Express reconnaît un gestionnaire d'erreur.
+/** Vrai pour une erreur imprévue (500) : ni erreur métier, ni requête invalide. */
+export function isUnexpected(error: unknown): boolean {
+  if (error instanceof HttpError) return false;
+  const status = (error as { status?: number } | null)?.status;
+  return status !== 400 && status !== 413;
+}
+
 export function errorHandler(error: unknown, _req: Request, res: Response, _next: NextFunction): void {
   if (error instanceof HttpError) {
     res.status(error.status).json({ error: { code: error.code, message: error.message } });
