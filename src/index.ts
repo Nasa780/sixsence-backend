@@ -15,11 +15,11 @@ import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { pointsPreview, sweepMatches } from './services/matches.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
-import { announceMonthlyMvp, onQueueChanged, sendEventReminders, syncAllRankRoles, syncRankRoles } from './services/community.js';
+import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, welcomeNewPlayers } from './services/community.js';
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
-import { noticeMatchFinished, noticeMatchMissed } from './services/matchNotices.js';
+import { noticeMatchAbandoned, noticeMatchFinished, noticeMatchMissed } from './services/matchNotices.js';
 import { QueueHub } from './ws/hub.js';
 
 /**
@@ -72,7 +72,9 @@ bus.on('queue:changed', async () => {
 bus.on('match:finalized', (match) => {
   void syncRankRoles([...match.team_a, ...match.team_b]);
   void noticeMatchFinished(match);
+  void announcePromotions(match);
 });
+bus.on('match:abandoned', (match) => void noticeMatchAbandoned(match));
 bus.on('queue:user', async (userId) => {
   const state = await getQueueState(userId);
   hub.sendToUser(userId, {
@@ -247,12 +249,18 @@ const awardMvp = () =>
       if (!award) return;
       console.log(`[mvp] MVP du mois ${award.month.slice(0, 7)} : ${award.userId}`);
       await announceMonthlyMvp(await usernameOf(award.userId), award.month);
+      await onMonthlyMvp(award.userId, award.month);
     })
     .catch((error) => console.error('[mvp]', error));
 void awardMvp();
 const mvpTimer = setInterval(awardMvp, 60 * 60_000);
-// Rappels Discord 1 h avant les événements GTA 6.
-const reminderTimer = setInterval(() => void sendEventReminders(), 5 * 60_000);
+// Rappels Discord 1 h avant les événements GTA 6, et bienvenue aux nouveaux inscrits.
+const reminderTimer = setInterval(() => {
+  void sendEventReminders();
+  void welcomeNewPlayers();
+}, 5 * 60_000);
+// Top de la semaine (lundi 10 h, heure de Paris), vérifié toutes les 15 minutes.
+const weeklyTimer = setInterval(() => void postWeeklyTop(), 15 * 60_000);
 // Rôles Discord de tous les joueurs classés, une fois au démarrage.
 setTimeout(() => void syncAllRankRoles().then((count) => count && console.log(`[discord] rôles mis à jour pour ${count} joueur(s)`)), 20_000);
 
@@ -266,6 +274,7 @@ server.listen(config.port, () => {
 function shutdown(signal: string): void {
   console.log(`[boot] ${signal} reçu, arrêt en cours`);
   clearInterval(sweeper);
+  clearInterval(weeklyTimer);
   clearInterval(readyTimer);
   clearInterval(queueTimer);
   clearInterval(discordTimer);

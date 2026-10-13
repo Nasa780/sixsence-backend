@@ -10,7 +10,8 @@ import { pushToUsers } from './push.js';
  *   - résultat contesté : salon de l'équipe SixSence et équipe qui a déclaré ;
  *   - décision de l'équipe (vainqueur ou annulation) : tous les joueurs ;
  *   - match non accepté : avertissement ou exclusion du joueur absent ;
- *   - fin du match : points gagnés ou perdus de chaque joueur.
+ *   - fin du match : points gagnés ou perdus de chaque joueur ;
+ *   - match abandonné (aucun résultat déclaré à temps) : tous les joueurs.
  * Tout est « au mieux » : une erreur n'empêche jamais le match de se dérouler.
  */
 
@@ -81,7 +82,20 @@ export async function noticeMatchMissed(userId: string, bannedUntil: string | nu
       ? "Tu n'as pas accepté le match : il est annulé."
       : `Tu n'as pas accepté le match : il est annulé et tu es exclu de la file jusqu'à ${hour(bannedUntil)}.`
     : "Tu n'as pas accepté le match : il est annulé. Avertissement : au prochain oubli dans les 24 h, tu seras exclu 15 min.";
-  await pushToUsers([userId], { title: 'Match annulé', body: text, url: '/cod/ranked', tag: 'file' });
+  await Promise.all([
+    pushToUsers([userId], { title: 'Match annulé', body: text, url: '/cod/ranked', tag: 'file' }),
+    dm([userId], `**Match annulé** — ${text}\nRèglement : ${config.siteUrl}/reglement`),
+  ]);
+}
+
+/** Match annulé faute de résultat déclaré à temps. */
+export async function noticeMatchAbandoned(match: CodMatch): Promise<void> {
+  const hours = Math.round(config.cod.cancelMinutes / 60);
+  const text = `Aucun résultat n'a été déclaré dans les ${hours} h : le match est annulé, aucun point ne bouge.`;
+  await Promise.all([
+    pushToUsers(players(match), { title: 'Match annulé', body: text, url: `/cod/match/${match.id}`, tag: `match-${match.id}` }),
+    dm(players(match), `**Match annulé** — ${title(match)}\n${text}\n${matchUrl(match)}`),
+  ]);
 }
 
 /** Fin du match : chaque joueur reçoit son résultat, ses points et son nouveau total. */
