@@ -19,7 +19,7 @@ import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, p
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
-import { noticeMatchAbandoned, noticeMatchFinished, noticeMatchMissed } from './services/matchNotices.js';
+import { noticeMatchAbandoned, noticeMatchFinished, noticeMatchMissed, remindStaff } from './services/matchNotices.js';
 import { QueueHub } from './ws/hub.js';
 
 /**
@@ -259,8 +259,11 @@ const reminderTimer = setInterval(() => {
   void sendEventReminders();
   void welcomeNewPlayers();
 }, 5 * 60_000);
-// Top de la semaine (lundi 10 h, heure de Paris), vérifié toutes les 15 minutes.
-const weeklyTimer = setInterval(() => void postWeeklyTop(), 15 * 60_000);
+// Top de la semaine (lundi 10 h, heure de Paris) et relance de l'équipe (attente de plus de 2 h), vérifiés toutes les 15 minutes.
+const weeklyTimer = setInterval(() => {
+  void postWeeklyTop();
+  void remindStaff();
+}, 15 * 60_000);
 // Rôles Discord de tous les joueurs classés, une fois au démarrage.
 setTimeout(() => void syncAllRankRoles().then((count) => count && console.log(`[discord] rôles mis à jour pour ${count} joueur(s)`)), 20_000);
 
