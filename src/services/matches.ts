@@ -1,4 +1,4 @@
-import { isAdmin } from '../auth.js';
+import { isReferee } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { bus, type CodMatch } from '../events.js';
@@ -106,7 +106,7 @@ export async function getMatch(
   if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
 
   const ids = [...match.team_a, ...match.team_b];
-  const privateAccess = Boolean(viewerId && (ids.includes(viewerId) || (await isAdmin(viewerId))));
+  const privateAccess = Boolean(viewerId && (ids.includes(viewerId) || (await isReferee(viewerId))));
   const [users, profiles, messages, proofs] = await Promise.all([
     supabase.from('users').select('id, username, avatar_url').in('id', ids),
     supabase.from('cod_profiles').select('user_id, activision_id, platform, points').in('user_id', ids),

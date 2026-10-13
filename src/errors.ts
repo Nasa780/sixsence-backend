@@ -38,6 +38,14 @@ const DB_ERRORS: Record<string, [status: number, message: string]> = {
   EVENT_FULL: [409, 'Cet événement est complet.'],
   INVALID_MVP: [400, "Le MVP se choisit parmi les joueurs de l'équipe gagnante."],
   MVP_VOTE_CLOSED: [409, 'Le vote du MVP est fermé pour ce match (24 h après la fin).'],
+  // Sanctions
+  INVALID_SANCTION: [400, 'Type de sanction inconnu.'],
+  INVALID_REASON: [400, 'Indique un motif (500 caractères au plus).'],
+  INVALID_DURATION: [400, "Durée d'exclusion invalide (1 minute à 1 an)."],
+  INVALID_POINTS: [400, 'Nombre de points invalide (1 à 5 000).'],
+  PLAYER_NOT_FOUND: [404, 'Joueur introuvable.'],
+  SANCTION_NOT_FOUND: [404, 'Sanction introuvable.'],
+  SANCTION_LIFTED: [409, 'Cette sanction est déjà levée.'],
   // Files et groupes ({detail} = pseudo du joueur concerné)
   INVALID_FORMAT: [400, 'Format de file inconnu.'],
   INVALID_GROUP_SIZE: [400, 'Ton groupe est trop grand pour ce format.'],

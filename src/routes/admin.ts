@@ -1,15 +1,20 @@
-import { Router } from 'express';
-import { currentUser, requireAdmin, requireAuth } from '../auth.js';
+import { Router, type RequestHandler } from 'express';
+import { currentUser, requireAuth, requireRoles } from '../auth.js';
+import { ROLES, rolesFor, type Role } from '../roles.js';
 import { HttpError, asyncHandler, unwrap, uuidParam } from '../errors.js';
 import { STAFF_BADGES, overview, parseBadges, parseEventPatch, parseFounder, parsePartner, searchPlayers } from '../services/admin.js';
 import { createEvent, parseNewEvent } from '../services/gtaEvents.js';
 import { listDisputes, resolveMatch } from '../services/matches.js';
 import { closeCase, listForAdmin } from '../services/moderation.js';
 import { announceEventCancelled, announceNewEvent, announceSeasonClosed, syncAllRankRoles } from '../services/community.js';
+import { applySanction, liftSanction, listSanctions } from '../services/sanctions.js';
 import { supabase } from '../supabase.js';
 
 /**
- * Administration (rôle admin obligatoire sur toutes les routes).
+ * Administration. Droits selon le rôle (voir guard ci-dessous) :
+ *   arbitre : tableau de bord, contestations, demandes d'arbitrage
+ *   staff   : + signalements, recherche de joueurs et sanctions
+ *   admin   : tout
  *
  *   GET    /admin/overview                 chiffres du tableau de bord
  *   GET    /admin/disputes                 matchs contestés
@@ -25,14 +30,19 @@ import { supabase } from '../supabase.js';
  *   POST|PATCH|DELETE /admin/partners[/:id]  partenaires
  *   GET    /admin/players?q=               rechercher des joueurs
  *   POST   /admin/players/:id/badges       { badges: [...] }
- *   POST   /admin/players/:id/role         { role: "member" | "admin" }
+ *   POST   /admin/players/:id/role         { role: "member" | "arbitre" | "staff" | "admin" }
+ *   GET    /admin/players/:id/sanctions    historique des sanctions d'un joueur
+ *   POST   /admin/players/:id/sanctions    { type, reason, minutes?, points?, reportId? } sanctionner
+ *   POST   /admin/sanctions/:id/lift       { reason? } lever une sanction
  *   POST   /admin/players/:id/unban        lever une exclusion de la file
  *   POST   /admin/season/close             { nextName } clôturer la saison
  *   POST   /admin/discord/sync-roles       remettre à jour les rôles Discord de tous les joueurs classés
  */
+const guard: RequestHandler = (req, res, next) => requireRoles(...rolesFor(req.method, req.path))(req, res, next);
+
 export function adminRouter(): Router {
   const router = Router();
-  router.use(requireAuth, requireAdmin);
+  router.use(requireAuth, guard);
 
   router.get('/overview', asyncHandler(async (_req, res) => {
     res.json({ ...(await overview()), staffBadges: STAFF_BADGES });
@@ -128,14 +138,25 @@ export function adminRouter(): Router {
   }));
 
   router.post('/players/:id/role', asyncHandler(async (req, res) => {
-    const role = (req.body as { role?: unknown } | undefined)?.role;
-    if (role !== 'member' && role !== 'admin') throw new HttpError(400, 'INVALID_INPUT', 'Rôle invalide.');
+    const role = (req.body as { role?: unknown } | undefined)?.role as Role;
+    if (!ROLES.includes(role)) throw new HttpError(400, 'INVALID_INPUT', 'Rôle invalide.');
     const id = uuidParam(req, 'id');
     if (id === currentUser(res).id && role !== 'admin') {
       throw new HttpError(400, 'INVALID_INPUT', 'Tu ne peux pas retirer ton propre rôle administrateur.');
     }
     unwrap(await supabase.from('users').update({ role }).eq('id', id));
     res.json({ role });
+  }));
+
+  // --- Sanctions (admin et staff) ------------------------------------------------
+  router.get('/players/:id/sanctions', asyncHandler(async (req, res) => {
+    res.json({ sanctions: await listSanctions(uuidParam(req, 'id')) });
+  }));
+  router.post('/players/:id/sanctions', asyncHandler(async (req, res) => {
+    res.status(201).json({ sanction: await applySanction(uuidParam(req, 'id'), req.body, currentUser(res).id) });
+  }));
+  router.post('/sanctions/:id/lift', asyncHandler(async (req, res) => {
+    res.json({ sanction: await liftSanction(req.params.id, currentUser(res).id, req.body) });
   }));
 
   router.post('/players/:id/unban', asyncHandler(async (req, res) => {
