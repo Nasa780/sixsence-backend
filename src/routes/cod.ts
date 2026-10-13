@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { HttpError, asyncHandler, uuidParam } from '../errors.js';
 import { bus } from '../events.js';
 import { notifyStaff } from '../services/discord.js';
+import { noticeResultDisputed, noticeResultReported } from '../services/matchNotices.js';
 import { ARBITRATION_REASONS, REPORT_REASONS, myArbitrations, reportPlayer, requestArbitration, usernameOf, voteMvp } from '../services/moderation.js';
 import { supabase } from '../supabase.js';
 import { addProof, confirmMatch, getMatch, postMessage, readyMatch, reportMatch, resolveMatch } from '../services/matches.js';
@@ -201,7 +202,9 @@ export function codRouter(hub: QueueHub): Router {
       if (winner !== 'A' && winner !== 'B') {
         throw new HttpError(400, 'INVALID_WINNER', 'Vainqueur invalide.');
       }
-      res.json({ match: await reportMatch(uuidParam(req, 'id'), currentUser(res).id, winner) });
+      const match = await reportMatch(uuidParam(req, 'id'), currentUser(res).id, winner);
+      if (match.status === 'awaiting_confirmation') void noticeResultReported(match);
+      res.json({ match });
     }),
   );
 
@@ -213,7 +216,10 @@ export function codRouter(hub: QueueHub): Router {
       if (typeof accept !== 'boolean') {
         throw new HttpError(400, 'INVALID_BODY', 'Le champ "accept" (true ou false) est requis.');
       }
-      res.json({ match: await confirmMatch(uuidParam(req, 'id'), currentUser(res).id, accept) });
+      const userId = currentUser(res).id;
+      const match = await confirmMatch(uuidParam(req, 'id'), userId, accept);
+      if (!accept && match.status === 'disputed') void noticeResultDisputed(match, userId);
+      res.json({ match });
     }),
   );
 
