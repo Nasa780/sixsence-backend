@@ -52,7 +52,7 @@ export interface PointsAtStake {
   loss: number;
   /** Bonus de série compris dans win. */
   bonus: number;
-  /** Numéro du match de placement (1 à 5), ou null. */
+  /** Numéro du match de placement (1 à 10), ou null. */
   placement: number | null;
 }
 

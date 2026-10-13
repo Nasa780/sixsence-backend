@@ -21,13 +21,13 @@ import type { QueueSummary } from './queue.js';
  */
 
 const RANK_ROLES = [
-  { name: 'Champion', min: 3500, color: 0xe8b4f8 },
-  { name: 'Grand Maître', min: 3000, color: 0xc084fc },
-  { name: 'Maître', min: 2500, color: 0xa78bfa },
-  { name: 'Diamant', min: 2000, color: 0x38bdf8 },
-  { name: 'Platine', min: 1500, color: 0x34d399 },
-  { name: 'Or', min: 1000, color: 0xc9a227 },
-  { name: 'Argent', min: 500, color: 0x94a3b8 },
+  { name: 'Champion', min: 2100, color: 0xe8b4f8 },
+  { name: 'Grand Maître', min: 1800, color: 0xc084fc },
+  { name: 'Maître', min: 1500, color: 0xa78bfa },
+  { name: 'Diamant', min: 1200, color: 0x38bdf8 },
+  { name: 'Platine', min: 900, color: 0x34d399 },
+  { name: 'Or', min: 600, color: 0xc9a227 },
+  { name: 'Argent', min: 300, color: 0x94a3b8 },
   { name: 'Bronze', min: 0, color: 0xc97b4b },
 ];
 /**
