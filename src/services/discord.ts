@@ -20,7 +20,14 @@ const { botToken, guildId, matchCategoryId, resultsChannelId, staffChannelId } =
 
 export const discordEnabled = Boolean(botToken && guildId);
 
-export async function discord(path: string, init: { method?: string; body?: unknown } = {}): Promise<unknown> {
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Appel à l'API Discord. Limite de débit (429, fréquente quand des salons sont créés et
+ * supprimés à la suite) : on attend le délai demandé par Discord (15 s au plus) et on réessaie,
+ * jusqu'à 3 fois.
+ */
+export async function discord(path: string, init: { method?: string; body?: unknown } = {}, attempt = 0): Promise<unknown> {
   const res = await fetch(`${API}${path}`, {
     method: init.method ?? 'GET',
     headers: { Authorization: `Bot ${botToken}`, 'Content-Type': 'application/json' },
@@ -28,6 +35,11 @@ export async function discord(path: string, init: { method?: string; body?: unkn
   });
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
+  if (res.status === 429 && attempt < 3) {
+    const retryAfter = Number((data as { retry_after?: number } | null)?.retry_after ?? res.headers.get('retry-after') ?? 1);
+    await wait(Math.min(15, Math.max(0.5, retryAfter)) * 1000);
+    return discord(path, init, attempt + 1);
+  }
   if (!res.ok) {
     const message = (data as { message?: string } | null)?.message ?? res.statusText;
     throw new Error(`Discord ${init.method ?? 'GET'} ${path} : ${res.status} ${message}`);
@@ -109,14 +121,20 @@ export async function onMatchStart(match: CodMatch): Promise<void> {
       },
     }) as Promise<{ id: string }>;
 
+  // L'un après l'autre (moins de risque de limite de débit) ; en cas d'échec, aucun salon orphelin.
+  const created: string[] = [];
   try {
-    const [teamA, teamB] = await Promise.all([create('Équipe 1'), create('Équipe 2')]);
+    const teamA = await create('Équipe 1');
+    created.push(teamA.id);
+    const teamB = await create('Équipe 2');
+    created.push(teamB.id);
     await supabase.from('cod_matches').update({ discord_channels: { teamA: teamA.id, teamB: teamB.id } }).eq('id', match.id);
     const link = (channelId: string) => `https://discord.com/channels/${guildId}/${channelId}`;
     await dm(match.team_a, `**Le match démarre** — rejoins le vocal de l'Équipe 1 : ${link(teamA.id)}\nSalon de match : ${matchUrl(match)}`);
     await dm(match.team_b, `**Le match démarre** — rejoins le vocal de l'Équipe 2 : ${link(teamB.id)}\nSalon de match : ${matchUrl(match)}`);
   } catch (error) {
     console.warn('[discord] création des salons vocaux impossible', (error as Error).message);
+    for (const channelId of created) await discord(`/channels/${channelId}`, { method: 'DELETE' }).catch(() => {});
     await supabase.from('cod_matches').update({ discord_channels: {} }).eq('id', match.id);
   }
 }
