@@ -15,7 +15,7 @@ import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { pointsPreview, sweepMatches } from './services/matches.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
-import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, welcomeNewPlayers } from './services/community.js';
+import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, syncTeamAndBadgeRoles, welcomeNewPlayers } from './services/community.js';
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
@@ -264,8 +264,15 @@ const weeklyTimer = setInterval(() => {
   void postWeeklyTop();
   void remindStaff();
 }, 15 * 60_000);
-// Rôles Discord de tous les joueurs classés, une fois au démarrage.
-setTimeout(() => void syncAllRankRoles().then((count) => count && console.log(`[discord] rôles mis à jour pour ${count} joueur(s)`)), 20_000);
+// Rôles Discord de tous les joueurs (rangs, équipe, badges, MVP du mois), une fois au démarrage.
+setTimeout(
+  () =>
+    void syncAllRankRoles()
+      .then((count) => count && console.log(`[discord] rôles de rang mis à jour pour ${count} joueur(s)`))
+      .then(() => syncTeamAndBadgeRoles())
+      .then((count) => count && console.log(`[discord] rôles d'équipe et de badges mis à jour pour ${count} joueur(s)`)),
+  20_000,
+);
 
 server.listen(config.port, () => {
   console.log(`[boot] SixSence API en écoute sur le port ${config.port}`);

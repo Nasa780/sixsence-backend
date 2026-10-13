@@ -6,7 +6,7 @@ import { STAFF_BADGES, overview, parseBadges, parseEventPatch, parseFounder, par
 import { createEvent, parseNewEvent } from '../services/gtaEvents.js';
 import { listDisputes, resolveMatch } from '../services/matches.js';
 import { closeCase, listForAdmin } from '../services/moderation.js';
-import { announceEventCancelled, announceNewEvent, announceSeasonClosed, onBadgesChanged, onTeamRoleChanged, syncAllRankRoles } from '../services/community.js';
+import { announceEventCancelled, announceNewEvent, announceSeasonClosed, onBadgesChanged, onTeamRoleChanged, syncAllRankRoles, syncTeamAndBadgeRoles } from '../services/community.js';
 import { applySanction, liftSanction, listSanctions } from '../services/sanctions.js';
 import { supabase } from '../supabase.js';
 
@@ -36,7 +36,7 @@ import { supabase } from '../supabase.js';
  *   POST   /admin/sanctions/:id/lift       { reason? } lever une sanction
  *   POST   /admin/players/:id/unban        lever une exclusion de la file
  *   POST   /admin/season/close             { nextName } clôturer la saison
- *   POST   /admin/discord/sync-roles       remettre à jour les rôles Discord de tous les joueurs classés
+ *   POST   /admin/discord/sync-roles       remettre à jour les rôles Discord (rangs, équipe, badges, MVP du mois)
  */
 const guard: RequestHandler = (req, res, next) => requireRoles(...rolesFor(req.method, req.path))(req, res, next);
 
@@ -181,7 +181,9 @@ export function adminRouter(): Router {
 
   // --- Discord -------------------------------------------------------------------
   router.post('/discord/sync-roles', asyncHandler(async (_req, res) => {
-    res.json({ updated: await syncAllRankRoles() });
+    const ranks = await syncAllRankRoles();
+    const others = await syncTeamAndBadgeRoles();
+    res.json({ updated: ranks + others });
   }));
 
   return router;

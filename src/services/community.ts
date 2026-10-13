@@ -213,6 +213,43 @@ export async function onBadgesChanged(userId: string, before: string[], after: s
   }
 }
 
+/**
+ * Rattrapage : rôles d'équipe (staff, arbitre), de badges et « MVP du mois » pour tous les
+ * joueurs concernés, sans message privé (au démarrage et depuis l'administration). Ajoute
+ * seulement ce que le site indique ; ne retire jamais un rôle posé à la main.
+ */
+export async function syncTeamAndBadgeRoles(): Promise<number> {
+  if (!discordEnabled) return 0;
+  let updated = 0;
+  try {
+    const [{ data: team }, { data: profiles }, { data: mvp }] = await Promise.all([
+      supabase.from('users').select('id, role').in('role', ['admin', 'staff', 'arbitre']),
+      supabase.from('cod_profiles').select('user_id, badges').overlaps('badges', BADGE_ROLES),
+      supabase.from('cod_monthly_mvp').select('user_id').order('month', { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    for (const member of (team ?? []) as { id: string; role: Role }[]) {
+      await setRole(member.id, member.role === 'arbitre' ? 'ARBITRE' : 'STAFF', true);
+      updated += 1;
+      await pause(250);
+    }
+    for (const profile of (profiles ?? []) as { user_id: string; badges: string[] }[]) {
+      for (const badge of BADGE_ROLES.filter((item) => profile.badges.includes(item))) {
+        await setRole(profile.user_id, badge, true);
+        await pause(250);
+      }
+      updated += 1;
+    }
+    const mvpId = (mvp as { user_id?: string } | null)?.user_id;
+    if (mvpId) {
+      await setRole(mvpId, 'MVP', true);
+      updated += 1;
+    }
+  } catch (error) {
+    console.warn('[discord] rattrapage des rôles d’équipe et de badges impossible', (error as Error).message);
+  }
+  return updated;
+}
+
 /** Nouveau MVP du mois : il prend le rôle, le MVP du mois précédent le rend. */
 export async function onMonthlyMvp(userId: string, month: string): Promise<void> {
   await setRole(userId, 'MVP', true);
