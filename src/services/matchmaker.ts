@@ -3,6 +3,8 @@
  * groupes qui formeront deux équipes complètes.
  *
  * Règles :
+ *   - les joueurs sont choisis dans l'ordre d'arrivée (findMatch) ; leur répartition
+ *     entre les deux équipes est ensuite entièrement tirée au sort (randomSplit) ;
  *   - un groupe (solo, duo, trio…) n'est jamais séparé : tous ses membres
  *     jouent dans la même équipe ;
  *   - le groupe le plus ancien de la file est toujours servi en premier. S'il est
@@ -92,6 +94,41 @@ export function findMatch(queue: QueueGroup[], teamSize: number, options: Option
     if (steps > maxSteps) return null;
   }
   return null;
+}
+
+/**
+ * Répartition tirée au sort : parmi toutes les façons de partager les groupes choisis
+ * en deux équipes complètes (sans jamais séparer un groupe), en prend une au hasard,
+ * avec la même chance pour chacune. L'ordre des groupes dans chaque équipe est aussi
+ * mélangé (le premier joueur de l'équipe A est l'hôte de la partie).
+ * random : générateur dans [0, 1[ (remplaçable dans les tests).
+ */
+export function randomSplit(proposal: MatchProposal, teamSize: number, random: () => number = Math.random): MatchProposal {
+  const groups = [...proposal.teamA, ...proposal.teamB];
+  // Au plus 10 groupes (5v5 en solos) : 1 024 combinaisons, examinées instantanément.
+  const splits: number[] = [];
+  for (let mask = 0; mask < 1 << groups.length; mask += 1) {
+    let size = 0;
+    groups.forEach((group, index) => {
+      if (mask & (1 << index)) size += group.members.length;
+    });
+    if (size === teamSize) splits.push(mask);
+  }
+  if (splits.length === 0) return proposal;
+
+  const mask = splits[Math.floor(random() * splits.length)] ?? splits[0]!;
+  const shuffle = (list: QueueGroup[]) => {
+    const copy = [...list];
+    for (let i = copy.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(random() * (i + 1));
+      [copy[i], copy[j]] = [copy[j]!, copy[i]!];
+    }
+    return copy;
+  };
+  return {
+    teamA: shuffle(groups.filter((_, index) => mask & (1 << index))),
+    teamB: shuffle(groups.filter((_, index) => !(mask & (1 << index)))),
+  };
 }
 
 /** Membres d'une liste de groupes, dans l'ordre. */

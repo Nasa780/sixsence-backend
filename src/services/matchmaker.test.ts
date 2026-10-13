@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { findMatch, membersOf, type QueueGroup } from './matchmaker.js';
+import { findMatch, membersOf, randomSplit, type QueueGroup } from './matchmaker.js';
 
 /** Construit une file : tailles des groupes dans l'ordre d'arrivée. */
 function queue(...sizes: number[]): QueueGroup[] {
@@ -147,5 +147,49 @@ describe('findMatch', () => {
   it('1v1 de test', () => {
     check(queue(1, 1), 1);
     assert.equal(findMatch(queue(1), 1), null);
+  });
+});
+
+describe('randomSplit', () => {
+  /** Répartition sous forme lisible : « g0+g3|g1+g2 » (équipes triées, côtés confondus). */
+  const key = (split: { teamA: QueueGroup[]; teamB: QueueGroup[] }) =>
+    [ids(split.teamA).join('+'), ids(split.teamB).join('+')].sort().join('|');
+
+  it('équipes toujours complètes, groupes jamais séparés, mêmes joueurs', () => {
+    for (const [sizes, teamSize] of [
+      [[1, 1, 1, 1], 2],
+      [[2, 1, 1], 2],
+      [[3, 1, 1, 1], 3],
+      [[2, 2, 1, 1, 1, 1], 4],
+      [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1], 5],
+      [[4, 1, 2, 3], 5],
+    ] as Array<[number[], number]>) {
+      const chosen = check(queue(...sizes), teamSize);
+      for (let round = 0; round < 200; round += 1) {
+        const split = randomSplit(chosen, teamSize);
+        assert.equal(membersOf(split.teamA).length, teamSize);
+        assert.equal(membersOf(split.teamB).length, teamSize);
+        assert.deepEqual([...ids(split.teamA), ...ids(split.teamB)].sort(), [...ids(chosen.teamA), ...ids(chosen.teamB)].sort());
+      }
+    }
+  });
+
+  it("le hasard ne suit pas l'ordre d'arrivée : toutes les répartitions sortent, à parts égales", () => {
+    // 4 solos en 2v2 : 3 répartitions possibles (g0 avec g1, g2 ou g3).
+    const chosen = check(queue(1, 1, 1, 1), 2);
+    const counts = new Map<string, number>();
+    for (let round = 0; round < 3000; round += 1) {
+      const k = key(randomSplit(chosen, 2));
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    assert.equal(counts.size, 3);
+    for (const count of counts.values()) assert.ok(count > 800 && count < 1200, `répartition déséquilibrée : ${count}/3000`);
+  });
+
+  it("le côté (équipe 1, qui fournit l'hôte) est aussi tiré au sort", () => {
+    const chosen = check(queue(1, 1, 1, 1), 2);
+    const hosts = new Set<string>();
+    for (let round = 0; round < 500; round += 1) hosts.add(membersOf(randomSplit(chosen, 2).teamA)[0]!);
+    assert.equal(hosts.size, 4, 'chacun des 4 joueurs peut être hôte');
   });
 });
