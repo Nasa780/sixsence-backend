@@ -10,7 +10,9 @@ import { pushToUsers } from './push.js';
  *   - résultat contesté : salon de l'équipe SixSence et équipe qui a déclaré ;
  *   - décision de l'équipe (vainqueur ou annulation) : tous les joueurs ;
  *   - match non accepté : avertissement ou exclusion du joueur absent ;
- *   - fin du match : points gagnés ou perdus de chaque joueur.
+ *   - fin du match : points gagnés ou perdus de chaque joueur ;
+ *   - match abandonné (aucun résultat déclaré à temps) : tous les joueurs ;
+ *   - relance de l'équipe pour ce qui attend depuis plus de 2 h.
  * Tout est « au mieux » : une erreur n'empêche jamais le match de se dérouler.
  */
 
@@ -81,7 +83,20 @@ export async function noticeMatchMissed(userId: string, bannedUntil: string | nu
       ? "Tu n'as pas accepté le match : il est annulé."
       : `Tu n'as pas accepté le match : il est annulé et tu es exclu de la file jusqu'à ${hour(bannedUntil)}.`
     : "Tu n'as pas accepté le match : il est annulé. Avertissement : au prochain oubli dans les 24 h, tu seras exclu 15 min.";
-  await pushToUsers([userId], { title: 'Match annulé', body: text, url: '/cod/ranked', tag: 'file' });
+  await Promise.all([
+    pushToUsers([userId], { title: 'Match annulé', body: text, url: '/cod/ranked', tag: 'file' }),
+    dm([userId], `**Match annulé** — ${text}\nRèglement : ${config.siteUrl}/reglement`),
+  ]);
+}
+
+/** Match annulé faute de résultat déclaré à temps. */
+export async function noticeMatchAbandoned(match: CodMatch): Promise<void> {
+  const hours = Math.round(config.cod.cancelMinutes / 60);
+  const text = `Aucun résultat n'a été déclaré dans les ${hours} h : le match est annulé, aucun point ne bouge.`;
+  await Promise.all([
+    pushToUsers(players(match), { title: 'Match annulé', body: text, url: `/cod/match/${match.id}`, tag: `match-${match.id}` }),
+    dm(players(match), `**Match annulé** — ${title(match)}\n${text}\n${matchUrl(match)}`),
+  ]);
 }
 
 /** Fin du match : chaque joueur reçoit son résultat, ses points et son nouveau total. */
@@ -102,4 +117,30 @@ export async function noticeMatchFinished(match: CodMatch): Promise<void> {
       });
     }),
   );
+}
+
+const REMINDER_HOURS = 2;
+
+/**
+ * Relance de l'équipe : contestations, demandes d'arbitrage et signalements en attente depuis
+ * plus de 2 h. Un seul message toutes les 2 h au plus (app_claim), et rien s'il n'y a rien.
+ */
+export async function remindStaff(now = Date.now()): Promise<void> {
+  const before = new Date(now - REMINDER_HOURS * 60 * 60_000).toISOString();
+  const count = async (query: PromiseLike<{ count: number | null }>) => (await query).count ?? 0;
+  const [disputes, arbitrations, reports] = await Promise.all([
+    count(supabase.from('cod_matches').select('id', { count: 'exact', head: true }).eq('status', 'disputed').lt('reported_at', before)),
+    count(supabase.from('cod_arbitration_requests').select('id', { count: 'exact', head: true }).eq('status', 'open').lt('created_at', before)),
+    count(supabase.from('cod_player_reports').select('id', { count: 'exact', head: true }).eq('status', 'open').lt('created_at', before)),
+  ]);
+  if (disputes + arbitrations + reports === 0) return;
+  const slot = String(Math.floor(now / (REMINDER_HOURS * 60 * 60_000)));
+  const { data: claimed } = await supabase.rpc('app_claim', { p_key: 'staff_reminder', p_value: slot });
+  if (!claimed) return;
+  const parts = [
+    disputes ? `${disputes} contestation${disputes > 1 ? 's' : ''} (${config.siteUrl}/admin?onglet=disputes)` : '',
+    arbitrations ? `${arbitrations} demande${arbitrations > 1 ? 's' : ''} d'arbitrage (${config.siteUrl}/admin?onglet=arbitrages)` : '',
+    reports ? `${reports} signalement${reports > 1 ? 's' : ''} (${config.siteUrl}/admin?onglet=signalements)` : '',
+  ].filter(Boolean);
+  await notifyStaff(`⏰ **En attente depuis plus de ${REMINDER_HOURS} h**\n${parts.map((part) => `• ${part}`).join('\n')}`);
 }

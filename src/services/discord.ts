@@ -212,5 +212,6 @@ async function sweepOnce(): Promise<void> {
 
     await supabase.from('cod_matches').update({ discord_done: true }).eq('id', match.id);
     if (match.status === 'completed') bus.emit('match:finalized', match);
+    if (match.status === 'cancelled' && match.cancel_reason === 'abandoned' && recent) bus.emit('match:abandoned', match);
   }
 }

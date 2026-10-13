@@ -6,7 +6,7 @@ import { STAFF_BADGES, overview, parseBadges, parseEventPatch, parseFounder, par
 import { createEvent, parseNewEvent } from '../services/gtaEvents.js';
 import { listDisputes, resolveMatch } from '../services/matches.js';
 import { closeCase, listForAdmin } from '../services/moderation.js';
-import { announceEventCancelled, announceNewEvent, announceSeasonClosed, syncAllRankRoles } from '../services/community.js';
+import { announceEventCancelled, announceNewEvent, announceSeasonClosed, onBadgesChanged, onTeamRoleChanged, syncAllRankRoles } from '../services/community.js';
 import { applySanction, liftSanction, listSanctions } from '../services/sanctions.js';
 import { supabase } from '../supabase.js';
 
@@ -133,7 +133,10 @@ export function adminRouter(): Router {
 
   router.post('/players/:id/badges', asyncHandler(async (req, res) => {
     const badges = parseBadges(req.body);
-    unwrap(await supabase.from('cod_profiles').update({ badges }).eq('user_id', uuidParam(req, 'id')));
+    const id = uuidParam(req, 'id');
+    const { data: before } = await supabase.from('cod_profiles').select('badges').eq('user_id', id).maybeSingle();
+    unwrap(await supabase.from('cod_profiles').update({ badges }).eq('user_id', id));
+    void onBadgesChanged(id, ((before as { badges?: string[] } | null)?.badges ?? []), badges);
     res.json({ badges });
   }));
 
@@ -144,7 +147,9 @@ export function adminRouter(): Router {
     if (id === currentUser(res).id && role !== 'admin') {
       throw new HttpError(400, 'INVALID_INPUT', 'Tu ne peux pas retirer ton propre rôle administrateur.');
     }
+    const { data: before } = await supabase.from('users').select('role').eq('id', id).maybeSingle();
     unwrap(await supabase.from('users').update({ role }).eq('id', id));
+    void onTeamRoleChanged(id, ((before as { role?: Role } | null)?.role ?? 'member'), role);
     res.json({ role });
   }));
 

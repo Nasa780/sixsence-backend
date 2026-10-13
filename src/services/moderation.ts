@@ -1,5 +1,7 @@
+import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
+import { dm } from './discord.js';
 
 /**
  * Vote du MVP, demandes d'arbitrage et signalements de joueurs.
@@ -243,6 +245,14 @@ export async function closeCase(table: Table, id: unknown, adminId: string, body
       .maybeSingle(),
   );
   if (!row) throw new HttpError(404, 'NOT_FOUND', 'Élément introuvable.');
+  if (table === 'cod_arbitration_requests' && !reopened) {
+    const request = row as ArbitrationRequest;
+    void dm(
+      [request.user_id],
+      `🛡️ **Ta demande d’arbitrage a été traitée** — ${input.status === 'resolved' ? 'Traitée' : 'Sans suite'}` +
+        `${resolution ? `\nNote de l’équipe : ${resolution}` : ''}\n${config.siteUrl}/cod/match/${request.match_id}`,
+    );
+  }
   return row;
 }
 
