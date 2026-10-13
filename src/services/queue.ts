@@ -3,7 +3,7 @@ import { config, findFormat, type QueueFormat } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { bus, type CodMatch, type ReadyCheckFailure } from '../events.js';
 import { supabase } from '../supabase.js';
-import { findMatch, membersOf, type QueueGroup } from './matchmaker.js';
+import { findMatch, membersOf, randomSplit, type QueueGroup } from './matchmaker.js';
 import { getPartyOf, type Party } from './parties.js';
 import { expiresAt, queueTimeouts, type TimeoutRules } from './queuePolicy.js';
 
@@ -267,13 +267,13 @@ async function readGroups(format: QueueFormat): Promise<QueueGroup[]> {
 export async function runMatchmaking(format: QueueFormat): Promise<void> {
   // Garde-fou : on ne boucle jamais indéfiniment, même en cas de comportement inattendu.
   for (let round = 0; round < 20; round += 1) {
-    const proposal = findMatch(await readGroups(format), format.teamSize);
-    if (!proposal) return;
+    const chosen = findMatch(await readGroups(format), format.teamSize);
+    if (!chosen) return;
 
-    // Côté (équipe 1 / équipe 2) tiré au sort : l'équipe 1 fournit l'hôte de la partie.
-    const swap = Math.random() < 0.5;
-    const teamA = membersOf(swap ? proposal.teamB : proposal.teamA);
-    const teamB = membersOf(swap ? proposal.teamA : proposal.teamB);
+    // Joueurs choisis dans l'ordre d'arrivée ; équipes, côtés et hôte tirés au sort.
+    const proposal = randomSplit(chosen, format.teamSize);
+    const teamA = membersOf(proposal.teamA);
+    const teamB = membersOf(proposal.teamB);
 
     const created = unwrap(
       await supabase.rpc('cod_create_group_match', {
