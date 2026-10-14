@@ -20,7 +20,7 @@ import { pushToUsers } from './push.js';
 
 /**
  * Cartes de visite : statistiques de carrière, déblocage (définitif), retrait de Partenaire
- * et Staff 6 avec le statut, carte équipée (cod_profiles.calling_card).
+ * et Staff avec le statut, carte équipée (cod_profiles.calling_card).
  * Nouvelle carte : notification push (regroupée) ; Épique ou Légendaire : message privé
  * Discord. Aucune annonce publique. L'attribution rétroactive (silent) ne prévient personne.
  */
@@ -133,7 +133,7 @@ export function forgetSeasons(): void {
 }
 
 /**
- * Met à jour les cartes d'un joueur : ajoute celles méritées, retire Partenaire / Staff 6
+ * Met à jour les cartes d'un joueur : ajoute celles méritées, retire Partenaire / Staff
  * si le statut est perdu (carte équipée remplacée par la carte par défaut).
  */
 export async function syncCards(userId: string, { silent = false } = {}): Promise<{ stats: CardStats & { calling_card: string }; added: string[] }> {

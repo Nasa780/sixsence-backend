@@ -4,7 +4,7 @@
  *
  * Familles : par défaut, rangs (pic atteint), succès, saison (3 par saison, exclusives),
  * MVP (MVP du mois : une carte par mois, regroupées ; MVP ×10), communauté, GTA 6.
- * Une carte obtenue est définitive, sauf Partenaire et Staff 6 (retirées avec le badge ou le rôle).
+ * Une carte obtenue est définitive, sauf Partenaire et Staff (retirées avec le badge ou le rôle).
  */
 
 export type Rarity = 'commune' | 'rare' | 'epique' | 'legendaire';
@@ -109,7 +109,7 @@ export const STATIC_CARDS: CardDef[] = [
   { key: 'fondateur', family: 'Communauté', name: 'Fondateur', condition: 'Membre fondateur', rarity: 'legendaire', exclusive: true, eligible: (s) => s.badges.includes('founder') },
   { key: 'beta', family: 'Communauté', name: 'Bêta-testeur', condition: 'A testé la bêta', rarity: 'rare', exclusive: true, eligible: (s) => s.badges.includes('beta') },
   { key: 'partenaire', family: 'Communauté', name: 'Partenaire', condition: 'Partenaire SixSence', rarity: 'rare', removable: true, eligible: (s) => s.badges.includes('partner') },
-  { key: 'staff-6', family: 'Communauté', name: 'Staff 6', condition: "Membre de l'équipe", rarity: 'rare', removable: true, eligible: (s) => s.team },
+  { key: 'staff-6', family: 'Communauté', name: 'Staff', condition: "Membre de l'équipe", rarity: 'rare', removable: true, eligible: (s) => s.team },
   { key: 'premiere-viree', family: 'GTA 6', name: 'Première virée', condition: '1 événement GTA 6', rarity: 'commune', ...count((s) => s.gtaEvents, 1) },
   { key: 'habitue', family: 'GTA 6', name: 'Habitué', condition: '5 événements GTA 6', rarity: 'rare', ...count((s) => s.gtaEvents, 5) },
 ];

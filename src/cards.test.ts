@@ -61,7 +61,7 @@ describe('cartes de visite', () => {
     for (const key of ['fondateur', 'beta', 'partenaire', 'staff-6', MVP_MONTH_CARD, 'mvp-10', 'premiere-viree', 'habitue']) assert.ok(keys.includes(key), key);
   });
 
-  it('Partenaire et Staff 6 sont retirées avec le statut, pas les autres', () => {
+  it('Partenaire et Staff sont retirées avec le statut, pas les autres', () => {
     assert.deepEqual(revokedKeys(['partenaire', 'staff-6', 'fondateur', 'rang-or'], stats({ peak: 0 })), ['partenaire', 'staff-6']);
     assert.deepEqual(revokedKeys(['partenaire'], stats({ badges: ['partner'] })), []);
   });
