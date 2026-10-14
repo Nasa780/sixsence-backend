@@ -8,6 +8,7 @@ import { noticeResultDisputed, noticeResultReported } from '../services/matchNot
 import { ARBITRATION_REASONS, REPORT_REASONS, myArbitrations, reportPlayer, requestArbitration, usernameOf, voteMvp } from '../services/moderation.js';
 import { supabase } from '../supabase.js';
 import { addProof, confirmMatch, getMatch, postMessage, readyMatch, reportMatch, resolveMatch } from '../services/matches.js';
+import { equipCard, markCardsSeen, myCards } from '../services/cards.js';
 import { createParty, getPartyOf, joinParty, kickMember, leaveParty, previewInvite, setPartyFormat } from '../services/parties.js';
 import { getQueueState, getQueueSummaries, joinQueue, leaveQueue, stayInQueue } from '../services/queue.js';
 import { getSiteStats } from '../services/stats.js';
@@ -287,6 +288,30 @@ export function codRouter(hub: QueueHub): Router {
           `${config.siteUrl}/cod/match/${matchId} · ${config.siteUrl}/admin?onglet=arbitrages`,
       );
       res.status(201).json({ request });
+    }),
+  );
+
+  // --- Cartes de visite ------------------------------------------------------------
+  router.get(
+    '/cards',
+    requireAuth,
+    asyncHandler(async (_req, res) => {
+      res.json(await myCards(currentUser(res).id));
+    }),
+  );
+  router.post(
+    '/cards/equip',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      res.json(await equipCard(currentUser(res).id, req.body));
+    }),
+  );
+  router.post(
+    '/cards/seen',
+    requireAuth,
+    asyncHandler(async (_req, res) => {
+      await markCardsSeen(currentUser(res).id);
+      res.json({ seen: true });
     }),
   );
 

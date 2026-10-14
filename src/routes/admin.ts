@@ -8,6 +8,7 @@ import { listDisputes, resolveMatch } from '../services/matches.js';
 import { closeCase, listForAdmin } from '../services/moderation.js';
 import { announceEventCancelled, announceNewEvent, announceSeasonClosed, onBadgesChanged, onTeamRoleChanged, syncAllRankRoles, syncTeamAndBadgeRoles } from '../services/community.js';
 import { applySanction, liftSanction, listSanctions } from '../services/sanctions.js';
+import { forgetSeasons, syncAllCards, syncCards } from '../services/cards.js';
 import { supabase } from '../supabase.js';
 
 /**
@@ -137,6 +138,7 @@ export function adminRouter(): Router {
     const { data: before } = await supabase.from('cod_profiles').select('badges').eq('user_id', id).maybeSingle();
     unwrap(await supabase.from('cod_profiles').update({ badges }).eq('user_id', id));
     void onBadgesChanged(id, ((before as { badges?: string[] } | null)?.badges ?? []), badges);
+    void syncCards(id).catch(() => {});
     res.json({ badges });
   }));
 
@@ -150,6 +152,7 @@ export function adminRouter(): Router {
     const { data: before } = await supabase.from('users').select('role').eq('id', id).maybeSingle();
     unwrap(await supabase.from('users').update({ role }).eq('id', id));
     void onTeamRoleChanged(id, ((before as { role?: Role } | null)?.role ?? 'member'), role);
+    void syncCards(id).catch(() => {});
     res.json({ role });
   }));
 
@@ -174,8 +177,10 @@ export function adminRouter(): Router {
     const nextName = (req.body as { nextName?: unknown } | undefined)?.nextName;
     const archived = unwrap(await supabase.rpc('cod_close_season', { p_next_name: typeof nextName === 'string' ? nextName : '' })) as number;
     void announceSeasonClosed(archived, String(nextName).trim());
-    // Points remis à zéro : les rangs Discord suivent.
+    // Points remis à zéro : les rangs Discord suivent ; cartes de la saison attribuées.
     void syncAllRankRoles();
+    forgetSeasons();
+    void syncAllCards().catch(() => {});
     res.json({ archived });
   }));
 

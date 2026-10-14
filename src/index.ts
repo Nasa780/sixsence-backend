@@ -20,6 +20,8 @@ import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQu
 import { getSiteStats } from './services/stats.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
 import { noticeMatchAbandoned, noticeMatchFinished, noticeMatchMissed, remindStaff } from './services/matchNotices.js';
+import { syncAllCards, syncCards } from './services/cards.js';
+import { supabase } from './supabase.js';
 import { QueueHub } from './ws/hub.js';
 
 /**
@@ -73,6 +75,7 @@ bus.on('match:finalized', (match) => {
   void syncRankRoles([...match.team_a, ...match.team_b]);
   void noticeMatchFinished(match);
   void announcePromotions(match);
+  for (const userId of [...match.team_a, ...match.team_b]) void syncCards(userId).catch(() => {});
 });
 bus.on('match:abandoned', (match) => void noticeMatchAbandoned(match));
 bus.on('queue:user', async (userId) => {
@@ -250,6 +253,7 @@ const awardMvp = () =>
       console.log(`[mvp] MVP du mois ${award.month.slice(0, 7)} : ${award.userId}`);
       await announceMonthlyMvp(await usernameOf(award.userId), award.month);
       await onMonthlyMvp(award.userId, award.month);
+      await syncCards(award.userId);
     })
     .catch((error) => console.error('[mvp]', error));
 void awardMvp();
@@ -259,6 +263,16 @@ const reminderTimer = setInterval(() => {
   void sendEventReminders();
   void welcomeNewPlayers();
 }, 5 * 60_000);
+// Cartes de visite : attribution rétroactive une seule fois (sans notification), puis
+// rattrapage toutes les heures (événements GTA terminés, etc.).
+setTimeout(() => {
+  void (async () => {
+    const { data: first } = await supabase.rpc('app_claim', { p_key: 'cards_backfill', p_value: 'v1' });
+    const added = await syncAllCards({ silent: Boolean(first) });
+    if (added) console.log(`[cartes] ${added} carte(s) attribuée(s)${first ? ' (attribution rétroactive)' : ''}`);
+  })().catch((error) => console.warn('[cartes]', (error as Error).message));
+}, 30_000);
+const cardsTimer = setInterval(() => void syncAllCards().catch(() => {}), 60 * 60_000);
 // Top de la semaine (lundi 10 h, heure de Paris) et relance de l'équipe (attente de plus de 2 h), vérifiés toutes les 15 minutes.
 const weeklyTimer = setInterval(() => {
   void postWeeklyTop();
@@ -285,6 +299,7 @@ function shutdown(signal: string): void {
   console.log(`[boot] ${signal} reçu, arrêt en cours`);
   clearInterval(sweeper);
   clearInterval(weeklyTimer);
+  clearInterval(cardsTimer);
   clearInterval(readyTimer);
   clearInterval(queueTimer);
   clearInterval(discordTimer);
