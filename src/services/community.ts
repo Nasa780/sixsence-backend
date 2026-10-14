@@ -16,7 +16,7 @@ import type { QueueSummary } from './queue.js';
  *     - « Player COD » dès le premier match classé, « Player GTA » dès la première inscription à un événement.
  *     Les rôles manquants sont créés par le bot (droit « Gérer les rôles » requis ; le rôle
  *     du bot doit être placé au-dessus de ces rôles dans la liste des rôles du serveur).
- *     - « Staff 6 » / « Arbitre SixSence » selon le rôle sur le site (message privé de bienvenue) ;
+ *     - « Staff 6 » / « Arbitre 6 » selon le rôle sur le site (message privé de bienvenue) ;
  *     - badges : « Fondateur », « Bêta-testeur », « Partenaire », et « MVP du mois » (dernier MVP).
  *     Ces rôles ne sont ajoutés ou retirés que lors d'un changement fait sur le site.
  *   Annonces
@@ -49,7 +49,7 @@ const COMMUNITY_ROLES = [
 /** Rôles d'équipe et de badges (ni affichés à part, ni mentionnables). */
 const EXTRA_ROLES = [
   { key: 'STAFF', name: 'Staff 6', formerNames: ['Staff SixSence'], color: 0xd4af37 },
-  { key: 'ARBITRE', name: 'Arbitre SixSence', color: 0x60a5fa },
+  { key: 'ARBITRE', name: 'Arbitre 6', formerNames: ['Arbitre SixSence'], color: 0x60a5fa },
   { key: 'founder', name: 'Fondateur', color: 0xf5d77a },
   { key: 'beta', name: 'Bêta-testeur', color: 0x94a3b8 },
   { key: 'partner', name: 'Partenaire', color: 0xff9a5c },
