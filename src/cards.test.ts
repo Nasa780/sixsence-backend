@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DEFAULT_CARD, MVP_MONTH_CARD, STATIC_CARDS, canEquip, eligibleKeys, longestStreak, mvpOf, revokedKeys, seasonCards, type CardStats } from './cards.js';
+import { DEFAULT_CARD, MVP_MONTH_CARD, STATIC_CARDS, canEquip, eligibleKeys, longestStreak, mvpOf, revokedKeys, seasonCards, seasonRankKey, type CardStats } from './cards.js';
 
 const base: CardStats = {
   peak: 0,
@@ -20,9 +20,9 @@ const base: CardStats = {
 const stats = (patch: Partial<CardStats>): CardStats => ({ ...base, ...patch });
 
 describe('cartes de visite', () => {
-  it('catalogue : 26 cartes permanentes (case MVP du mois comprise) + 3 par saison = 29', () => {
+  it('catalogue : 26 cartes permanentes (case MVP du mois comprise) + 12 par saison = 38', () => {
     assert.equal(STATIC_CARDS.length, 26);
-    assert.equal(STATIC_CARDS.length + seasonCards(1).length, 29);
+    assert.equal(STATIC_CARDS.length + seasonCards(1).length, 38);
     assert.ok(STATIC_CARDS.some((card) => card.key === MVP_MONTH_CARD));
     assert.equal(new Set(STATIC_CARDS.map((card) => card.key)).size, STATIC_CARDS.length);
   });
@@ -51,9 +51,20 @@ describe('cartes de visite', () => {
   });
 
   it('cartes de saison : participant (10 matchs), top 10, champion', () => {
-    const keys = eligibleKeys(stats({ seasons: [{ id: 1, position: 1, played: 30 }, { id: 2, position: 14, played: 9 }] }));
+    const keys = eligibleKeys(stats({ seasons: [{ id: 1, position: 1, played: 30, peak: 2400 }, { id: 2, position: 14, played: 9, peak: 700 }] }));
     assert.ok(keys.includes('s1-participant') && keys.includes('s1-top10') && keys.includes('s1-champion'));
     assert.ok(!keys.includes('s2-participant') && !keys.includes('s2-top10'));
+  });
+
+  it('carte de rang de saison : seulement le plus haut rang atteint pendant la saison', () => {
+    const keys = eligibleKeys(stats({ seasons: [{ id: 1, position: 3, played: 40, peak: 1350 }, { id: 2, position: 50, played: 2, peak: 120 }, { id: 3, position: null, played: 0, peak: 0 }] }));
+    assert.ok(keys.includes('s1-rang-diamant'));
+    for (const key of ['s1-rang-platine', 's1-rang-maitre', 's1-rang-bronze']) assert.ok(!keys.includes(key), key);
+    assert.ok(keys.includes('s2-rang-bronze'));
+    assert.ok(!keys.some((key) => key.startsWith('s3-rang-')));
+    assert.equal(seasonRankKey(2999), 'champion');
+    assert.equal(seasonRankKey(3000), 'legende');
+    assert.equal(seasonRankKey(0), 'bronze');
   });
 
   it('communauté, MVP et GTA', () => {
