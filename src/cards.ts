@@ -2,7 +2,8 @@
  * Cartes de visite : catalogue et règles d'obtention (fonctions pures, testées dans
  * cards.test.ts). Le site dessine les cartes (src/lib/cards.js) à partir des mêmes clés.
  *
- * Familles : par défaut, rangs (pic atteint), succès, saison (3 par saison, exclusives),
+ * Familles : par défaut, rangs (pic atteint), succès, saison (participant, top 10, champion et
+ * carte du plus haut rang atteint pendant la saison ; exclusives),
  * MVP (MVP du mois : une carte par mois, regroupées ; MVP ×10), communauté, GTA 6.
  * Une carte obtenue est définitive, sauf Partenaire et Staff (retirées avec le badge ou le rôle).
  */
@@ -23,8 +24,8 @@ export interface CardStats {
   mvpMatches: number;
   /** Mois où il a été MVP du mois (« 2026-10 »). */
   mvpMonths: string[];
-  /** Saisons archivées : classement final et matchs joués. */
-  seasons: { id: number; position: number | null; played: number }[];
+  /** Saisons archivées : classement final, matchs joués et pic de points de la saison. */
+  seasons: { id: number; position: number | null; played: number; peak: number }[];
   badges: string[];
   /** Membre de l'équipe SixSence (admin, staff ou arbitre). */
   team: boolean;
@@ -114,7 +115,18 @@ export const STATIC_CARDS: CardDef[] = [
   { key: 'habitue', family: 'GTA 6', name: 'Habitué', condition: '5 événements GTA 6', rarity: 'rare', ...count((s) => s.gtaEvents, 5) },
 ];
 
-/** Les trois cartes d'une saison (exclusives, attribuées à la clôture). */
+/** Rangs des cartes de saison : Bronze puis les mêmes paliers que les cartes de rang. */
+const SEASON_RANKS = [{ name: 'Bronze', key: 'bronze', min: 0, rarity: 'commune' as Rarity }, ...RANK_CARDS];
+
+/** Rang (clé) correspondant à un total de points. */
+export function seasonRankKey(points: number): string {
+  return [...SEASON_RANKS].reverse().find((rank) => points >= rank.min)!.key;
+}
+
+/**
+ * Cartes d'une saison (exclusives, attribuées à la clôture) : participant, top 10, champion, et une
+ * carte par rang (« s<id>-rang-<rang> ») pour le plus haut rang atteint pendant la saison.
+ */
 export function seasonCards(seasonId: number): CardDef[] {
   const of = (stats: CardStats) => stats.seasons.find((season) => season.id === seasonId);
   return [
@@ -148,6 +160,18 @@ export function seasonCards(seasonId: number): CardDef[] {
       exclusive: true,
       eligible: (s) => of(s)?.position === 1,
     },
+    ...SEASON_RANKS.map((rank) => ({
+      key: `s${seasonId}-rang-${rank.key}`,
+      family: `Saison ${seasonId}`,
+      name: `${rank.name} S${seasonId}`,
+      condition: `Plus haut rang de la saison : ${rank.name}`,
+      rarity: rank.rarity,
+      exclusive: true,
+      eligible: (s: CardStats) => {
+        const season = of(s);
+        return Boolean(season && season.played > 0 && seasonRankKey(season.peak) === rank.key);
+      },
+    })),
   ];
 }
 

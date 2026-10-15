@@ -46,7 +46,7 @@ export async function computeStats(userId: string): Promise<CardStats & { callin
       .or(`team_a.cs.{${userId}},team_b.cs.{${userId}}`)
       .order('completed_at', { ascending: true })
       .limit(5000),
-    supabase.from('season_results').select('season_id, position, points, wins, losses').eq('user_id', userId),
+    supabase.from('season_results').select('season_id, position, points, peak_points, wins, losses').eq('user_id', userId),
     supabase.from('cod_monthly_mvp').select('month').eq('user_id', userId),
     supabase.from('gta_registrations').select('gta_events!inner(starts_at, ends_at, status)').eq('user_id', userId),
   ]);
@@ -66,7 +66,7 @@ export async function computeStats(userId: string): Promise<CardStats & { callin
     mvpMatches = [...byMatch.values()].filter((list) => mvpOf(list).includes(userId)).length;
   }
 
-  const seasonRows = (seasons.data ?? []) as { season_id: number; position: number | null; points: number; wins: number; losses: number }[];
+  const seasonRows = (seasons.data ?? []) as { season_id: number; position: number | null; points: number; peak_points: number | null; wins: number; losses: number }[];
   const now = Date.now();
   const gtaEvents = ((registrations.data ?? []) as unknown as { gta_events: { starts_at: string; ends_at: string | null; status: string } | null }[]).filter(
     (row) => row.gta_events && row.gta_events.status !== 'cancelled' && new Date(row.gta_events.ends_at ?? row.gta_events.starts_at).getTime() < now,
@@ -75,7 +75,7 @@ export async function computeStats(userId: string): Promise<CardStats & { callin
   const role = (user.data as { role?: string } | null)?.role ?? 'member';
 
   return {
-    peak: Math.max(p.peak_points ?? 0, p.points ?? 0, ...seasonRows.map((row) => row.points)),
+    peak: Math.max(p.peak_points ?? 0, p.points ?? 0, ...seasonRows.map((row) => Math.max(row.peak_points ?? 0, row.points))),
     wins: won.length,
     played: rows.length,
     bestStreak: longestStreak(results),
@@ -84,7 +84,8 @@ export async function computeStats(userId: string): Promise<CardStats & { callin
     soloWins: won.filter((match) => (match.group_sizes?.[userId] ?? 1) <= 1).length,
     mvpMatches,
     mvpMonths: ((mvpMonths.data ?? []) as { month: string }[]).map((row) => row.month.slice(0, 7)),
-    seasons: seasonRows.map((row) => ({ id: row.season_id, position: row.position, played: row.wins + row.losses })),
+    // Pic de la saison (archivé depuis la migration 0020) ; à défaut, les points de fin de saison.
+    seasons: seasonRows.map((row) => ({ id: row.season_id, position: row.position, played: row.wins + row.losses, peak: Math.max(row.peak_points ?? 0, row.points) })),
     badges: p.badges ?? [],
     team: role === 'admin' || role === 'staff' || role === 'arbitre',
     gtaEvents,
