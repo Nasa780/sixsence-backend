@@ -201,10 +201,11 @@ export async function reportPlayer(reporterId: string, body: unknown): Promise<P
 
 type Table = 'cod_arbitration_requests' | 'cod_player_reports';
 
-/** Liste pour l'administration, avec les pseudos (ouverts d'abord). */
-export async function listForAdmin(table: Table, status: unknown) {
+/** Liste pour l'administration, avec les pseudos (ouverts d'abord), éventuellement d'un seul match. */
+export async function listForAdmin(table: Table, status: unknown, matchId?: unknown) {
   let query = supabase.from(table).select('*').order('created_at', { ascending: false }).limit(100);
   if (status === 'open' || status === 'resolved' || status === 'rejected') query = query.eq('status', status);
+  if (typeof matchId === 'string' && /^[0-9a-f-]{36}$/i.test(matchId)) query = query.eq('match_id', matchId);
   const rows = (unwrap(await query) ?? []) as Record<string, unknown>[];
   const ids = new Set<string>();
   for (const row of rows) {
@@ -269,4 +270,17 @@ export async function openCounts(): Promise<{ arbitrations: number; reports: num
     supabase.from('cod_player_reports').select('id', { count: 'exact', head: true }).eq('status', 'open'),
   ]);
   return { arbitrations: arbitrations.count ?? 0, reports: reports.count ?? 0 };
+}
+
+/**
+ * Après une correction : les demandes d'arbitrage encore ouvertes de ce match sont classées
+ * « traitées » avec la décision en note (les joueurs ont déjà reçu le message de correction).
+ */
+export async function resolveOpenRequests(matchId: string, staffId: string, resolution: string): Promise<void> {
+  const { error } = await supabase
+    .from('cod_arbitration_requests')
+    .update({ status: 'resolved', resolution: resolution.slice(0, 500), resolved_by: staffId, resolved_at: new Date().toISOString() })
+    .eq('match_id', matchId)
+    .eq('status', 'open');
+  if (error) console.warn('[arbitrage] clôture des demandes impossible', error.message);
 }

@@ -15,7 +15,7 @@ export const MODERATORS: Role[] = ['admin', 'staff'];
 
 /** Rôles autorisés pour une route de /admin (chemin relatif : « /disputes »…). Le reste : admin. */
 export function rolesFor(method: string, path: string): Role[] {
-  if (path === '/overview' || path === '/disputes' || path.startsWith('/arbitrations') || /^\/matches\/[^/]+\/cancel$/.test(path)) {
+  if (path === '/overview' || path === '/disputes' || (method === 'GET' && path === '/matches') || path.startsWith('/arbitrations') || /^\/matches\/[^/]+\/cancel$/.test(path)) {
     return MATCH_REFEREES;
   }
   if (path.startsWith('/reports') || (method === 'GET' && path === '/players') || /^\/players\/[^/]+\/sanctions$/.test(path) || path.startsWith('/sanctions/')) {

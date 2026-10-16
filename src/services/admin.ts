@@ -168,3 +168,61 @@ export async function overview() {
     season: season.data ?? null,
   };
 }
+
+/**
+ * Matchs récents pour l'équipe (« Matchs » de /admin) : les 50 derniers, ou ceux d'un joueur
+ * (recherche par pseudo), avec les pseudos, la correction éventuelle et les demandes en attente.
+ */
+export async function recentMatches(query: string) {
+  let request = supabase
+    .from('cod_matches')
+    .select('id, status, map, mode, format, team_size, team_a, team_b, winner, points_changes, created_at, completed_at, cancel_reason, corrected_at, correction_action')
+    .order('created_at', { ascending: false })
+    .limit(50);
+  const term = query.trim().slice(0, 40).replace(/[%_,(){}]/g, '');
+  if (term) {
+    const found = (unwrap(await supabase.from('users').select('id').ilike('username', `%${term}%`).limit(20)) ?? []) as { id: string }[];
+    if (found.length === 0) return [];
+    const ids = found.map((user) => user.id).join(',');
+    request = request.or(`team_a.ov.{${ids}},team_b.ov.{${ids}}`);
+  }
+  const matches = (unwrap(await request) ?? []) as { id: string; team_a: string[]; team_b: string[] }[];
+  if (matches.length === 0) return [];
+
+  const playerIds = [...new Set(matches.flatMap((match) => [...match.team_a, ...match.team_b]))];
+  const [users, requests] = await Promise.all([
+    supabase.from('users').select('id, username').in('id', playerIds),
+    supabase.from('cod_arbitration_requests').select('match_id').eq('status', 'open').in('match_id', matches.map((match) => match.id)),
+  ]);
+  if (users.error) throw fromDbError(users.error);
+  if (requests.error) throw fromDbError(requests.error);
+  const names = Object.fromEntries(((users.data ?? []) as { id: string; username: string }[]).map((user) => [user.id, user.username]));
+  const open = new Map<string, number>();
+  for (const row of (requests.data ?? []) as { match_id: string }[]) open.set(row.match_id, (open.get(row.match_id) ?? 0) + 1);
+  return matches.map((match) => ({ ...match, names, openRequests: open.get(match.id) ?? 0 }));
+}
+
+/** Historique des corrections de matchs terminés (admin) : qui, quand, pourquoi, points avant et après. */
+export async function listCorrections() {
+  const rows = (unwrap(
+    await supabase
+      .from('cod_match_corrections')
+      .select('id, match_id, staff_id, action, previous_winner, new_winner, reason, points_before, points_after, created_at')
+      .order('created_at', { ascending: false })
+      .limit(100),
+  ) ?? []) as { match_id: string; staff_id: string | null; points_before: Record<string, number> | null }[];
+  if (rows.length === 0) return [];
+  const matchIds = [...new Set(rows.map((row) => row.match_id))];
+  const matches = (unwrap(await supabase.from('cod_matches').select('id, map, format, team_size, team_a, team_b').in('id', matchIds)) ?? []) as {
+    id: string;
+    team_a: string[];
+    team_b: string[];
+  }[];
+  const byMatch = new Map(matches.map((match) => [match.id, match]));
+  const ids = new Set<string>();
+  for (const row of rows) if (row.staff_id) ids.add(row.staff_id);
+  for (const match of matches) for (const id of [...match.team_a, ...match.team_b]) ids.add(id);
+  const users = (unwrap(await supabase.from('users').select('id, username').in('id', [...ids])) ?? []) as { id: string; username: string }[];
+  const names = Object.fromEntries(users.map((user) => [user.id, user.username]));
+  return rows.map((row) => ({ ...row, match: byMatch.get(row.match_id) ?? null, names }));
+}

@@ -8,7 +8,7 @@ import { syncCards } from './cards.js';
 import { syncRankRoles } from './community.js';
 import { correctionWindowHours } from './correctionPolicy.js';
 import { noticeMatchCorrected, noticeMatchResolved } from './matchNotices.js';
-import { mvpVotesOf } from './moderation.js';
+import { mvpVotesOf, resolveOpenRequests } from './moderation.js';
 
 /** Joueur tel qu'affiché dans la salle de match. */
 export interface MatchPlayer {
@@ -241,6 +241,7 @@ export async function correctMatch(matchId: string, staffId: string, role: Role,
   ) as CodMatch;
   bus.emit('match:closed');
   void noticeMatchCorrected(match, staffId);
+  void resolveOpenRequests(matchId, staffId, `Résultat corrigé : ${action === 'cancel' ? 'match annulé' : 'vainqueur inversé'}. ${reason.trim()}`);
   if (action === 'cancel') {
     const ids = [...match.team_a, ...match.team_b];
     void syncRankRoles(ids);

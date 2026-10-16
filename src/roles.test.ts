@@ -8,6 +8,10 @@ describe("droits sur l'administration", () => {
   it("l'arbitre tranche les matchs, et rien d'autre", () => {
     assert.equal(can('arbitre', 'GET', '/overview'), true);
     assert.equal(can('arbitre', 'GET', '/disputes'), true);
+    assert.equal(can('arbitre', 'GET', '/matches'), true);
+    assert.equal(can('arbitre', 'GET', '/corrections'), false);
+    assert.equal(can('staff', 'GET', '/corrections'), false);
+    assert.equal(can('admin', 'GET', '/corrections'), true);
     assert.equal(can('arbitre', 'GET', '/arbitrations'), true);
     assert.equal(can('arbitre', 'POST', '/arbitrations/12'), true);
     assert.equal(can('arbitre', 'POST', '/matches/3f2b1c9e-1111-2222-3333-444455556666/cancel'), true);
