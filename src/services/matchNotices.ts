@@ -12,6 +12,7 @@ import { pushToUsers } from './push.js';
  *   - match non accepté : avertissement ou exclusion du joueur absent ;
  *   - fin du match : points gagnés ou perdus de chaque joueur ;
  *   - match abandonné (aucun résultat déclaré à temps) : tous les joueurs ;
+ *   - résultat corrigé par l'équipe (match terminé) : tous les joueurs et salon de l'équipe ;
  *   - relance de l'équipe pour ce qui attend depuis plus de 2 h.
  * Tout est « au mieux » : une erreur n'empêche jamais le match de se dérouler.
  */
@@ -96,6 +97,28 @@ export async function noticeMatchAbandoned(match: CodMatch): Promise<void> {
   await Promise.all([
     pushToUsers(players(match), { title: 'Match annulé', body: text, url: `/cod/match/${match.id}`, tag: `match-${match.id}` }),
     dm(players(match), `**Match annulé** — ${title(match)}\n${text}\n${matchUrl(match)}`),
+  ]);
+}
+
+/**
+ * Résultat corrigé après validation (mauvais clic…) : tous les joueurs sont prévenus, et le salon de
+ * l'équipe garde une trace. Pour une inversion, les nouveaux points arrivent par la notification de fin
+ * de match (le match est revalidé).
+ */
+export async function noticeMatchCorrected(match: CodMatch, staffId: string): Promise<void> {
+  const staff = await usernameOf(staffId);
+  const reason = match.correction_reason ?? '';
+  const decision =
+    match.correction_action === 'cancel'
+      ? 'Le match est annulé : les points, victoires et défaites du match sont rendus.'
+      : `Victoire attribuée à l'${teamLabel(match.winner ?? 'A')} : les points sont recalculés.`;
+  const motif = reason ? `\nMotif : ${reason}` : '';
+  await Promise.all([
+    match.correction_action === 'cancel'
+      ? pushToUsers(players(match), { title: 'Résultat corrigé', body: `${title(match)} · match annulé, points rendus`, url: `/cod/match/${match.id}`, tag: `match-${match.id}` })
+      : Promise.resolve(),
+    dm(players(match), `🛡️ **Résultat corrigé par l'équipe SixSence** — ${title(match)}\n${decision}${motif}\n${matchUrl(match)}`),
+    notifyStaff(`🛠️ **Match corrigé** par ${staff} — ${title(match)}\n${decision}${motif}\n${matchUrl(match)}`),
   ]);
 }
 

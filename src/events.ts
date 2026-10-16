@@ -31,6 +31,11 @@ export interface CodMatch {
   discord_done: boolean;
   created_at: string;
   completed_at: string | null;
+  /** Correction par l'équipe après validation (0021). */
+  corrected_at?: string | null;
+  corrected_by?: string | null;
+  correction_reason?: string | null;
+  correction_action?: 'swap' | 'cancel' | null;
 }
 
 /** Vérification « Prêt ? » expirée : qui avait accepté, qui manquait. */

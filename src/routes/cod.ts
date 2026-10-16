@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { MATCH_REFEREES, currentUser, optionalAuth, requireAuth, requireRoles, viewerOf } from '../auth.js';
+import { MATCH_REFEREES, currentUser, optionalAuth, requireAuth, requireRoles, roleOf, viewerOf } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, asyncHandler, uuidParam } from '../errors.js';
 import { bus } from '../events.js';
@@ -7,7 +7,7 @@ import { notifyStaff } from '../services/discord.js';
 import { noticeResultDisputed, noticeResultReported } from '../services/matchNotices.js';
 import { ARBITRATION_REASONS, REPORT_REASONS, myArbitrations, reportPlayer, requestArbitration, usernameOf, voteMvp } from '../services/moderation.js';
 import { supabase } from '../supabase.js';
-import { addProof, confirmMatch, getMatch, postMessage, readyMatch, reportMatch, resolveMatch } from '../services/matches.js';
+import { addProof, confirmMatch, correctMatch, getMatch, postMessage, readyMatch, reportMatch, resolveMatch } from '../services/matches.js';
 import { equipCard, markCardsSeen, myCards } from '../services/cards.js';
 import { createParty, getPartyOf, joinParty, kickMember, leaveParty, previewInvite, setPartyFormat } from '../services/parties.js';
 import { getQueueState, getQueueSummaries, joinQueue, leaveQueue, stayInQueue } from '../services/queue.js';
@@ -39,6 +39,7 @@ import type { QueueHub } from '../ws/hub.js';
  *   POST /cod/matches/:id/confirm   confirmer ou contester  { accept: boolean }
  *   POST /cod/matches/:id/messages  écrire dans le chat     { body: string }
  *   POST /cod/matches/:id/resolve   arbitrage (admin, staff, arbitre) { winner: "A" | "B" | null }
+ *   POST /cod/matches/:id/correct   correction d'un match terminé (48 h, admin sans limite) { action: "swap" | "cancel", reason }
  */
 export function codRouter(hub: QueueHub): Router {
   const router = Router();
@@ -247,6 +248,19 @@ export function codRouter(hub: QueueHub): Router {
         throw new HttpError(400, 'INVALID_WINNER', 'Vainqueur invalide.');
       }
       res.json({ match: await resolveMatch(uuidParam(req, 'id'), winner) });
+    }),
+  );
+
+  router.post(
+    '/matches/:id/correct',
+    requireAuth,
+    requireRoles(...MATCH_REFEREES),
+    asyncHandler(async (req, res) => {
+      const body = (req.body ?? {}) as { action?: unknown; reason?: unknown };
+      if (body.action !== 'swap' && body.action !== 'cancel') throw new HttpError(400, 'INVALID_ACTION', 'Correction inconnue.');
+      if (typeof body.reason !== 'string' || body.reason.trim().length < 3) throw new HttpError(400, 'INVALID_REASON', 'Indique un motif.');
+      const staff = currentUser(res);
+      res.json({ match: await correctMatch(uuidParam(req, 'id'), staff.id, await roleOf(staff.id), body.action, body.reason) });
     }),
   );
 
