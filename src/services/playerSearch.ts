@@ -26,6 +26,8 @@ export interface SearchablePlayer {
   username: string;
   activisionId: string | null;
   points: number;
+  /** Date du dernier match (ms), 0 si aucun : tri quand rien n'est tapé. */
+  lastMatch?: number;
 }
 
 /**
@@ -45,11 +47,14 @@ export function matchScore(player: SearchablePlayer, query: string): number | nu
   return best;
 }
 
-/** Joueurs qui correspondent, les meilleurs d'abord (puis les plus de points, puis par pseudo). */
+/**
+ * Joueurs qui correspondent, les meilleurs d'abord (puis les plus de points, puis par pseudo).
+ * Sans recherche : les joueurs du dernier match d'abord (puis les plus de points).
+ */
 export function rankPlayers<T extends SearchablePlayer>(players: T[], query: string): T[] {
   return players
     .map((player) => ({ player, score: matchScore(player, query) }))
     .filter((entry): entry is { player: T; score: number } => entry.score !== null)
-    .sort((a, b) => a.score - b.score || b.player.points - a.player.points || a.player.username.localeCompare(b.player.username, 'fr'))
+    .sort((a, b) => a.score - b.score || (normalizeName(query) ? 0 : (b.player.lastMatch ?? 0) - (a.player.lastMatch ?? 0)) || b.player.points - a.player.points || a.player.username.localeCompare(b.player.username, 'fr'))
     .map((entry) => entry.player);
 }

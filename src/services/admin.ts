@@ -142,20 +142,28 @@ export const PLAYERS_PAGE = 50;
  * compte quelques milliers de comptes.
  */
 export async function searchPlayers(query: string, offset = 0) {
-  const [users, profiles] = await Promise.all([
+  const [users, profiles, matches] = await Promise.all([
     supabase.from('users').select('id, username, avatar_url, role, created_at').limit(10000),
     supabase.from('cod_profiles').select('user_id, points, wins, losses, badges, banned_until, activision_id').limit(10000),
+    // Dernier match de chaque joueur (les 1 000 derniers matchs suffisent pour le tri).
+    supabase.from('cod_matches').select('team_a, team_b, created_at').order('created_at', { ascending: false }).limit(1000),
   ]);
   if (users.error) throw fromDbError(users.error);
   if (profiles.error) throw fromDbError(profiles.error);
+  if (matches.error) throw fromDbError(matches.error);
+  const lastMatch = new Map<string, string>();
+  for (const match of (matches.data ?? []) as { team_a: string[]; team_b: string[]; created_at: string }[]) {
+    for (const id of [...match.team_a, ...match.team_b]) if (!lastMatch.has(id)) lastMatch.set(id, match.created_at);
+  }
   const byId = new Map(((profiles.data ?? []) as { user_id: string; points: number; activision_id: string | null }[]).map((profile) => [profile.user_id, profile]));
   const players = ((users.data ?? []) as { id: string; username: string }[]).map((user) => {
     const profile = byId.get(user.id) ?? null;
-    return { ...user, profile, activisionId: profile?.activision_id ?? null, points: profile?.points ?? 0 };
+    const last = lastMatch.get(user.id) ?? null;
+    return { ...user, profile, last_match_at: last, activisionId: profile?.activision_id ?? null, points: profile?.points ?? 0, lastMatch: last ? Date.parse(last) : 0 };
   });
   const ranked = rankPlayers(players, query.slice(0, 40));
   const start = Math.max(0, Math.floor(offset) || 0);
-  const page = ranked.slice(start, start + PLAYERS_PAGE).map(({ activisionId: _a, points: _p, ...player }) => player);
+  const page = ranked.slice(start, start + PLAYERS_PAGE).map(({ activisionId: _a, points: _p, lastMatch: _l, ...player }) => player);
   return { players: page, hasMore: ranked.length > start + PLAYERS_PAGE, total: ranked.length };
 }
 

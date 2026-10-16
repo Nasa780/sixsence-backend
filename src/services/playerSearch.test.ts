@@ -27,11 +27,13 @@ describe('recherche de joueurs', () => {
     assert.deepEqual(rankPlayers(players, 'lala').map((player) => player.username), ['Lala', 'Lalaland', 'Kalala']);
   });
 
-  it('sans recherche : tout le monde, le plus de points d’abord', () => {
+  it('sans recherche : les joueurs du dernier match d’abord, puis le plus de points', () => {
     const players = [
-      { username: 'B', activisionId: null, points: 10 },
-      { username: 'A', activisionId: null, points: 300 },
+      { username: 'B', activisionId: null, points: 10, lastMatch: 3000 },
+      { username: 'A', activisionId: null, points: 300, lastMatch: 1000 },
+      { username: 'C', activisionId: null, points: 900, lastMatch: 0 },
+      { username: 'D', activisionId: null, points: 50, lastMatch: 0 },
     ];
-    assert.deepEqual(rankPlayers(players, '').map((player) => player.username), ['A', 'B']);
+    assert.deepEqual(rankPlayers(players, '').map((player) => player.username), ['B', 'A', 'C', 'D']);
   });
 });
