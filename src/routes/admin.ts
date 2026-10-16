@@ -31,7 +31,7 @@ import { supabase } from '../supabase.js';
  *   DELETE /admin/events/:id               supprimer
  *   POST|PATCH|DELETE /admin/founders[/:id]  fondateurs
  *   POST|PATCH|DELETE /admin/partners[/:id]  partenaires
- *   GET    /admin/players?q=               rechercher des joueurs
+ *   GET    /admin/players?q=&offset=       rechercher des joueurs (pseudo même stylisé, identifiant Activision ; 50 par page)
  *   POST   /admin/players/:id/badges       { badges: [...] }
  *   POST   /admin/players/:id/role         { role: "member" | "arbitre" | "staff" | "admin" }
  *   GET    /admin/players/:id/sanctions    historique des sanctions d'un joueur
@@ -137,7 +137,7 @@ export function adminRouter(): Router {
 
   // --- Joueurs -----------------------------------------------------------------
   router.get('/players', asyncHandler(async (req, res) => {
-    res.json({ players: await searchPlayers(typeof req.query.q === 'string' ? req.query.q : '') });
+    res.json(await searchPlayers(typeof req.query.q === 'string' ? req.query.q : '', Number(req.query.offset) || 0));
   }));
 
   router.post('/players/:id/badges', asyncHandler(async (req, res) => {

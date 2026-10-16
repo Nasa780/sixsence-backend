@@ -1,4 +1,5 @@
 import { HttpError, fromDbError, unwrap } from '../errors.js';
+import { rankPlayers } from './playerSearch.js';
 import { supabase } from '../supabase.js';
 import { openCounts } from './moderation.js';
 
@@ -131,20 +132,31 @@ export function parseBadges(body: unknown): string[] {
   return [...new Set(badges as string[])];
 }
 
-export async function searchPlayers(query: string) {
-  let request = supabase.from('users').select('id, username, avatar_url, role, created_at').order('username').limit(20);
-  const term = query.trim().slice(0, 40).replace(/[%_,()]/g, '');
-  if (term) request = request.ilike('username', `%${term}%`);
-  const users = (unwrap(await request) ?? []) as { id: string }[];
-  if (users.length === 0) return [];
+/** Joueurs par page de la recherche de /admin. */
+export const PLAYERS_PAGE = 50;
 
-  const { data: profiles, error } = await supabase
-    .from('cod_profiles')
-    .select('user_id, points, wins, losses, badges, banned_until, activision_id')
-    .in('user_id', users.map((user) => user.id));
-  if (error) throw fromDbError(error);
-  const byId = new Map(((profiles ?? []) as { user_id: string }[]).map((profile) => [profile.user_id, profile]));
-  return users.map((user) => ({ ...user, profile: byId.get(user.id) ?? null }));
+/**
+ * Recherche de joueurs (/admin) : pseudo Discord (même stylisé) ou identifiant Activision,
+ * meilleures correspondances d'abord, 50 par page (offset). Toute la communauté est lue puis
+ * filtrée ici (normalisation des lettres impossible en SQL simple) : suffisant tant qu'elle
+ * compte quelques milliers de comptes.
+ */
+export async function searchPlayers(query: string, offset = 0) {
+  const [users, profiles] = await Promise.all([
+    supabase.from('users').select('id, username, avatar_url, role, created_at').limit(10000),
+    supabase.from('cod_profiles').select('user_id, points, wins, losses, badges, banned_until, activision_id').limit(10000),
+  ]);
+  if (users.error) throw fromDbError(users.error);
+  if (profiles.error) throw fromDbError(profiles.error);
+  const byId = new Map(((profiles.data ?? []) as { user_id: string; points: number; activision_id: string | null }[]).map((profile) => [profile.user_id, profile]));
+  const players = ((users.data ?? []) as { id: string; username: string }[]).map((user) => {
+    const profile = byId.get(user.id) ?? null;
+    return { ...user, profile, activisionId: profile?.activision_id ?? null, points: profile?.points ?? 0 };
+  });
+  const ranked = rankPlayers(players, query.slice(0, 40));
+  const start = Math.max(0, Math.floor(offset) || 0);
+  const page = ranked.slice(start, start + PLAYERS_PAGE).map(({ activisionId: _a, points: _p, ...player }) => player);
+  return { players: page, hasMore: ranked.length > start + PLAYERS_PAGE, total: ranked.length };
 }
 
 /** Vue d'ensemble du tableau de bord. */
