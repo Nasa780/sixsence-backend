@@ -2,7 +2,7 @@ import { Router, type RequestHandler } from 'express';
 import { currentUser, requireAuth, requireRoles } from '../auth.js';
 import { ROLES, rolesFor, type Role } from '../roles.js';
 import { HttpError, asyncHandler, unwrap, uuidParam } from '../errors.js';
-import { STAFF_BADGES, overview, parseBadges, parseEventPatch, parseFounder, parsePartner, searchPlayers } from '../services/admin.js';
+import { STAFF_BADGES, listCorrections, overview, parseBadges, parseEventPatch, parseFounder, parsePartner, recentMatches, searchPlayers } from '../services/admin.js';
 import { createEvent, parseNewEvent } from '../services/gtaEvents.js';
 import { listDisputes, resolveMatch } from '../services/matches.js';
 import { closeCase, listForAdmin } from '../services/moderation.js';
@@ -19,7 +19,9 @@ import { supabase } from '../supabase.js';
  *
  *   GET    /admin/overview                 chiffres du tableau de bord
  *   GET    /admin/disputes                 matchs contestés
- *   GET    /admin/arbitrations?status=     demandes d'arbitrage (open | resolved | rejected)
+ *   GET    /admin/matches?q=               matchs récents (recherche par pseudo), corrections et demandes en attente
+ *   GET    /admin/corrections              historique des corrections de matchs terminés (admin)
+ *   GET    /admin/arbitrations?status=&match=  demandes d'arbitrage (open | resolved | rejected), d'un match
  *   POST   /admin/arbitrations/:id         { status, resolution } traiter une demande
  *   GET    /admin/reports?status=          signalements de joueurs
  *   POST   /admin/reports/:id              { status, resolution } traiter un signalement
@@ -53,10 +55,16 @@ export function adminRouter(): Router {
   router.get('/disputes', asyncHandler(async (_req, res) => {
     res.json({ matches: await listDisputes() });
   }));
+  router.get('/matches', asyncHandler(async (req, res) => {
+    res.json({ matches: await recentMatches(typeof req.query.q === 'string' ? req.query.q : '') });
+  }));
+  router.get('/corrections', asyncHandler(async (_req, res) => {
+    res.json({ items: await listCorrections() });
+  }));
 
   // --- Arbitrages et signalements ------------------------------------------------
   router.get('/arbitrations', asyncHandler(async (req, res) => {
-    res.json({ items: await listForAdmin('cod_arbitration_requests', req.query.status) });
+    res.json({ items: await listForAdmin('cod_arbitration_requests', req.query.status, req.query.match) });
   }));
   router.post('/arbitrations/:id', asyncHandler(async (req, res) => {
     res.json({ item: await closeCase('cod_arbitration_requests', req.params.id, currentUser(res).id, req.body) });
