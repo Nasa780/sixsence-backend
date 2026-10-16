@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
+import { PLAYER_CORRECTION_HOURS, withinWindow } from './correctionPolicy.js';
 import { dm } from './discord.js';
 
 /**
@@ -14,6 +15,7 @@ import { dm } from './discord.js';
  */
 
 export const ARBITRATION_REASONS: Record<string, string> = {
+  misclick: 'Erreur de déclaration (mauvais clic)',
   cheating: 'Triche suspectée',
   afk: 'Joueur absent ou AFK',
   lobby: 'Problème de partie (hôte, lobby, déconnexion)',
@@ -104,15 +106,19 @@ export async function requestArbitration(matchId: string, userId: string, body: 
   }
   const details = cleanDetails(input.details);
 
-  const match = unwrap(await supabase.from('cod_matches').select('status, team_a, team_b').eq('id', matchId).maybeSingle()) as {
+  const match = unwrap(await supabase.from('cod_matches').select('status, team_a, team_b, completed_at').eq('id', matchId).maybeSingle()) as {
     status: string;
     team_a: string[];
     team_b: string[];
+    completed_at: string | null;
   } | null;
   if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
   if (![...match.team_a, ...match.team_b].includes(userId)) throw new HttpError(403, 'NOT_A_PLAYER', 'Tu ne participes pas à ce match.');
-  if (!['in_progress', 'awaiting_confirmation', 'disputed'].includes(match.status)) {
-    throw new HttpError(409, 'MATCH_CLOSED', "Ce match est terminé : utilise plutôt « Signaler » sur le joueur concerné.");
+  // Match en cours, ou terminé depuis moins de 24 h (demande de correction : mauvais clic…).
+  const open = ['in_progress', 'awaiting_confirmation', 'disputed'].includes(match.status);
+  const correctable = match.status === 'completed' && withinWindow(match.completed_at, PLAYER_CORRECTION_HOURS);
+  if (!open && !correctable) {
+    throw new HttpError(409, 'MATCH_CLOSED', "Ce match est terminé depuis plus de 24 h : utilise plutôt « Signaler » sur le joueur concerné.");
   }
 
   const { count, error } = await supabase
@@ -122,7 +128,7 @@ export async function requestArbitration(matchId: string, userId: string, body: 
     .eq('user_id', userId)
     .eq('status', 'open');
   if (error) throw fromDbError(error);
-  if ((count ?? 0) >= 2) throw new HttpError(429, 'TOO_MANY_REQUESTS', 'Tu as déjà deux demandes en attente pour ce match : un admin arrive.');
+  if ((count ?? 0) >= 1) throw new HttpError(429, 'TOO_MANY_REQUESTS', 'Tu as déjà une demande en attente pour ce match : un arbitre arrive.');
 
   return unwrap(
     await supabase.from('cod_arbitration_requests').insert({ match_id: matchId, user_id: userId, reason: input.reason, details }).select('*').single(),

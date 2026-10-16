@@ -38,6 +38,10 @@ const DB_ERRORS: Record<string, [status: number, message: string]> = {
   EVENT_FULL: [409, 'Cet événement est complet.'],
   INVALID_MVP: [400, "Le MVP se choisit parmi les joueurs de l'équipe gagnante."],
   MVP_VOTE_CLOSED: [409, 'Le vote du MVP est fermé pour ce match (24 h après la fin).'],
+  // Correction d'un match terminé
+  INVALID_ACTION: [400, 'Correction inconnue.'],
+  MATCH_NOT_COMPLETED: [409, 'Seul un match terminé avec un vainqueur peut être corrigé.'],
+  CORRECTION_TOO_LATE: [409, 'Le délai de correction (48 h après la validation) est dépassé : demande à un admin.'],
   // Sanctions
   INVALID_SANCTION: [400, 'Type de sanction inconnu.'],
   INVALID_REASON: [400, 'Indique un motif (500 caractères au plus).'],

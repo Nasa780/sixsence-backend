@@ -3,7 +3,11 @@ import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { bus, type CodMatch } from '../events.js';
 import { supabase } from '../supabase.js';
-import { noticeMatchResolved } from './matchNotices.js';
+import type { Role } from '../roles.js';
+import { syncCards } from './cards.js';
+import { syncRankRoles } from './community.js';
+import { correctionWindowHours } from './correctionPolicy.js';
+import { noticeMatchCorrected, noticeMatchResolved } from './matchNotices.js';
 import { mvpVotesOf } from './moderation.js';
 
 /** Joueur tel qu'affiché dans la salle de match. */
@@ -217,6 +221,31 @@ export async function resolveMatch(matchId: string, winner: 'A' | 'B' | null): P
   const match = unwrap(await supabase.rpc('cod_resolve_match', { p_match: matchId, p_winner: winner })) as CodMatch;
   announceIfClosed(match);
   if (match) void noticeMatchResolved(match);
+  return match;
+}
+
+/**
+ * Correction d'un match terminé par l'équipe (mauvais clic…) : inverser le vainqueur ou annuler.
+ * Délai selon le rôle (48 h, admin sans limite). Les joueurs et le salon de l'équipe sont prévenus ;
+ * une inversion revalide le match (points, rangs Discord et cartes à jour par « match:finalized »).
+ */
+export async function correctMatch(matchId: string, staffId: string, role: Role, action: 'swap' | 'cancel', reason: string): Promise<CodMatch> {
+  const match = unwrap(
+    await supabase.rpc('cod_correct_match', {
+      p_match: matchId,
+      p_action: action,
+      p_staff: staffId,
+      p_reason: reason,
+      p_max_hours: correctionWindowHours(role),
+    }),
+  ) as CodMatch;
+  bus.emit('match:closed');
+  void noticeMatchCorrected(match, staffId);
+  if (action === 'cancel') {
+    const ids = [...match.team_a, ...match.team_b];
+    void syncRankRoles(ids);
+    for (const id of ids) void syncCards(id).catch(() => {});
+  }
   return match;
 }
 
