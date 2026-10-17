@@ -4,7 +4,7 @@ import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { SUPPRESS_EMBEDS, discord, discordEnabled, dm, notifyStaff } from './discord.js';
 import { pushToUsers } from './push.js';
-import { declarationError, isValidMapScore, map3Picker, pickMaps, seriesState, type MapScore, type Side } from './teamMatchPolicy.js';
+import { deciderPicker, declarationError, isCompleteSeries, pickMaps, seriesState, type MapScore, type Side } from './teamMatchPolicy.js';
 import { membershipOf } from './teams.js';
 
 /**
@@ -40,6 +40,10 @@ export interface TeamMatch {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  /** Match de tournoi (pas de points en jeu), tour du tableau, format (3, ou 5 en finale). */
+  tournament_id: string | null;
+  round: number | null;
+  best_of: number;
 }
 
 const OPEN = ['in_progress', 'awaiting_confirmation', 'disputed'];
@@ -115,6 +119,8 @@ export async function joinTeamQueue(userId: string, body: unknown) {
 
   const state = await teamPlayState(userId);
   if (state.activeMatchId) throw new HttpError(409, 'ALREADY_IN_MATCH', 'Ton équipe a déjà un match en cours.');
+  const { teamBusyInTournament } = await import('./tournaments.js');
+  if (await teamBusyInTournament(teamId)) throw new HttpError(409, 'TEAM_IN_TOURNAMENT', 'Ton équipe est inscrite au tournoi en cours : pas de match ordinaire d’ici la fin de son parcours.');
 
   // Chaque titulaire : pas d'exclusion, pas de match classé en cours, pas en file classée.
   const [profiles, users, rankedQueue] = await Promise.all([
@@ -223,15 +229,15 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
   if (viewerId) {
     const side = await leaderSide(match, viewerId);
     const referee = await isReferee(viewerId);
-    const state = seriesState(match.scores);
+    const state = seriesState(match.scores, match.best_of);
     const isPlayer = ids.includes(viewerId);
     viewer = {
       leaderOf: side,
       referee,
       isPlayer,
-      canReport: Boolean(side) && match.status === 'in_progress' && (state.phase === 'maps12' || (state.phase === 'map3' && match.maps.length === 3)),
+      canReport: Boolean(side) && match.status === 'in_progress' && state.phase !== 'done' && (state.phase !== 'decider' || match.maps.length === match.best_of),
       canConfirm: Boolean(side) && match.status === 'awaiting_confirmation' && match.reported_team !== side,
-      canPickMap3: Boolean(side) && match.status === 'in_progress' && state.phase === 'map3' && match.maps.length === 2 && match.map3_picker === side,
+      canPickMap3: Boolean(side) && match.status === 'in_progress' && state.phase === 'decider' && match.maps.length === match.best_of - 1 && match.map3_picker === side,
       canResolve: referee && OPEN.includes(match.status),
       canProve: isPlayer && proofWindowOpen(match),
     };
@@ -260,7 +266,12 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
     cancelReason: match.cancel_reason,
     createdAt: match.created_at,
     completedAt: match.completed_at,
-    mapPool: match.status === 'in_progress' && match.maps.length === 2 && match.scores.length === 2 ? config.cod.maps.filter((map) => !match.maps.some((m) => m.map === map)) : [],
+    mapPool:
+      match.status === 'in_progress' && match.maps.length === match.best_of - 1 && match.scores.length === match.best_of - 1
+        ? config.cod.maps.filter((map) => !match.maps.some((m) => m.map === map))
+        : [],
+    bestOf: match.best_of,
+    tournament: match.tournament_id ? await tournamentLabel(match.tournament_id, match.round) : null,
     confirmMinutes: config.cod.confirmMinutes,
     proofs,
     viewer,
@@ -344,9 +355,9 @@ export async function reportTeamScores(userId: string, matchId: string, body: un
   if (!side) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader d’une des deux équipes peut déclarer les scores.');
   if (match.status !== 'in_progress') throw new HttpError(409, 'MATCH_NOT_REPORTABLE', 'Des scores sont déjà déclarés ou le match est terminé.');
   const scores = (body as { scores?: unknown } | undefined)?.scores;
-  const problem = declarationError(match.scores, scores);
+  const problem = declarationError(match.scores, scores, match.best_of);
   if (problem) throw new HttpError(400, 'INVALID_SCORES', problem);
-  if (seriesState(match.scores).phase === 'map3' && match.maps.length < 3) throw new HttpError(409, 'MAP3_NOT_PICKED', 'La map 3 n’est pas encore choisie.');
+  if (seriesState(match.scores, match.best_of).phase === 'decider' && match.maps.length < match.best_of) throw new HttpError(409, 'MAP3_NOT_PICKED', 'La map décisive n’est pas encore choisie.');
 
   const now = new Date().toISOString();
   const updated = unwrap(
@@ -398,15 +409,26 @@ export async function confirmTeamScores(userId: string, matchId: string, body: u
   return getTeamMatch(matchId, userId);
 }
 
-/** Scores confirmés : fin du match (2 maps gagnées) ou passage à la map 3. */
+/** Scores confirmés : fin du match, map suivante, ou map décisive (égalité avant la dernière map). */
 async function applyConfirmed(match: TeamMatch): Promise<void> {
   const all = [...match.scores, ...(match.pending_scores ?? [])];
-  const state = seriesState(all);
+  const state = seriesState(all, match.best_of);
   if (state.winner) {
     unwrap(await supabase.rpc('team_match_finalize', { p_match: match.id, p_scores: all, p_winner: state.winner, p_resolved_by: null }));
+    await afterClose(match);
     return;
   }
-  const picker = map3Picker(all);
+  if (state.phase === 'next') {
+    unwrap(
+      await supabase
+        .from('team_matches')
+        .update({ status: 'in_progress', scores: all, pending_scores: null, reported_by: null, reported_team: null, reported_at: null, updated_at: new Date().toISOString() })
+        .eq('id', match.id)
+        .eq('status', 'awaiting_confirmation'),
+    );
+    return;
+  }
+  const picker = deciderPicker(all);
   const maps = picker === 'random' ? [...match.maps, { map: pickMaps(config.cod.maps, 1, match.maps.map((m) => m.map))[0]!, pick: 'random' }] : match.maps;
   const updated = unwrap(
     await supabase
@@ -420,10 +442,10 @@ async function applyConfirmed(match: TeamMatch): Promise<void> {
   if (!updated) return;
   const teams = await teamsById([match.team_a, match.team_b]);
   if (picker === 'random') {
-    await pushToUsers([...match.roster_a, ...match.roster_b], { title: '1 – 1 : map 3 tirée au sort', body: `Égalité de manches : ce sera ${maps[2]!.map}.`, url: matchUrl(match.id), tag: `team-match-${match.id}` });
+    await pushToUsers([...match.roster_a, ...match.roster_b], { title: 'Égalité : map décisive tirée au sort', body: `Égalité de manches : ce sera ${maps[maps.length - 1]!.map}.`, url: matchUrl(match.id), tag: `team-match-${match.id}` });
   } else {
     const pickerTeam = picker === 'A' ? match.team_a : match.team_b;
-    await pushToUsers(await leadersOf(pickerTeam), { title: '1 – 1 : à toi de choisir la map 3', body: `[${teams.get(pickerTeam)?.tag}] a gagné le plus de manches.`, url: matchUrl(match.id), tag: `team-match-${match.id}` });
+    await pushToUsers(await leadersOf(pickerTeam), { title: 'Égalité : à toi de choisir la map décisive', body: `[${teams.get(pickerTeam)?.tag}] a gagné le plus de manches.`, url: matchUrl(match.id), tag: `team-match-${match.id}` });
   }
 }
 
@@ -431,8 +453,10 @@ async function applyConfirmed(match: TeamMatch): Promise<void> {
 export async function pickTeamMap3(userId: string, matchId: string, body: unknown) {
   const match = await matchRow(matchId);
   const side = await leaderSide(match, userId);
-  if (!side || match.map3_picker !== side) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Le choix de la map 3 revient à l’équipe qui a gagné le plus de manches.');
-  if (match.status !== 'in_progress' || match.scores.length !== 2 || match.maps.length !== 2) throw new HttpError(409, 'MAP3_CLOSED', 'La map 3 n’est pas à choisir maintenant.');
+  if (!side || match.map3_picker !== side) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Le choix de la map décisive revient à l’équipe qui a gagné le plus de manches.');
+  if (match.status !== 'in_progress' || match.scores.length !== match.best_of - 1 || match.maps.length !== match.best_of - 1) {
+    throw new HttpError(409, 'MAP3_CLOSED', 'La map décisive n’est pas à choisir maintenant.');
+  }
   const map = (body as { map?: unknown } | undefined)?.map;
   if (typeof map !== 'string' || !config.cod.maps.includes(map) || match.maps.some((m) => m.map === map)) throw new HttpError(400, 'INVALID_MAP', 'Map invalide ou déjà jouée.');
   const updated = unwrap(
@@ -445,8 +469,8 @@ export async function pickTeamMap3(userId: string, matchId: string, body: unknow
       .select('id')
       .maybeSingle(),
   );
-  if (!updated) throw new HttpError(409, 'MAP3_CLOSED', 'La map 3 vient d’être choisie : recharge la page.');
-  await pushToUsers([...match.roster_a, ...match.roster_b], { title: `Map 3 : ${map}`, body: 'Bonne chance pour la manche décisive.', url: matchUrl(matchId), tag: `team-match-${matchId}` });
+  if (!updated) throw new HttpError(409, 'MAP3_CLOSED', 'La map décisive vient d’être choisie : recharge la page.');
+  await pushToUsers([...match.roster_a, ...match.roster_b], { title: `Map décisive : ${map}`, body: 'Bonne chance pour la manche décisive.', url: matchUrl(matchId), tag: `team-match-${matchId}` });
   return getTeamMatch(matchId, userId);
 }
 
@@ -464,12 +488,25 @@ export async function resolveTeamMatch(staffId: string, matchId: string, body: u
         .eq('id', matchId),
     );
   } else {
-    if (!Array.isArray(scores) || scores.length < 2 || scores.length > 3 || !scores.every(isValidMapScore)) throw new HttpError(400, 'INVALID_SCORES', 'Scores invalides.');
-    const state = seriesState(scores as MapScore[]);
-    if (!state.winner || (scores.length === 3 && seriesState((scores as MapScore[]).slice(0, 2)).winner)) throw new HttpError(400, 'INVALID_SCORES', 'La série doit se terminer sur 2 maps gagnées.');
-    unwrap(await supabase.rpc('team_match_finalize', { p_match: matchId, p_scores: scores, p_winner: state.winner, p_resolved_by: staffId }));
+    if (!isCompleteSeries(scores, match.best_of)) throw new HttpError(400, 'INVALID_SCORES', 'Scores invalides : la série doit se terminer sur la dernière map saisie.');
+    unwrap(await supabase.rpc('team_match_finalize', { p_match: matchId, p_scores: scores, p_winner: seriesState(scores, match.best_of).winner, p_resolved_by: staffId }));
   }
+  await afterClose(match);
   return getTeamMatch(matchId, staffId);
+}
+
+/** Match de tournoi terminé ou annulé : le tableau avance (chargé à la demande, évite une dépendance circulaire). */
+async function afterClose(match: TeamMatch): Promise<void> {
+  if (!match.tournament_id) return;
+  const { advanceTournament } = await import('./tournaments.js');
+  await advanceTournament(match.tournament_id).catch((caught: Error) => console.error('[tournoi] avancement impossible', caught.message));
+}
+
+async function tournamentLabel(tournamentId: string, round: number | null) {
+  const row = unwrap(await supabase.from('tournaments').select('id, name, size').eq('id', tournamentId).maybeSingle()) as { id: string; name: string; size: number } | null;
+  if (!row) return null;
+  const { roundName, roundsFor } = await import('./tournamentPolicy.js');
+  return { id: row.id, name: row.name, round: round ? roundName(round, roundsFor(row.size)) : null };
 }
 
 // --- Historique d'une équipe ----------------------------------------------------------------
@@ -488,7 +525,7 @@ export async function teamMatchHistory(teamId: string) {
   return rows.map((row) => {
     const side: Side = row.team_a === teamId ? 'A' : 'B';
     const opponent = teams.get(side === 'A' ? row.team_b : row.team_a);
-    const state = seriesState(row.scores);
+    const state = seriesState(row.scores, 5);
     return {
       id: row.id,
       status: row.status,
@@ -516,6 +553,7 @@ export async function sweepTeamMatches(): Promise<void> {
         .from('team_matches')
         .update({ status: 'cancelled', cancel_reason: 'abandoned', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq('status', 'in_progress')
+        .is('tournament_id', null)
         .lt('updated_at', cancelBefore),
     );
     await sweepTeamDiscord();

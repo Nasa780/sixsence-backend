@@ -10,6 +10,7 @@ import { announceEventCancelled, announceNewEvent, announceSeasonClosed, onBadge
 import { applySanction, liftSanction, listSanctions } from '../services/sanctions.js';
 import { forgetSeasons, syncAllCards, syncCards } from '../services/cards.js';
 import { listTeamDisputes } from '../services/teamMatches.js';
+import { cancelTournament, createTournament, forceEntryWinner, listTournaments, previewQualified } from '../services/tournaments.js';
 import { adminDisbandTeam, adminTeamReports, adminTeams, closeTeamReport, moderateTeam } from '../services/teams.js';
 import { supabase } from '../supabase.js';
 
@@ -33,6 +34,11 @@ import { supabase } from '../supabase.js';
  *   DELETE /admin/teams/:id                dissoudre une équipe
  *   GET    /admin/team-reports?status=     signalements d'équipes
  *   POST   /admin/team-reports/:id         { status: "resolved" | "rejected" }
+ *   GET    /admin/tournaments              derniers tournois (admin)
+ *   GET    /admin/tournaments/preview?size= qualifiés si le tournoi était créé maintenant
+ *   POST   /admin/tournaments              { name, startsAt, size } créer le tournoi (qualifiés et effectifs figés)
+ *   DELETE /admin/tournaments/:id          annuler le tournoi
+ *   POST   /admin/tournaments/:id/entries/:entryId/winner { side } désigner le vainqueur d'une rencontre
  *   POST   /admin/matches/:id/cancel       annuler un match
  *   POST   /admin/events                   créer un événement GTA 6
  *   PATCH  /admin/events/:id               modifier (titre, dates, places, statut…)
@@ -102,6 +108,23 @@ export function adminRouter(): Router {
   }));
   router.post('/team-reports/:id', asyncHandler(async (req, res) => {
     res.json(await closeTeamReport(currentUser(res).id, req.params.id, req.body));
+  }));
+
+  // --- Tournoi de fin de saison (admin) ----------------------------------------------
+  router.get('/tournaments', asyncHandler(async (_req, res) => {
+    res.json({ tournaments: await listTournaments() });
+  }));
+  router.get('/tournaments/preview', asyncHandler(async (req, res) => {
+    res.json(await previewQualified(req.query.size));
+  }));
+  router.post('/tournaments', asyncHandler(async (req, res) => {
+    res.status(201).json(await createTournament(currentUser(res).id, req.body));
+  }));
+  router.delete('/tournaments/:id', asyncHandler(async (req, res) => {
+    res.json(await cancelTournament(uuidParam(req, 'id')));
+  }));
+  router.post('/tournaments/:id/entries/:entryId/winner', asyncHandler(async (req, res) => {
+    res.json(await forceEntryWinner(uuidParam(req, 'id'), req.params.entryId, req.body));
   }));
 
   router.post('/matches/:id/cancel', asyncHandler(async (req, res) => {
@@ -211,7 +234,10 @@ export function adminRouter(): Router {
   // --- Saison ------------------------------------------------------------------
   router.post('/season/close', asyncHandler(async (req, res) => {
     const nextName = (req.body as { nextName?: unknown } | undefined)?.nextName;
+    const closing = unwrap(await supabase.from('seasons').select('id').eq('is_active', true).maybeSingle()) as { id: number } | null;
     const archived = unwrap(await supabase.rpc('cod_close_season', { p_next_name: typeof nextName === 'string' ? nextName : '' })) as number;
+    // Équipes : classement final archivé, points remis à 1 000.
+    if (closing) unwrap(await supabase.rpc('team_close_season', { p_season: closing.id }));
     void announceSeasonClosed(archived, String(nextName).trim());
     // Points remis à zéro : les rangs Discord suivent ; cartes de la saison attribuées.
     void syncAllRankRoles();
