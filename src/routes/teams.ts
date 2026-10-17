@@ -14,6 +14,7 @@ import {
   teamPlayState,
 } from '../services/teamMatches.js';
 import { TEAM_REPORT_REASONS } from '../services/teamPolicy.js';
+import { checkIn, currentTournament, getTournament } from '../services/tournaments.js';
 import {
   answerInvite,
   cancelInvite,
@@ -67,6 +68,9 @@ import {
  *   POST   /teams/matches/:matchId/confirm     confirmer ou contester (Leader adverse) { accept }
  *   POST   /teams/matches/:matchId/map3        choisir la map 3 (Leader de l'équipe qui a gagné le plus de manches) { map }
  *   POST   /teams/matches/:matchId/proofs      enregistrer une capture déjà envoyée (titulaire) { path }
+ *   GET    /teams/tournament                   tournoi prévu ou en cours (sinon le dernier terminé), tableau, droits du visiteur
+ *   GET    /teams/tournaments/:id              un tournoi
+ *   POST   /teams/tournaments/:id/checkin      check-in d'un Leader (30 min avant) { roster: [ids parmi l'effectif figé] }
  *   POST   /teams/matches/:matchId/resolve     arbitrage { scores: [[a, b], …] | null (annuler) }
  */
 export function teamsRouter(): Router {
@@ -88,6 +92,11 @@ export function teamsRouter(): Router {
   router.post('/matches/:matchId/map3', requireAuth, asyncHandler(async (req, res) => void res.json(await pickTeamMap3(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/proofs', requireAuth, asyncHandler(async (req, res) => void res.json(await addTeamProof(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/resolve', requireAuth, asyncHandler(async (req, res) => void res.json(await resolveTeamMatch(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
+
+  // --- Tournoi de fin de saison ------------------------------------------------------
+  router.get('/tournament', optionalAuth, asyncHandler(async (_req, res) => void res.json({ tournament: await currentTournament(viewerOf(res)?.id ?? null) })));
+  router.get('/tournaments/:tournamentId', optionalAuth, asyncHandler(async (req, res) => void res.json(await getTournament(uuidParam(req, 'tournamentId'), viewerOf(res)?.id ?? null))));
+  router.post('/tournaments/:tournamentId/checkin', requireAuth, asyncHandler(async (req, res) => void res.json(await checkIn(currentUser(res).id, uuidParam(req, 'tournamentId'), req.body))));
 
   router.post('/invites/:inviteId/answer', requireAuth, asyncHandler(async (req, res) => void res.json(await answerInvite(currentUser(res).id, req.params.inviteId, req.body))));
   router.delete('/invites/:inviteId', requireAuth, asyncHandler(async (req, res) => void res.json(await cancelInvite(currentUser(res).id, req.params.inviteId))));

@@ -16,6 +16,7 @@ import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { pointsPreview, sweepMatches } from './services/matches.js';
 import { sweepTeamMatches, tryCreateTeamMatches } from './services/teamMatches.js';
+import { sweepTournaments } from './services/tournaments.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, syncTeamAndBadgeRoles, welcomeNewPlayers } from './services/community.js';
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
@@ -242,10 +243,11 @@ void pushPublicKey();
 
 // Ménage des matchs sans réponse ou abandonnés, une fois par minute.
 const sweeper = setInterval(() => void sweepMatches(), 60_000);
-// Matchs d'équipe : file (au cas où), scores non confirmés, matchs abandonnés, salons et résultats Discord.
+// Matchs d'équipe : file (au cas où), scores non confirmés, matchs abandonnés, salons et résultats Discord ; tournois (départ, tableau).
 const teamTimer = setInterval(() => {
   void tryCreateTeamMatches();
   void sweepTeamMatches();
+  void sweepTournaments();
 }, 60_000);
 // Vérifications « Prêt ? » expirées : contrôlées toutes les 3 secondes.
 const readyTimer = setInterval(() => void expireReadyChecks(), 3_000);
