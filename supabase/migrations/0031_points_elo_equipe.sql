@@ -3,7 +3,9 @@
 -- =============================================================================
 -- Niveau d'une équipe = total des points de ses joueurs. Écart = (total adverse − total de
 -- l'équipe) / nombre de joueurs par équipe (même échelle du 2v2 au 5v5). Chance de victoire
--- façon Elo : E = 1 / (1 + 10^(écart / 400)).
+-- façon Elo : E = 1 / (1 + 10^(écart / 800)). Échelle 800 : les écarts fréquents (jusqu'à ~800 points
+-- par joueur dans une file sans matchmaking par niveau) restent répartis entre +40 et +60 au lieu de
+-- saturer aux extrêmes (simulation : 16 % des matchs à ≤42 ou ≥58 en fin de saison, contre 46 % à 400).
 --   * victoire : 40 + 20 × (1 − E) → +50 à niveau égal, jusqu'à +60 contre une équipe bien plus
 --     forte, +40 contre une équipe bien plus faible ; même gain pour toute l'équipe ;
 --     placement (10 premiers matchs de la saison) : victoire doublée (+80 à +120) ;
@@ -58,7 +60,7 @@ begin
 
     -- Écart moyen par joueur, du point de vue de l'équipe du joueur.
     v_gap := case when r.user_id = any (m.team_a) then v_total_b - v_total_a else v_total_a - v_total_b end / v_size;
-    v_chance := 1 / (1 + power(10::numeric, v_gap / 400));
+    v_chance := 1 / (1 + power(10::numeric, v_gap / 800));
     v_win := round(40 + 20 * (1 - v_chance))::integer;
 
     v_result := v_result || jsonb_build_object(
