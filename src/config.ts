@@ -152,6 +152,8 @@ export const config = {
     codChannelId: process.env.DISCORD_COD_CHANNEL_ID?.trim() || '',
     /** Salon des annonces GTA 6 : nouveaux événements, rappels (facultatif). */
     gtaChannelId: process.env.DISCORD_GTA_CHANNEL_ID?.trim() || '',
+    /** Salon du règlement du serveur (publié par le bot depuis l'admin). */
+    rulesChannelId: process.env.DISCORD_RULES_CHANNEL_ID?.trim() || '1561121381578444890',
   },
 
   /** Adresse publique du site (liens envoyés sur Discord). */
