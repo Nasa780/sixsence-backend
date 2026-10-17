@@ -19,10 +19,11 @@ describe("droits sur l'administration", () => {
     assert.equal(can('arbitre', 'GET', '/players'), false);
     assert.equal(can('arbitre', 'POST', '/players/abc/sanctions'), false);
     assert.equal(can('arbitre', 'POST', '/events'), false);
+    assert.equal(can('arbitre', 'GET', '/teams'), false);
   });
 
   it('le staff modère et sanctionne, sans gérer le site', () => {
-    for (const [method, path] of [['GET', '/disputes'], ['GET', '/reports'], ['POST', '/reports/4'], ['GET', '/players'], ['GET', '/players/abc/sanctions'], ['POST', '/players/abc/sanctions'], ['POST', '/sanctions/9/lift']]) {
+    for (const [method, path] of [['GET', '/disputes'], ['GET', '/reports'], ['POST', '/reports/4'], ['GET', '/players'], ['GET', '/players/abc/sanctions'], ['POST', '/players/abc/sanctions'], ['POST', '/sanctions/9/lift'], ['GET', '/teams'], ['DELETE', '/teams/abc'], ['POST', '/team-reports/2']]) {
       assert.equal(can('staff', method!, path!), true, `${method} ${path}`);
     }
     for (const [method, path] of [['POST', '/players/abc/role'], ['POST', '/players/abc/badges'], ['POST', '/players/abc/unban'], ['POST', '/events'], ['PATCH', '/events/1'], ['POST', '/season/close'], ['POST', '/founders'], ['POST', '/discord/sync-roles']]) {
