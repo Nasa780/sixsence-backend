@@ -189,6 +189,16 @@ async function sweepOnce(): Promise<void> {
     }
 
     const recent = match.completed_at && Date.now() - new Date(match.completed_at).getTime() < 60 * 60 * 1000;
+    // Match corrigé : l'ancien message de résultat est supprimé (remplacé ci-dessous si le match a un vainqueur).
+    let resultMessage = match.discord_result_message ?? null;
+    if (resultMessage && match.corrected_at && resultsChannelId) {
+      try {
+        await discord(`/channels/${resultsChannelId}/messages/${resultMessage}`, { method: 'DELETE' });
+      } catch (deleteError) {
+        console.warn('[discord] suppression de l’ancien résultat impossible', (deleteError as Error).message);
+      }
+      resultMessage = null;
+    }
     if (match.status === 'completed' && match.winner && resultsChannelId && recent) {
       try {
         const names = await usernames([...match.team_a, ...match.team_b]);
@@ -196,21 +206,22 @@ async function sweepOnce(): Promise<void> {
           ids.map((id) => `${names.get(id) ?? 'Joueur'} (${(match.points_changes?.[id] ?? 0) >= 0 ? '+' : ''}${match.points_changes?.[id] ?? 0})`).join(', ');
         const winners = match.winner === 'A' ? match.team_a : match.team_b;
         const losers = match.winner === 'A' ? match.team_b : match.team_a;
-        await discord(`/channels/${resultsChannelId}/messages`, {
+        const posted = (await discord(`/channels/${resultsChannelId}/messages`, {
           method: 'POST',
           body: {
             content:
-              `**${match.map}** · ${match.mode} — victoire de l'Équipe ${match.winner === 'A' ? '1' : '2'}\n` +
+              `**${match.map}** · ${match.mode} — victoire de l'Équipe ${match.winner === 'A' ? '1' : '2'}${match.corrected_at ? ' (résultat corrigé)' : ''}\n` +
               `Gagnants : ${team(winners)}\nPerdants : ${team(losers)}\n${matchUrl(match)}`,
             flags: SUPPRESS_EMBEDS,
           },
-        });
+        })) as { id?: string } | null;
+        resultMessage = posted?.id ?? null;
       } catch (postError) {
         console.warn('[discord] publication du résultat impossible', (postError as Error).message);
       }
     }
 
-    await supabase.from('cod_matches').update({ discord_done: true }).eq('id', match.id);
+    await supabase.from('cod_matches').update({ discord_done: true, discord_result_message: resultMessage }).eq('id', match.id);
     if (match.status === 'completed') bus.emit('match:finalized', match);
     if (match.status === 'cancelled' && match.cancel_reason === 'abandoned' && recent) bus.emit('match:abandoned', match);
   }

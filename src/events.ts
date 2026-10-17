@@ -36,6 +36,8 @@ export interface CodMatch {
   corrected_by?: string | null;
   correction_reason?: string | null;
   correction_action?: 'swap' | 'cancel' | null;
+  /** Message de résultat publié dans le salon Discord (0023), supprimé si le match est corrigé. */
+  discord_result_message?: string | null;
 }
 
 /** Vérification « Prêt ? » expirée : qui avait accepté, qui manquait. */
