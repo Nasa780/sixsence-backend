@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { currentUser, optionalAuth, requireAuth, viewerOf } from '../auth.js';
+import { config } from '../config.js';
 import { asyncHandler, uuidParam } from '../errors.js';
 import {
   addTeamProof,
@@ -77,6 +78,11 @@ import {
  */
 export function teamsRouter(): Router {
   const router = Router();
+  // Mode en pause (TEAM_MODE) : lectures seules, aucune action.
+  router.use((req, res, next) => {
+    if (config.teams.enabled || req.method === 'GET') return next();
+    res.status(403).json({ error: { code: 'TEAM_MODE_PAUSED', message: 'Le mode Match team est en pause.' } });
+  });
 
   router.get('/', asyncHandler(async (_req, res) => void res.json({ teams: await listTeams() })));
   router.get('/report-reasons', (_req, res) => void res.json(TEAM_REPORT_REASONS));

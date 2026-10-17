@@ -42,7 +42,7 @@ async function setMembers(roleId: string, userIds: string[], method: 'PUT' | 'DE
 }
 
 function safely(label: string, task: () => Promise<void>): void {
-  if (!discordEnabled) return;
+  if (!discordEnabled || !config.teams.enabled) return;
   void task().catch((caught) => console.warn(`[discord] rôle d'équipe : ${label} impossible`, (caught as Error).message));
 }
 

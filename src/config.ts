@@ -127,6 +127,8 @@ export const config = {
 
   /** Mode « Match team » : BO3 entre équipes. TEAM_MATCH_PLAYERS : titulaires par équipe (4 ; moins pour tester). */
   teams: {
+    /** Mode en pause tant que TEAM_MODE ne vaut pas « on » : pas de création d'équipe, de match ni de tournoi. */
+    enabled: process.env.TEAM_MODE?.trim() === 'on',
     rosterSize: integer('TEAM_MATCH_PLAYERS', 4, 1),
   },
 

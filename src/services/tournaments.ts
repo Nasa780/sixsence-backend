@@ -124,6 +124,7 @@ export async function previewQualified(size: unknown) {
 
 /** Crée le tournoi : qualifiés figés (têtes de série, effectifs), tableau du 1er tour. */
 export async function createTournament(adminId: string, body: unknown) {
+  if (!config.teams.enabled) throw new HttpError(403, 'TEAM_MODE_PAUSED', 'Le mode Match team est en pause.');
   const { name, startsAt, size } = parseCreate(body);
   const { count, error } = await supabase.from('tournaments').select('id', { count: 'exact', head: true }).in('status', ['scheduled', 'running']);
   if (error) throw fromDbError(error);
