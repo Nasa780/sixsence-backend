@@ -15,6 +15,7 @@ import { teamsRouter } from './routes/teams.js';
 import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { pointsPreview, sweepMatches } from './services/matches.js';
+import { sweepTeamMatches, tryCreateTeamMatches } from './services/teamMatches.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, syncTeamAndBadgeRoles, welcomeNewPlayers } from './services/community.js';
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
@@ -241,6 +242,11 @@ void pushPublicKey();
 
 // Ménage des matchs sans réponse ou abandonnés, une fois par minute.
 const sweeper = setInterval(() => void sweepMatches(), 60_000);
+// Matchs d'équipe : file (au cas où), scores non confirmés, matchs abandonnés, salons et résultats Discord.
+const teamTimer = setInterval(() => {
+  void tryCreateTeamMatches();
+  void sweepTeamMatches();
+}, 60_000);
 // Vérifications « Prêt ? » expirées : contrôlées toutes les 3 secondes.
 const readyTimer = setInterval(() => void expireReadyChecks(), 3_000);
 // Durée maximale de recherche : contrôlée toutes les 20 secondes.
@@ -300,6 +306,7 @@ server.listen(config.port, () => {
 function shutdown(signal: string): void {
   console.log(`[boot] ${signal} reçu, arrêt en cours`);
   clearInterval(sweeper);
+  clearInterval(teamTimer);
   clearInterval(weeklyTimer);
   clearInterval(cardsTimer);
   clearInterval(readyTimer);

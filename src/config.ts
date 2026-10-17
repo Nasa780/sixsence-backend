@@ -125,6 +125,11 @@ export const config = {
     queueWarnMinutes: 5,
   },
 
+  /** Mode « Match team » : BO3 entre équipes. TEAM_MATCH_PLAYERS : titulaires par équipe (4 ; moins pour tester). */
+  teams: {
+    rosterSize: integer('TEAM_MATCH_PLAYERS', 4, 1),
+  },
+
   /**
    * Intégration Discord (facultative : désactivée tant que DISCORD_BOT_TOKEN est vide).
    * Le bot doit être membre du serveur DISCORD_GUILD_ID avec les droits « Gérer les salons »
