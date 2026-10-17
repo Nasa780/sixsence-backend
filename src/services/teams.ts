@@ -36,6 +36,8 @@ interface TeamRow {
   losses: number;
   created_at: string;
   disbanded_at: string | null;
+  /** Trophées de tournoi (vainqueur, finaliste), migration 0028. */
+  trophies: { tournamentId: string; name: string; season: number | null; place: 'winner' | 'finalist'; date: string }[];
 }
 
 interface MemberRow {
@@ -46,7 +48,7 @@ interface MemberRow {
   joined_at: string;
 }
 
-const TEAM_COLUMNS = 'id, name, tag, description, color, logo_url, banner_url, socials, owner_id, points, wins, losses, created_at, disbanded_at';
+const TEAM_COLUMNS = 'id, name, tag, description, color, logo_url, banner_url, socials, owner_id, points, wins, losses, created_at, disbanded_at, trophies';
 const teamUrl = (id: string) => `/cod/equipes/${id}`;
 
 function badInput(error: unknown): never {
@@ -110,6 +112,7 @@ function publicTeam(team: TeamRow) {
     played: team.wins + team.losses,
     createdAt: team.created_at,
     disbanded: Boolean(team.disbanded_at),
+    trophies: team.trophies ?? [],
   };
 }
 
