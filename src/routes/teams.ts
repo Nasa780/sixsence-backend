@@ -1,6 +1,17 @@
 import { Router } from 'express';
-import { currentUser, requireAuth } from '../auth.js';
+import { currentUser, optionalAuth, requireAuth, viewerOf } from '../auth.js';
 import { asyncHandler, uuidParam } from '../errors.js';
+import {
+  confirmTeamScores,
+  getTeamMatch,
+  joinTeamQueue,
+  leaveTeamQueue,
+  pickTeamMap3,
+  reportTeamScores,
+  resolveTeamMatch,
+  teamMatchHistory,
+  teamPlayState,
+} from '../services/teamMatches.js';
 import { TEAM_REPORT_REASONS } from '../services/teamPolicy.js';
 import {
   answerInvite,
@@ -44,6 +55,17 @@ import {
  *   POST   /teams/:id/transfer                 transmettre la couronne { userId }
  *   DELETE /teams/:id                          dissoudre (couronne)
  *   POST   /teams/:id/report                   signaler une équipe     { reason, details? }
+ *
+ * Matchs d'équipe (BO3) :
+ *   GET    /teams/:id/matches                  derniers matchs d'une équipe (public)
+ *   GET    /teams/matches/:matchId             feuille de match (public ; droits du visiteur s'il est connecté)
+ *   GET    /teams/me/play                      recherche en cours, match en cours, équipes en file
+ *   POST   /teams/me/queue                     lancer la recherche (Leader) { roster: [ids des titulaires] }
+ *   DELETE /teams/me/queue                     arrêter la recherche (Leader)
+ *   POST   /teams/matches/:matchId/report      déclarer les scores (Leader) { scores: [[a, b], …] } (point de vue de l'équipe 1)
+ *   POST   /teams/matches/:matchId/confirm     confirmer ou contester (Leader adverse) { accept }
+ *   POST   /teams/matches/:matchId/map3        choisir la map 3 (Leader de l'équipe qui a gagné le plus de manches) { map }
+ *   POST   /teams/matches/:matchId/resolve     arbitrage { scores: [[a, b], …] | null (annuler) }
  */
 export function teamsRouter(): Router {
   const router = Router();
@@ -54,10 +76,21 @@ export function teamsRouter(): Router {
   router.post('/me/leave', requireAuth, asyncHandler(async (_req, res) => void res.json(await leaveTeam(currentUser(res).id))));
   router.post('/', requireAuth, asyncHandler(async (req, res) => void res.status(201).json(await createTeam(currentUser(res).id, req.body))));
 
+  // --- Matchs d'équipe (BO3) ----------------------------------------------------
+  router.get('/me/play', requireAuth, asyncHandler(async (_req, res) => void res.json(await teamPlayState(currentUser(res).id))));
+  router.post('/me/queue', requireAuth, asyncHandler(async (req, res) => void res.json(await joinTeamQueue(currentUser(res).id, req.body))));
+  router.delete('/me/queue', requireAuth, asyncHandler(async (_req, res) => void res.json(await leaveTeamQueue(currentUser(res).id))));
+  router.get('/matches/:matchId', optionalAuth, asyncHandler(async (req, res) => void res.json(await getTeamMatch(uuidParam(req, 'matchId'), viewerOf(res)?.id ?? null))));
+  router.post('/matches/:matchId/report', requireAuth, asyncHandler(async (req, res) => void res.json(await reportTeamScores(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
+  router.post('/matches/:matchId/confirm', requireAuth, asyncHandler(async (req, res) => void res.json(await confirmTeamScores(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
+  router.post('/matches/:matchId/map3', requireAuth, asyncHandler(async (req, res) => void res.json(await pickTeamMap3(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
+  router.post('/matches/:matchId/resolve', requireAuth, asyncHandler(async (req, res) => void res.json(await resolveTeamMatch(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
+
   router.post('/invites/:inviteId/answer', requireAuth, asyncHandler(async (req, res) => void res.json(await answerInvite(currentUser(res).id, req.params.inviteId, req.body))));
   router.delete('/invites/:inviteId', requireAuth, asyncHandler(async (req, res) => void res.json(await cancelInvite(currentUser(res).id, req.params.inviteId))));
 
   router.get('/:id', asyncHandler(async (req, res) => void res.json(await getTeam(uuidParam(req, 'id')))));
+  router.get('/:id/matches', asyncHandler(async (req, res) => void res.json({ matches: await teamMatchHistory(uuidParam(req, 'id')) })));
   router.patch('/:id', requireAuth, asyncHandler(async (req, res) => void res.json(await updateTeam(currentUser(res).id, uuidParam(req, 'id'), req.body))));
   router.delete('/:id', requireAuth, asyncHandler(async (req, res) => void res.json(await disbandTeam(currentUser(res).id, uuidParam(req, 'id')))));
   router.get('/:id/search', requireAuth, asyncHandler(async (req, res) => void res.json(await searchInvitable(currentUser(res).id, uuidParam(req, 'id'), req.query.q))));

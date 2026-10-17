@@ -159,7 +159,7 @@ export async function getTeam(teamId: string) {
 
 // --- Accès ---------------------------------------------------------------------------
 
-async function membershipOf(userId: string): Promise<(MemberRow & { isOwner: boolean }) | null> {
+export async function membershipOf(userId: string): Promise<(MemberRow & { isOwner: boolean }) | null> {
   const member = unwrap(await supabase.from('team_members').select('user_id, team_id, role, starter, joined_at').eq('user_id', userId).maybeSingle()) as MemberRow | null;
   if (!member) return null;
   const team = unwrap(await supabase.from('teams').select('owner_id').eq('id', member.team_id).single()) as { owner_id: string };
@@ -458,6 +458,11 @@ export async function cancelInvite(userId: string, inviteId: unknown) {
   return { ok: true };
 }
 
+/** Effectif modifié : l'équipe sort de la file des matchs (ses titulaires ne sont peut-être plus là). */
+async function leaveQueueOnChange(teamId: string): Promise<void> {
+  await supabase.from('team_queue').delete().eq('team_id', teamId);
+}
+
 // --- Effectif ---------------------------------------------------------------------------
 
 async function targetIn(teamId: string, targetId: string): Promise<TeamActor> {
@@ -489,6 +494,7 @@ export async function kickMember(userId: string, teamId: string, targetId: strin
   const target = await targetIn(teamId, targetId);
   if (!canDo(actor, 'kick', target)) forbid(target.isOwner ? 'Le Leader à la couronne ne peut pas être exclu.' : 'Seul le Leader à la couronne peut exclure un Leader.');
   unwrap(await supabase.rpc('team_remove_member', { p_team: teamId, p_user: targetId, p_left: false }));
+  await leaveQueueOnChange(teamId);
   const team = await teamRow(teamId);
   await pushToUsers([targetId], { title: `Tu ne fais plus partie de ${team.name}`, body: 'Un Leader t’a retiré de l’équipe.', url: '/cod/equipe', tag: `equipe-${teamId}` });
   return getTeam(teamId);
@@ -499,6 +505,7 @@ export async function leaveTeam(userId: string) {
   const member = await membershipOf(userId);
   if (!member) throw new HttpError(409, 'NOT_IN_TEAM', 'Tu ne fais partie d’aucune équipe.');
   unwrap(await supabase.rpc('team_remove_member', { p_team: member.team_id, p_user: userId, p_left: true }));
+  await leaveQueueOnChange(member.team_id);
   return { ok: true };
 }
 
@@ -519,6 +526,7 @@ export async function disbandTeam(userId: string, teamId: string) {
   const members = (await membersOf(teamId)).map((member) => member.user_id).filter((id) => id !== userId);
   const team = await teamRow(teamId);
   unwrap(await supabase.rpc('team_disband', { p_team: teamId }));
+  await leaveQueueOnChange(teamId);
   await pushToUsers(members, { title: `${team.name} a été dissoute`, body: 'Tu peux rejoindre une autre équipe.', url: '/cod/equipes', tag: `equipe-${teamId}` });
   return { ok: true };
 }
@@ -676,6 +684,7 @@ export async function adminDisbandTeam(staffId: string, teamId: string) {
   const team = await teamRow(teamId);
   const members = (await membersOf(teamId)).map((member) => member.user_id);
   unwrap(await supabase.rpc('team_disband', { p_team: teamId }));
+  await leaveQueueOnChange(teamId);
   await resolveTeamReports(teamId, staffId);
   await pushToUsers(members, {
     title: `${team.name} a été dissoute`,
