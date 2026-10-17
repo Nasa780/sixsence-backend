@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { currentUser, optionalAuth, requireAuth, viewerOf } from '../auth.js';
 import { asyncHandler, uuidParam } from '../errors.js';
 import {
+  addTeamProof,
   confirmTeamScores,
   getTeamMatch,
   joinTeamQueue,
@@ -65,6 +66,7 @@ import {
  *   POST   /teams/matches/:matchId/report      déclarer les scores (Leader) { scores: [[a, b], …] } (point de vue de l'équipe 1)
  *   POST   /teams/matches/:matchId/confirm     confirmer ou contester (Leader adverse) { accept }
  *   POST   /teams/matches/:matchId/map3        choisir la map 3 (Leader de l'équipe qui a gagné le plus de manches) { map }
+ *   POST   /teams/matches/:matchId/proofs      enregistrer une capture déjà envoyée (titulaire) { path }
  *   POST   /teams/matches/:matchId/resolve     arbitrage { scores: [[a, b], …] | null (annuler) }
  */
 export function teamsRouter(): Router {
@@ -84,6 +86,7 @@ export function teamsRouter(): Router {
   router.post('/matches/:matchId/report', requireAuth, asyncHandler(async (req, res) => void res.json(await reportTeamScores(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/confirm', requireAuth, asyncHandler(async (req, res) => void res.json(await confirmTeamScores(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/map3', requireAuth, asyncHandler(async (req, res) => void res.json(await pickTeamMap3(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
+  router.post('/matches/:matchId/proofs', requireAuth, asyncHandler(async (req, res) => void res.json(await addTeamProof(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/resolve', requireAuth, asyncHandler(async (req, res) => void res.json(await resolveTeamMatch(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
 
   router.post('/invites/:inviteId/answer', requireAuth, asyncHandler(async (req, res) => void res.json(await answerInvite(currentUser(res).id, req.params.inviteId, req.body))));

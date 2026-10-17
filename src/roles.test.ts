@@ -20,6 +20,7 @@ describe("droits sur l'administration", () => {
     assert.equal(can('arbitre', 'POST', '/players/abc/sanctions'), false);
     assert.equal(can('arbitre', 'POST', '/events'), false);
     assert.equal(can('arbitre', 'GET', '/teams'), false);
+    assert.equal(can('arbitre', 'GET', '/team-disputes'), true);
   });
 
   it('le staff modère et sanctionne, sans gérer le site', () => {

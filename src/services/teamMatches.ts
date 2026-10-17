@@ -219,18 +219,24 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
   };
 
   let viewer = null;
+  let proofs: { id: number; userId: string; username: string; url: string; createdAt: string }[] | null = null;
   if (viewerId) {
     const side = await leaderSide(match, viewerId);
     const referee = await isReferee(viewerId);
     const state = seriesState(match.scores);
+    const isPlayer = ids.includes(viewerId);
     viewer = {
       leaderOf: side,
       referee,
+      isPlayer,
       canReport: Boolean(side) && match.status === 'in_progress' && (state.phase === 'maps12' || (state.phase === 'map3' && match.maps.length === 3)),
       canConfirm: Boolean(side) && match.status === 'awaiting_confirmation' && match.reported_team !== side,
       canPickMap3: Boolean(side) && match.status === 'in_progress' && state.phase === 'map3' && match.maps.length === 2 && match.map3_picker === side,
       canResolve: referee && OPEN.includes(match.status),
+      canProve: isPlayer && proofWindowOpen(match),
     };
+    // Captures : visibles des joueurs du match et des arbitres seulement (liens signés d'une heure).
+    if (isPlayer || referee) proofs = await proofsOf(match.id, players);
   }
   return {
     id: match.id,
@@ -256,8 +262,79 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
     completedAt: match.completed_at,
     mapPool: match.status === 'in_progress' && match.maps.length === 2 && match.scores.length === 2 ? config.cod.maps.filter((map) => !match.maps.some((m) => m.map === map)) : [],
     confirmMinutes: config.cod.confirmMinutes,
+    proofs,
     viewer,
   };
+}
+
+// --- Captures de preuve -----------------------------------------------------------------------
+
+const PROOF_BUCKET = 'team-match-proofs';
+const MAX_PROOFS = 5;
+
+/** Envoi possible pendant le match et jusqu'à 24 h après sa fin (comme le bucket, migration 0027). */
+function proofWindowOpen(match: TeamMatch): boolean {
+  if (OPEN.includes(match.status)) return true;
+  return match.status === 'completed' && Boolean(match.completed_at) && Date.now() - new Date(match.completed_at!).getTime() < 24 * 3600_000;
+}
+
+async function proofsOf(matchId: string, players: { id: string; username: string }[]) {
+  const rows = (unwrap(await supabase.from('team_match_proofs').select('id, user_id, storage_path, created_at').eq('match_id', matchId).order('created_at')) ?? []) as {
+    id: number;
+    user_id: string;
+    storage_path: string;
+    created_at: string;
+  }[];
+  if (rows.length === 0) return [];
+  const { data, error } = await supabase.storage.from(PROOF_BUCKET).createSignedUrls(rows.map((row) => row.storage_path), 3600);
+  if (error) {
+    console.warn('[team-match] liens des captures impossibles', error.message);
+    return [];
+  }
+  const urls = new Map((data ?? []).filter((item) => item.signedUrl).map((item) => [item.path, item.signedUrl]));
+  const names = new Map(players.map((player) => [player.id, player.username]));
+  return rows
+    .filter((row) => urls.has(row.storage_path))
+    .map((row) => ({ id: row.id, userId: row.user_id, username: names.get(row.user_id) ?? 'Joueur', url: urls.get(row.storage_path)!, createdAt: row.created_at }));
+}
+
+/** Enregistre une capture déjà envoyée par un titulaire dans le bucket (dossier <match>/<joueur>/). */
+export async function addTeamProof(userId: string, matchId: string, body: unknown) {
+  const match = await matchRow(matchId);
+  if (![...match.roster_a, ...match.roster_b].includes(userId)) throw new HttpError(403, 'NOT_A_PLAYER', 'Tu ne joues pas ce match.');
+  if (!proofWindowOpen(match)) throw new HttpError(409, 'MATCH_CLOSED', 'Les captures ne sont plus acceptées pour ce match (24 h après la fin).');
+  const path = (body as { path?: unknown } | undefined)?.path;
+  const prefix = `${matchId}/${userId}/`;
+  if (typeof path !== 'string' || !path.startsWith(prefix) || !/^[A-Za-z0-9._-]+\.(png|jpe?g|webp)$/.test(path.slice(prefix.length))) {
+    throw new HttpError(400, 'INVALID_PROOF', 'Fichier de preuve invalide.');
+  }
+  const { count, error } = await supabase.from('team_match_proofs').select('id', { count: 'exact', head: true }).eq('match_id', matchId).eq('user_id', userId);
+  if (error) throw fromDbError(error);
+  if ((count ?? 0) >= MAX_PROOFS) throw new HttpError(409, 'TOO_MANY_PROOFS', `Tu as déjà envoyé ${MAX_PROOFS} captures pour ce match.`);
+  unwrap(await supabase.from('team_match_proofs').insert({ match_id: matchId, user_id: userId, storage_path: path }));
+  return getTeamMatch(matchId, userId);
+}
+
+// --- Administration ------------------------------------------------------------------------------
+
+/** Matchs d'équipe contestés, pour l'onglet admin « Contestations ». */
+export async function listTeamDisputes() {
+  const rows = (unwrap(await supabase.from('team_matches').select('*').eq('status', 'disputed').order('updated_at', { ascending: true })) ?? []) as TeamMatch[];
+  const teams = await teamsById([...new Set(rows.flatMap((row) => [row.team_a, row.team_b]))]);
+  const card = (id: string) => {
+    const team = teams.get(id);
+    return team ? { id: team.id, name: team.name, tag: team.tag, color: team.color, logoUrl: team.logo_url } : null;
+  };
+  return rows.map((row) => ({
+    id: row.id,
+    teamA: card(row.team_a),
+    teamB: card(row.team_b),
+    maps: row.maps,
+    scores: row.scores,
+    pendingScores: row.pending_scores,
+    reportedTeam: row.reported_team,
+    disputedAt: row.updated_at,
+  }));
 }
 
 /** Un Leader déclare les scores de l'étape en cours (maps 1 et 2, ou map 3). */

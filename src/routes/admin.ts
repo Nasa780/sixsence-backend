@@ -9,6 +9,7 @@ import { closeCase, listForAdmin } from '../services/moderation.js';
 import { announceEventCancelled, announceNewEvent, announceSeasonClosed, onBadgesChanged, onTeamRoleChanged, syncAllRankRoles, syncTeamAndBadgeRoles } from '../services/community.js';
 import { applySanction, liftSanction, listSanctions } from '../services/sanctions.js';
 import { forgetSeasons, syncAllCards, syncCards } from '../services/cards.js';
+import { listTeamDisputes } from '../services/teamMatches.js';
 import { adminDisbandTeam, adminTeamReports, adminTeams, closeTeamReport, moderateTeam } from '../services/teams.js';
 import { supabase } from '../supabase.js';
 
@@ -20,6 +21,7 @@ import { supabase } from '../supabase.js';
  *
  *   GET    /admin/overview                 chiffres du tableau de bord
  *   GET    /admin/disputes                 matchs contestés
+ *   GET    /admin/team-disputes            matchs d'équipe contestés (arbitrage sur la feuille de match)
  *   GET    /admin/matches?q=               matchs récents (recherche par pseudo), corrections et demandes en attente
  *   GET    /admin/corrections              historique des corrections de matchs terminés (admin)
  *   GET    /admin/arbitrations?status=&match=  demandes d'arbitrage (open | resolved | rejected), d'un match
@@ -60,6 +62,9 @@ export function adminRouter(): Router {
   // --- Matchs ----------------------------------------------------------------
   router.get('/disputes', asyncHandler(async (_req, res) => {
     res.json({ matches: await listDisputes() });
+  }));
+  router.get('/team-disputes', asyncHandler(async (_req, res) => {
+    res.json({ matches: await listTeamDisputes() });
   }));
   router.get('/matches', asyncHandler(async (req, res) => {
     res.json({ matches: await recentMatches(typeof req.query.q === 'string' ? req.query.q : '') });
