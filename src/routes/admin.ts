@@ -1,5 +1,6 @@
 import { Router, type RequestHandler } from 'express';
 import { currentUser, requireAuth, requireRoles } from '../auth.js';
+import { config } from '../config.js';
 import { ROLES, rolesFor, type Role } from '../roles.js';
 import { HttpError, asyncHandler, unwrap, uuidParam } from '../errors.js';
 import { STAFF_BADGES, listCorrections, overview, parseBadges, parseEventPatch, parseFounder, parsePartner, recentMatches, searchPlayers } from '../services/admin.js';
@@ -253,7 +254,7 @@ export function adminRouter(): Router {
     const others = await syncTeamAndBadgeRoles();
     // Rôles des équipes (Match team) : créés s'ils manquent, effectifs remis à jour.
     const teams = (unwrap(await supabase.from('teams').select('id').is('disbanded_at', null)) ?? []) as { id: string }[];
-    for (const team of teams) syncTeamRole(team.id);
+    if (config.teams.enabled) for (const team of teams) syncTeamRole(team.id);
     res.json({ updated: ranks + others });
   }));
 

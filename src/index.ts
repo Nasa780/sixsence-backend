@@ -245,6 +245,7 @@ void pushPublicKey();
 const sweeper = setInterval(() => void sweepMatches(), 60_000);
 // Matchs d'équipe : file (au cas où), scores non confirmés, matchs abandonnés, salons et résultats Discord ; tournois (départ, tableau).
 const teamTimer = setInterval(() => {
+  if (!config.teams.enabled) return; // mode Match team en pause (TEAM_MODE)
   void tryCreateTeamMatches();
   void sweepTeamMatches();
   void sweepTournaments();
