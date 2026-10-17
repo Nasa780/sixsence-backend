@@ -68,6 +68,7 @@ const DB_ERRORS: Record<string, [status: number, message: string]> = {
   OWNER_MUST_TRANSFER: [409, 'Transmets la couronne à un autre membre avant de quitter l’équipe (ou dissous-la).'],
   NOT_TEAM_OWNER: [403, 'Seul le Leader à la couronne peut faire cela.'],
   STARTERS_FULL: [409, 'L’équipe a déjà 4 titulaires : passe d’abord un titulaire en remplaçant.'],
+  TOURNAMENT_MATCH: [409, 'Un match de tournoi ne se corrige pas ici : l’admin désigne le vainqueur depuis l’onglet Tournoi.'],
 };
 
 export function fromDbError(error: { message: string; details?: string | null }): HttpError {

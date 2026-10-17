@@ -1,8 +1,9 @@
-import { isReferee } from '../auth.js';
+import { isReferee, roleOf } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { SUPPRESS_EMBEDS, discord, discordEnabled, dm, notifyStaff } from './discord.js';
+import { correctionWindowHours, withinWindow } from './correctionPolicy.js';
 import { pushToUsers } from './push.js';
 import { deciderPicker, declarationError, isCompleteSeries, pickMaps, seriesState, type MapScore, type Side } from './teamMatchPolicy.js';
 import { membershipOf } from './teams.js';
@@ -44,6 +45,9 @@ export interface TeamMatch {
   tournament_id: string | null;
   round: number | null;
   best_of: number;
+  /** Correction après validation (0029). */
+  corrected_at: string | null;
+  correction_reason: string | null;
 }
 
 const OPEN = ['in_progress', 'awaiting_confirmation', 'disputed'];
@@ -240,6 +244,7 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
       canPickMap3: Boolean(side) && match.status === 'in_progress' && state.phase === 'decider' && match.maps.length === match.best_of - 1 && match.map3_picker === side,
       canResolve: referee && OPEN.includes(match.status),
       canProve: isPlayer && proofWindowOpen(match),
+      canCorrect: referee && match.status === 'completed' && !match.tournament_id && withinWindow(match.completed_at, correctionWindowHours(await roleOf(viewerId))),
     };
     // Captures : visibles des joueurs du match et des arbitres seulement (liens signés d'une heure).
     if (isPlayer || referee) proofs = await proofsOf(match.id, players);
@@ -264,6 +269,8 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
     winner: match.winner,
     pointsChanges: match.points_changes,
     cancelReason: match.cancel_reason,
+    correctedAt: match.corrected_at,
+    correctionReason: match.correction_reason,
     createdAt: match.created_at,
     completedAt: match.completed_at,
     mapPool:
@@ -509,6 +516,40 @@ async function tournamentLabel(tournamentId: string, round: number | null) {
   return { id: row.id, name: row.name, round: round ? roundName(round, roundsFor(row.size)) : null };
 }
 
+/**
+ * Correction d'un match terminé (mauvaise déclaration…) : nouveaux scores de toute la série (le
+ * vainqueur peut changer) ou annulation (scores null). Arbitre et staff : 48 h ; admin : sans limite.
+ * Pas pour les matchs de tournoi (l'admin désigne le vainqueur depuis l'onglet Tournoi).
+ */
+export async function correctTeamMatch(staffId: string, matchId: string, body: unknown) {
+  if (!(await isReferee(staffId))) throw new HttpError(403, 'FORBIDDEN', 'Réservé à l’équipe SixSence.');
+  const match = await matchRow(matchId);
+  const input = (body ?? {}) as { scores?: unknown; reason?: unknown };
+  const reason = typeof input.reason === 'string' ? input.reason : '';
+  let winner: Side | null = null;
+  if (input.scores !== null) {
+    if (!isCompleteSeries(input.scores, match.best_of)) throw new HttpError(400, 'INVALID_SCORES', 'Scores invalides : la série doit se terminer sur la dernière map saisie.');
+    winner = seriesState(input.scores, match.best_of).winner;
+  }
+  unwrap(
+    await supabase.rpc('team_match_correct', {
+      p_match: matchId,
+      p_scores: input.scores === null ? null : input.scores,
+      p_winner: winner,
+      p_staff: staffId,
+      p_reason: reason,
+      p_max_hours: correctionWindowHours(await roleOf(staffId)),
+    }),
+  );
+  await pushToUsers([...match.roster_a, ...match.roster_b], {
+    title: 'Résultat du match team corrigé',
+    body: input.scores === null ? 'Le match a été annulé par l’équipe SixSence : points rendus.' : 'L’équipe SixSence a corrigé les scores : points recalculés.',
+    url: matchUrl(matchId),
+    tag: `team-match-${matchId}`,
+  });
+  return getTeamMatch(matchId, staffId);
+}
+
 // --- Historique d'une équipe ----------------------------------------------------------------
 
 export async function teamMatchHistory(teamId: string) {
@@ -578,7 +619,7 @@ async function sweepTeamDiscord(): Promise<void> {
           method: 'POST',
           body: {
             content:
-              `⚔️ **Match team** · [${a?.tag}] ${a?.name} vs [${b?.tag}] ${b?.name} — victoire de **${winner?.name}** (+${gain} pts)\n` +
+              `⚔️ **Match team** · [${a?.tag}] ${a?.name} vs [${b?.tag}] ${b?.name} — victoire de **${winner?.name}** (+${gain} pts)${match.corrected_at ? ' (résultat corrigé)' : ''}\n` +
               `${match.scores.map(([x, y], i) => `${match.maps[i]?.map ?? `Map ${i + 1}`} ${x}-${y}`).join(' · ')}\n${config.siteUrl}${matchUrl(match.id)}`,
             flags: SUPPRESS_EMBEDS,
           },
@@ -586,7 +627,7 @@ async function sweepTeamDiscord(): Promise<void> {
       }
     }
     await supabase.from('team_matches').update({ discord_done: true }).eq('id', match.id);
-    if (match.status === 'completed') {
+    if (match.status === 'completed' && !match.corrected_at) {
       await pushToUsers([...match.roster_a, ...match.roster_b], {
         title: 'Match team terminé',
         body: `Victoire de l’équipe ${match.winner === 'A' ? '1' : '2'} · ${match.scores.map(([x, y]) => `${x}-${y}`).join(' · ')}`,

@@ -4,6 +4,7 @@ import { supabase } from '../supabase.js';
 import { discordEnabled, dm, notifyStaff } from './discord.js';
 import { rankPlayers } from './playerSearch.js';
 import { pushToUsers } from './push.js';
+import { addTeamRole, deleteTeamRole, removeTeamRole, syncTeamRole } from './teamDiscord.js';
 import {
   TEAM_LIMITS,
   TEAM_REPORT_REASONS,
@@ -284,6 +285,7 @@ export async function createTeam(userId: string, body: unknown) {
   const team = unwrap(
     await supabase.rpc('team_create', { p_owner: userId, p_name: input.name, p_tag: input.tag, p_description: input.description ?? null, p_color: input.color }),
   ) as TeamRow;
+  syncTeamRole(team.id);
   return getTeam(team.id);
 }
 
@@ -314,6 +316,7 @@ export async function updateTeam(userId: string, teamId: string, body: unknown) 
     if (rows.some((row) => row.tag === input.tag)) throw new HttpError(409, 'TEAM_TAG_TAKEN', 'Ce tag est déjà pris.');
   }
   unwrap(await supabase.from('teams').update(patch).eq('id', teamId).is('disbanded_at', null));
+  if (input.name !== undefined || input.tag !== undefined || input.color !== undefined) syncTeamRole(teamId);
   return getTeam(teamId);
 }
 
@@ -431,6 +434,7 @@ export async function answerInvite(userId: string, inviteId: unknown, body: unkn
   const joiner = unwrap(await supabase.from('users').select('username').eq('id', invite.user_id).single()) as { username: string };
   await assertEligible(invite.user_id, invite.kind === 'invite' ? 'Tu' : joiner.username);
   unwrap(await supabase.rpc('team_add_member', { p_team: invite.team_id, p_user: invite.user_id }));
+  addTeamRole(invite.team_id, invite.user_id);
   unwrap(await supabase.from('team_invites').update({ status: 'accepted', answered_at: new Date().toISOString() }).eq('id', id));
 
   const team = await teamRow(invite.team_id);
@@ -498,6 +502,7 @@ export async function kickMember(userId: string, teamId: string, targetId: strin
   if (!canDo(actor, 'kick', target)) forbid(target.isOwner ? 'Le Leader à la couronne ne peut pas être exclu.' : 'Seul le Leader à la couronne peut exclure un Leader.');
   unwrap(await supabase.rpc('team_remove_member', { p_team: teamId, p_user: targetId, p_left: false }));
   await leaveQueueOnChange(teamId);
+  removeTeamRole(teamId, targetId);
   const team = await teamRow(teamId);
   await pushToUsers([targetId], { title: `Tu ne fais plus partie de ${team.name}`, body: 'Un Leader t’a retiré de l’équipe.', url: '/cod/equipe', tag: `equipe-${teamId}` });
   return getTeam(teamId);
@@ -509,6 +514,9 @@ export async function leaveTeam(userId: string) {
   if (!member) throw new HttpError(409, 'NOT_IN_TEAM', 'Tu ne fais partie d’aucune équipe.');
   unwrap(await supabase.rpc('team_remove_member', { p_team: member.team_id, p_user: userId, p_left: true }));
   await leaveQueueOnChange(member.team_id);
+  // Seul membre restant : l'équipe vient d'être dissoute, son rôle disparaît.
+  if (member.isOwner) deleteTeamRole(member.team_id);
+  else removeTeamRole(member.team_id, userId);
   return { ok: true };
 }
 
@@ -530,6 +538,7 @@ export async function disbandTeam(userId: string, teamId: string) {
   const team = await teamRow(teamId);
   unwrap(await supabase.rpc('team_disband', { p_team: teamId }));
   await leaveQueueOnChange(teamId);
+  deleteTeamRole(teamId);
   await pushToUsers(members, { title: `${team.name} a été dissoute`, body: 'Tu peux rejoindre une autre équipe.', url: '/cod/equipes', tag: `equipe-${teamId}` });
   return { ok: true };
 }
@@ -672,6 +681,7 @@ export async function moderateTeam(staffId: string, teamId: string, body: unknow
   }
   if (Object.keys(patch).length === 0) throw new HttpError(400, 'INVALID_TEAM', 'Rien à modifier.');
   unwrap(await supabase.from('teams').update(patch).eq('id', teamId));
+  if (patch.name) syncTeamRole(teamId);
   await resolveTeamReports(teamId, staffId);
   await pushToUsers(await leadersOf(teamId), {
     title: `Fiche de ${team.name} modérée`,
@@ -688,6 +698,7 @@ export async function adminDisbandTeam(staffId: string, teamId: string) {
   const members = (await membersOf(teamId)).map((member) => member.user_id);
   unwrap(await supabase.rpc('team_disband', { p_team: teamId }));
   await leaveQueueOnChange(teamId);
+  deleteTeamRole(teamId);
   await resolveTeamReports(teamId, staffId);
   await pushToUsers(members, {
     title: `${team.name} a été dissoute`,
