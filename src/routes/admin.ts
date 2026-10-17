@@ -9,12 +9,13 @@ import { closeCase, listForAdmin } from '../services/moderation.js';
 import { announceEventCancelled, announceNewEvent, announceSeasonClosed, onBadgesChanged, onTeamRoleChanged, syncAllRankRoles, syncTeamAndBadgeRoles } from '../services/community.js';
 import { applySanction, liftSanction, listSanctions } from '../services/sanctions.js';
 import { forgetSeasons, syncAllCards, syncCards } from '../services/cards.js';
+import { adminDisbandTeam, adminTeamReports, adminTeams, closeTeamReport, moderateTeam } from '../services/teams.js';
 import { supabase } from '../supabase.js';
 
 /**
  * Administration. Droits selon le rôle (voir guard ci-dessous) :
  *   arbitre : tableau de bord, contestations, demandes d'arbitrage
- *   staff   : + signalements, recherche de joueurs et sanctions
+ *   staff   : + signalements, recherche de joueurs, sanctions et équipes
  *   admin   : tout
  *
  *   GET    /admin/overview                 chiffres du tableau de bord
@@ -25,6 +26,11 @@ import { supabase } from '../supabase.js';
  *   POST   /admin/arbitrations/:id         { status, resolution } traiter une demande
  *   GET    /admin/reports?status=          signalements de joueurs
  *   POST   /admin/reports/:id              { status, resolution } traiter un signalement
+ *   GET    /admin/teams?q=                 équipes actives (signalées d'abord)
+ *   PATCH  /admin/teams/:id                { clearLogo?, clearBanner?, clearDescription?, name?, tag? } modérer une fiche
+ *   DELETE /admin/teams/:id                dissoudre une équipe
+ *   GET    /admin/team-reports?status=     signalements d'équipes
+ *   POST   /admin/team-reports/:id         { status: "resolved" | "rejected" }
  *   POST   /admin/matches/:id/cancel       annuler un match
  *   POST   /admin/events                   créer un événement GTA 6
  *   PATCH  /admin/events/:id               modifier (titre, dates, places, statut…)
@@ -74,6 +80,23 @@ export function adminRouter(): Router {
   }));
   router.post('/reports/:id', asyncHandler(async (req, res) => {
     res.json({ item: await closeCase('cod_player_reports', req.params.id, currentUser(res).id, req.body) });
+  }));
+
+  // --- Équipes (Match team) ----------------------------------------------------
+  router.get('/teams', asyncHandler(async (req, res) => {
+    res.json({ teams: await adminTeams(req.query.q) });
+  }));
+  router.patch('/teams/:id', asyncHandler(async (req, res) => {
+    res.json({ team: await moderateTeam(currentUser(res).id, uuidParam(req, 'id'), req.body) });
+  }));
+  router.delete('/teams/:id', asyncHandler(async (req, res) => {
+    res.json(await adminDisbandTeam(currentUser(res).id, uuidParam(req, 'id')));
+  }));
+  router.get('/team-reports', asyncHandler(async (req, res) => {
+    res.json({ items: await adminTeamReports(req.query.status) });
+  }));
+  router.post('/team-reports/:id', asyncHandler(async (req, res) => {
+    res.json(await closeTeamReport(currentUser(res).id, req.params.id, req.body));
   }));
 
   router.post('/matches/:id/cancel', asyncHandler(async (req, res) => {

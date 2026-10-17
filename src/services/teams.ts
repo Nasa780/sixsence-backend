@@ -542,3 +542,146 @@ export async function reportTeam(userId: string, teamId: string, body: unknown) 
   await notifyStaff(`⚑ Équipe signalée : **[${team.tag}] ${team.name}** — ${TEAM_REPORT_REASONS[input.reason]}${details ? ` : ${details}` : ''}\n${config.siteUrl}${teamUrl(teamId)}`);
   return { ok: true };
 }
+
+// --- Administration (staff et admins) ------------------------------------------------------
+
+const countBy = (rows: { team_id: string }[]) => rows.reduce((map, row) => map.set(row.team_id, (map.get(row.team_id) ?? 0) + 1), new Map<string, number>());
+
+/** Équipes actives pour l'onglet admin « Équipes » (recherche par nom ou tag), signalées d'abord. */
+export async function adminTeams(query: unknown) {
+  const q = typeof query === 'string' ? query.trim().toLowerCase().slice(0, 40) : '';
+  const [teams, members, reports] = await Promise.all([
+    activeTeams(),
+    supabase.from('team_members').select('team_id'),
+    supabase.from('team_reports').select('team_id').eq('status', 'open'),
+  ]);
+  if (members.error) throw fromDbError(members.error);
+  if (reports.error) throw fromDbError(reports.error);
+  const sizes = countBy((members.data ?? []) as { team_id: string }[]);
+  const open = countBy((reports.data ?? []) as { team_id: string }[]);
+  const owners = await playersById([...new Set(teams.map((team) => team.owner_id))]);
+  return teams
+    .map((team, index) => ({
+      ...publicTeam(team),
+      position: index + 1,
+      size: sizes.get(team.id) ?? 0,
+      openReports: open.get(team.id) ?? 0,
+      crown: owners.get(team.owner_id)?.username ?? 'Joueur',
+    }))
+    .filter((team) => !q || team.name.toLowerCase().includes(q) || team.tag.toLowerCase().includes(q))
+    .sort((a, b) => b.openReports - a.openReports || a.position - b.position);
+}
+
+/** Signalements d'équipes (les plus récents d'abord), avec l'équipe et l'auteur. */
+export async function adminTeamReports(status: unknown) {
+  let request = supabase
+    .from('team_reports')
+    .select('id, team_id, reporter_id, reason, details, status, created_at, resolved_at')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (status === 'open' || status === 'resolved' || status === 'rejected') request = request.eq('status', status);
+  const rows = (unwrap(await request) ?? []) as {
+    id: number;
+    team_id: string;
+    reporter_id: string;
+    reason: string;
+    details: string | null;
+    status: string;
+    created_at: string;
+    resolved_at: string | null;
+  }[];
+  const teams = rows.length ? ((unwrap(await supabase.from('teams').select(TEAM_COLUMNS).in('id', [...new Set(rows.map((row) => row.team_id))])) ?? []) as TeamRow[]) : [];
+  const teamById = new Map(teams.map((team) => [team.id, publicTeam(team)]));
+  const reporters = await playersById([...new Set(rows.map((row) => row.reporter_id))]);
+  return rows.map((row) => ({
+    id: row.id,
+    reason: row.reason,
+    reasonLabel: TEAM_REPORT_REASONS[row.reason] ?? row.reason,
+    details: row.details,
+    status: row.status,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at,
+    team: teamById.get(row.team_id) ?? null,
+    reporter: reporters.get(row.reporter_id)?.username ?? 'Joueur',
+  }));
+}
+
+export async function closeTeamReport(staffId: string, reportId: unknown, body: unknown) {
+  const id = Number(reportId);
+  const status = (body as { status?: unknown } | undefined)?.status;
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, 'INVALID_ID', 'Identifiant invalide.');
+  if (status !== 'resolved' && status !== 'rejected') throw new HttpError(400, 'INVALID_STATUS', 'Statut invalide.');
+  const row = unwrap(
+    await supabase
+      .from('team_reports')
+      .update({ status, resolved_by: staffId, resolved_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('status', 'open')
+      .select('id')
+      .maybeSingle(),
+  );
+  if (!row) throw new HttpError(404, 'REPORT_NOT_FOUND', 'Signalement introuvable ou déjà traité.');
+  return { ok: true };
+}
+
+async function resolveTeamReports(teamId: string, staffId: string): Promise<void> {
+  unwrap(
+    await supabase
+      .from('team_reports')
+      .update({ status: 'resolved', resolved_by: staffId, resolved_at: new Date().toISOString() })
+      .eq('team_id', teamId)
+      .eq('status', 'open'),
+  );
+}
+
+/**
+ * Modération d'une fiche : retirer le logo, la bannière ou la description, renommer (nom et tag).
+ * Les signalements ouverts de l'équipe sont classés « traités » et ses Leaders prévenus.
+ */
+export async function moderateTeam(staffId: string, teamId: string, body: unknown) {
+  const input = (body ?? {}) as { clearLogo?: unknown; clearBanner?: unknown; clearDescription?: unknown; name?: unknown; tag?: unknown };
+  const team = await teamRow(teamId);
+  if (team.disbanded_at) throw new HttpError(404, 'TEAM_NOT_FOUND', 'Équipe introuvable.');
+  const patch: Record<string, unknown> = {};
+  if (input.clearLogo === true) patch.logo_url = null;
+  if (input.clearBanner === true) patch.banner_url = null;
+  if (input.clearDescription === true) patch.description = null;
+  if (input.name !== undefined || input.tag !== undefined) {
+    let parsed: { name?: string; tag?: string } = {};
+    try {
+      parsed = parseTeamInput({ name: input.name ?? team.name, tag: input.tag ?? team.tag }, { create: true });
+    } catch (error) {
+      badInput(error);
+    }
+    const rows = (unwrap(await supabase.from('teams').select('name, tag').is('disbanded_at', null).neq('id', teamId)) ?? []) as { name: string; tag: string }[];
+    if (rows.some((row) => row.name.toLowerCase() === parsed.name!.toLowerCase())) throw new HttpError(409, 'TEAM_NAME_TAKEN', 'Ce nom d’équipe est déjà pris.');
+    if (rows.some((row) => row.tag === parsed.tag)) throw new HttpError(409, 'TEAM_TAG_TAKEN', 'Ce tag est déjà pris.');
+    patch.name = parsed.name;
+    patch.tag = parsed.tag;
+  }
+  if (Object.keys(patch).length === 0) throw new HttpError(400, 'INVALID_TEAM', 'Rien à modifier.');
+  unwrap(await supabase.from('teams').update(patch).eq('id', teamId));
+  await resolveTeamReports(teamId, staffId);
+  await pushToUsers(await leadersOf(teamId), {
+    title: `Fiche de ${team.name} modérée`,
+    body: 'L’équipe SixSence a modifié la fiche de ton équipe (contenu inapproprié).',
+    url: '/cod/equipe',
+    tag: `equipe-${teamId}`,
+  });
+  return getTeam(teamId);
+}
+
+/** Dissolution par l'équipe SixSence : effectif libéré, signalements classés, joueurs prévenus. */
+export async function adminDisbandTeam(staffId: string, teamId: string) {
+  const team = await teamRow(teamId);
+  const members = (await membersOf(teamId)).map((member) => member.user_id);
+  unwrap(await supabase.rpc('team_disband', { p_team: teamId }));
+  await resolveTeamReports(teamId, staffId);
+  await pushToUsers(members, {
+    title: `${team.name} a été dissoute`,
+    body: 'L’équipe SixSence a dissous ton équipe. Tu peux en rejoindre une autre.',
+    url: '/cod/equipes',
+    tag: `equipe-${teamId}`,
+  });
+  return { ok: true };
+}
