@@ -11,6 +11,7 @@ import { codRouter } from './routes/cod.js';
 import { errorsRouter } from './routes/errors.js';
 import { gtaRouter } from './routes/gta.js';
 import { pushRouter } from './routes/push.js';
+import { teamsRouter } from './routes/teams.js';
 import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { pointsPreview, sweepMatches } from './services/matches.js';
@@ -214,6 +215,7 @@ app.get(
 app.use('/cod', codRouter(hub));
 app.use('/gta', gtaRouter());
 app.use('/push', pushRouter());
+app.use('/teams', teamsRouter());
 app.use('/admin', adminRouter());
 app.use('/errors', errorsRouter());
 app.use(notFoundHandler);

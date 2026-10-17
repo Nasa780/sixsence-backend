@@ -58,6 +58,16 @@ const DB_ERRORS: Record<string, [status: number, message: string]> = {
   MEMBER_BANNED: [403, '{detail} est temporairement exclu de la file : le groupe ne peut pas la rejoindre.'],
   MEMBER_IN_MATCH: [409, '{detail} a déjà un match en cours.'],
   MEMBER_IN_QUEUE: [409, '{detail} est déjà dans une file.'],
+  // Équipes (Match team)
+  ALREADY_IN_TEAM: [409, 'Ce joueur fait déjà partie d’une équipe.'],
+  TEAM_NAME_TAKEN: [409, 'Ce nom d’équipe est déjà pris.'],
+  TEAM_TAG_TAKEN: [409, 'Ce tag est déjà pris.'],
+  TEAM_NOT_FOUND: [404, 'Équipe introuvable.'],
+  TEAM_FULL: [409, 'L’équipe est complète (8 joueurs).'],
+  NOT_IN_TEAM: [404, 'Ce joueur ne fait pas partie de l’équipe.'],
+  OWNER_MUST_TRANSFER: [409, 'Transmets la couronne à un autre membre avant de quitter l’équipe (ou dissous-la).'],
+  NOT_TEAM_OWNER: [403, 'Seul le Leader à la couronne peut faire cela.'],
+  STARTERS_FULL: [409, 'L’équipe a déjà 4 titulaires : passe d’abord un titulaire en remplaçant.'],
 };
 
 export function fromDbError(error: { message: string; details?: string | null }): HttpError {
