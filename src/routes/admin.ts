@@ -9,6 +9,7 @@ import { closeCase, listForAdmin } from '../services/moderation.js';
 import { announceEventCancelled, announceNewEvent, announceSeasonClosed, onBadgesChanged, onTeamRoleChanged, syncAllRankRoles, syncTeamAndBadgeRoles } from '../services/community.js';
 import { applySanction, liftSanction, listSanctions } from '../services/sanctions.js';
 import { forgetSeasons, syncAllCards, syncCards } from '../services/cards.js';
+import { syncTeamRole } from '../services/teamDiscord.js';
 import { listTeamDisputes } from '../services/teamMatches.js';
 import { cancelTournament, createTournament, forceEntryWinner, listTournaments, previewQualified } from '../services/tournaments.js';
 import { adminDisbandTeam, adminTeamReports, adminTeams, closeTeamReport, moderateTeam } from '../services/teams.js';
@@ -53,7 +54,7 @@ import { supabase } from '../supabase.js';
  *   POST   /admin/sanctions/:id/lift       { reason? } lever une sanction
  *   POST   /admin/players/:id/unban        lever une exclusion de la file
  *   POST   /admin/season/close             { nextName } clôturer la saison
- *   POST   /admin/discord/sync-roles       remettre à jour les rôles Discord (rangs, équipe, badges, MVP du mois)
+ *   POST   /admin/discord/sync-roles       remettre à jour les rôles Discord (rangs, équipe, badges, MVP du mois, rôles des équipes)
  */
 const guard: RequestHandler = (req, res, next) => requireRoles(...rolesFor(req.method, req.path))(req, res, next);
 
@@ -250,6 +251,9 @@ export function adminRouter(): Router {
   router.post('/discord/sync-roles', asyncHandler(async (_req, res) => {
     const ranks = await syncAllRankRoles();
     const others = await syncTeamAndBadgeRoles();
+    // Rôles des équipes (Match team) : créés s'ils manquent, effectifs remis à jour.
+    const teams = (unwrap(await supabase.from('teams').select('id').is('disbanded_at', null)) ?? []) as { id: string }[];
+    for (const team of teams) syncTeamRole(team.id);
     res.json({ updated: ranks + others });
   }));
 

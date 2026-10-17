@@ -4,6 +4,7 @@ import { asyncHandler, uuidParam } from '../errors.js';
 import {
   addTeamProof,
   confirmTeamScores,
+  correctTeamMatch,
   getTeamMatch,
   joinTeamQueue,
   leaveTeamQueue,
@@ -71,6 +72,7 @@ import {
  *   GET    /teams/tournament                   tournoi prévu ou en cours (sinon le dernier terminé), tableau, droits du visiteur
  *   GET    /teams/tournaments/:id              un tournoi
  *   POST   /teams/tournaments/:id/checkin      check-in d'un Leader (30 min avant) { roster: [ids parmi l'effectif figé] }
+ *   POST   /teams/matches/:matchId/correct     correction d'un match terminé (arbitre 48 h, admin sans limite) { scores | null, reason }
  *   POST   /teams/matches/:matchId/resolve     arbitrage { scores: [[a, b], …] | null (annuler) }
  */
 export function teamsRouter(): Router {
@@ -91,6 +93,7 @@ export function teamsRouter(): Router {
   router.post('/matches/:matchId/confirm', requireAuth, asyncHandler(async (req, res) => void res.json(await confirmTeamScores(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/map3', requireAuth, asyncHandler(async (req, res) => void res.json(await pickTeamMap3(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/proofs', requireAuth, asyncHandler(async (req, res) => void res.json(await addTeamProof(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
+  router.post('/matches/:matchId/correct', requireAuth, asyncHandler(async (req, res) => void res.json(await correctTeamMatch(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/resolve', requireAuth, asyncHandler(async (req, res) => void res.json(await resolveTeamMatch(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
 
   // --- Tournoi de fin de saison ------------------------------------------------------
