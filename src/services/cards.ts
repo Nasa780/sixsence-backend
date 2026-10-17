@@ -73,6 +73,7 @@ export async function computeStats(userId: string): Promise<CardStats & { callin
   ).length;
   const p = (profile.data ?? {}) as { peak_points?: number; points?: number; badges?: string[]; calling_card?: string };
   const role = (user.data as { role?: string } | null)?.role ?? 'member';
+  const { active } = await seasonIds();
 
   return {
     peak: Math.max(p.peak_points ?? 0, p.points ?? 0, ...seasonRows.map((row) => Math.max(row.peak_points ?? 0, row.points))),
@@ -86,6 +87,7 @@ export async function computeStats(userId: string): Promise<CardStats & { callin
     mvpMonths: ((mvpMonths.data ?? []) as { month: string }[]).map((row) => row.month.slice(0, 7)),
     // Pic de la saison (archivé depuis la migration 0020) ; à défaut, les points de fin de saison.
     seasons: seasonRows.map((row) => ({ id: row.season_id, position: row.position, played: row.wins + row.losses, peak: Math.max(row.peak_points ?? 0, row.points) })),
+    currentSeason: { id: active, peak: Math.max(p.peak_points ?? 0, p.points ?? 0) },
     badges: p.badges ?? [],
     team: role === 'admin' || role === 'staff' || role === 'arbitre',
     gtaEvents,

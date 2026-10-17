@@ -2,8 +2,8 @@
  * Cartes de visite : catalogue et règles d'obtention (fonctions pures, testées dans
  * cards.test.ts). Le site dessine les cartes (src/lib/cards.js) à partir des mêmes clés.
  *
- * Familles : par défaut, rangs (pic atteint), succès, saison (participant, top 10, champion et
- * carte du plus haut rang atteint pendant la saison ; exclusives),
+ * Familles : par défaut, rangs (rang atteint pendant la saison des cartes de rang, RANK_CARDS_SEASON ;
+ * exclusives, nouvelles cartes à chaque saison), succès, saison (participant, top 10, champion ; exclusives),
  * MVP (MVP du mois : une carte par mois, regroupées ; MVP ×10), communauté, GTA 6.
  * Une carte obtenue est définitive, sauf Partenaire et Staff (retirées avec le badge ou le rôle).
  */
@@ -26,6 +26,8 @@ export interface CardStats {
   mvpMonths: string[];
   /** Saisons archivées : classement final, matchs joués et pic de points de la saison. */
   seasons: { id: number; position: number | null; played: number; peak: number }[];
+  /** Saison en cours et pic de points atteint pendant celle-ci. */
+  currentSeason: { id: number | null; peak: number };
   badges: string[];
   /** Membre de l'équipe SixSence (admin, staff ou arbitre). */
   team: boolean;
@@ -54,6 +56,12 @@ export const MVP_MONTH_CARD = 'mvp-du-mois';
 /** Formats comptés pour « Polyvalent » (la file 1v1 de test est ignorée). */
 export const RANKED_FORMATS = ['2v2', '3v3', '4v4', '5v5'];
 
+/**
+ * Saison des cartes de rang actuelles : elles ne se gagnent que pendant cette saison (exclusives) ;
+ * chaque nouvelle saison aura ses propres cartes de rang. Les cartes obtenues restent obtenues.
+ */
+export const RANK_CARDS_SEASON = 1;
+
 const RANK_CARDS: { name: string; key: string; min: number; rarity: Rarity }[] = [
   { name: 'Argent', key: 'argent', min: 300, rarity: 'commune' },
   { name: 'Or', key: 'or', min: 600, rarity: 'commune' },
@@ -64,6 +72,12 @@ const RANK_CARDS: { name: string; key: string; min: number; rarity: Rarity }[] =
   { name: 'Champion', key: 'champion', min: 2100, rarity: 'legendaire' },
   { name: 'Légende', key: 'legende', min: 3000, rarity: 'legendaire' },
 ];
+
+/** Pic de points atteint pendant une saison (en cours ou archivée). */
+export function seasonPeak(stats: CardStats, seasonId: number): number {
+  const archived = stats.seasons.find((season) => season.id === seasonId)?.peak ?? 0;
+  return Math.max(archived, stats.currentSeason.id === seasonId ? stats.currentSeason.peak : 0);
+}
 
 const count = (value: (stats: CardStats) => number, goal: number) => ({
   eligible: (stats: CardStats) => value(stats) >= goal,
@@ -77,9 +91,10 @@ export const STATIC_CARDS: CardDef[] = [
     key: `rang-${rank.key}`,
     family: 'Rangs',
     name: rank.name,
-    condition: `Atteindre ${rank.name}`,
+    condition: `Atteindre ${rank.name} pendant la saison ${RANK_CARDS_SEASON}`,
     rarity: rank.rarity,
-    ...count((stats) => stats.peak, rank.min),
+    exclusive: true,
+    ...count((stats) => seasonPeak(stats, RANK_CARDS_SEASON), rank.min),
   })),
   { key: 'premier-sang', family: 'Succès', name: 'Premier sang', condition: '1re victoire', rarity: 'commune', ...count((s) => s.wins, 1) },
   { key: 'domination', family: 'Succès', name: 'Domination', condition: '10 victoires', rarity: 'commune', ...count((s) => s.wins, 10) },
@@ -115,17 +130,8 @@ export const STATIC_CARDS: CardDef[] = [
   { key: 'habitue', family: 'GTA 6', name: 'Habitué', condition: '5 événements GTA 6', rarity: 'rare', ...count((s) => s.gtaEvents, 5) },
 ];
 
-/** Rangs des cartes de saison : Bronze puis les mêmes paliers que les cartes de rang. */
-const SEASON_RANKS = [{ name: 'Bronze', key: 'bronze', min: 0, rarity: 'commune' as Rarity }, ...RANK_CARDS];
-
-/** Rang (clé) correspondant à un total de points. */
-export function seasonRankKey(points: number): string {
-  return [...SEASON_RANKS].reverse().find((rank) => points >= rank.min)!.key;
-}
-
 /**
- * Cartes d'une saison (exclusives, attribuées à la clôture) : participant, top 10, champion, et une
- * carte par rang (« s<id>-rang-<rang> ») pour le plus haut rang atteint pendant la saison.
+ * Cartes d'une saison (exclusives, attribuées à la clôture) : participant, top 10, champion.
  */
 export function seasonCards(seasonId: number): CardDef[] {
   const of = (stats: CardStats) => stats.seasons.find((season) => season.id === seasonId);
@@ -160,18 +166,6 @@ export function seasonCards(seasonId: number): CardDef[] {
       exclusive: true,
       eligible: (s) => of(s)?.position === 1,
     },
-    ...SEASON_RANKS.map((rank) => ({
-      key: `s${seasonId}-rang-${rank.key}`,
-      family: `Saison ${seasonId}`,
-      name: `${rank.name} S${seasonId}`,
-      condition: `Plus haut rang de la saison : ${rank.name}`,
-      rarity: rank.rarity,
-      exclusive: true,
-      eligible: (s: CardStats) => {
-        const season = of(s);
-        return Boolean(season && season.played > 0 && seasonRankKey(season.peak) === rank.key);
-      },
-    })),
   ];
 }
 

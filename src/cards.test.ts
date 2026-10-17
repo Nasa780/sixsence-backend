@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DEFAULT_CARD, MVP_MONTH_CARD, STATIC_CARDS, canEquip, eligibleKeys, longestStreak, mvpOf, revokedKeys, seasonCards, seasonRankKey, type CardStats } from './cards.js';
+import { DEFAULT_CARD, MVP_MONTH_CARD, STATIC_CARDS, canEquip, eligibleKeys, longestStreak, mvpOf, revokedKeys, seasonCards, seasonPeak, type CardStats } from './cards.js';
 
 const base: CardStats = {
   peak: 0,
@@ -13,6 +13,7 @@ const base: CardStats = {
   mvpMatches: 0,
   mvpMonths: [],
   seasons: [],
+  currentSeason: { id: 1, peak: 0 },
   badges: [],
   team: false,
   gtaEvents: 0,
@@ -20,9 +21,9 @@ const base: CardStats = {
 const stats = (patch: Partial<CardStats>): CardStats => ({ ...base, ...patch });
 
 describe('cartes de visite', () => {
-  it('catalogue : 26 cartes permanentes (case MVP du mois comprise) + 12 par saison = 38', () => {
+  it('catalogue : 26 cartes permanentes (case MVP du mois comprise) + 3 par saison = 29', () => {
     assert.equal(STATIC_CARDS.length, 26);
-    assert.equal(STATIC_CARDS.length + seasonCards(1).length, 38);
+    assert.equal(STATIC_CARDS.length + seasonCards(1).length, 29);
     assert.ok(STATIC_CARDS.some((card) => card.key === MVP_MONTH_CARD));
     assert.equal(new Set(STATIC_CARDS.map((card) => card.key)).size, STATIC_CARDS.length);
   });
@@ -31,8 +32,8 @@ describe('cartes de visite', () => {
     assert.deepEqual(eligibleKeys(base), [DEFAULT_CARD]);
   });
 
-  it('rangs selon le pic atteint, succès selon la carrière', () => {
-    const keys = eligibleKeys(stats({ peak: 1340, wins: 63, played: 80, bestStreak: 6, formatsWon: ['2v2', '3v3', '5v5'], groupWins: 30, soloWins: 14 }));
+  it('rangs selon le pic de la saison 1, succès selon la carrière', () => {
+    const keys = eligibleKeys(stats({ peak: 1340, currentSeason: { id: 1, peak: 1340 }, wins: 63, played: 80, bestStreak: 6, formatsWon: ['2v2', '3v3', '5v5'], groupWins: 30, soloWins: 14 }));
     for (const key of ['rang-argent', 'rang-or', 'rang-platine', 'rang-diamant', 'premier-sang', 'domination', 'veteran', 'indestructible', 'esprit-equipe']) {
       assert.ok(keys.includes(key), key);
     }
@@ -56,15 +57,18 @@ describe('cartes de visite', () => {
     assert.ok(!keys.includes('s2-participant') && !keys.includes('s2-top10'));
   });
 
-  it('carte de rang de saison : seulement le plus haut rang atteint pendant la saison', () => {
-    const keys = eligibleKeys(stats({ seasons: [{ id: 1, position: 3, played: 40, peak: 1350 }, { id: 2, position: 50, played: 2, peak: 120 }, { id: 3, position: null, played: 0, peak: 0 }] }));
-    assert.ok(keys.includes('s1-rang-diamant'));
-    for (const key of ['s1-rang-platine', 's1-rang-maitre', 's1-rang-bronze']) assert.ok(!keys.includes(key), key);
-    assert.ok(keys.includes('s2-rang-bronze'));
-    assert.ok(!keys.some((key) => key.startsWith('s3-rang-')));
-    assert.equal(seasonRankKey(2999), 'champion');
-    assert.equal(seasonRankKey(3000), 'legende');
-    assert.equal(seasonRankKey(0), 'bronze');
+  it('cartes de rang exclusives : seulement pendant la saison 1, obtenues pour de bon', () => {
+    // Saison 1 archivée (Diamant atteint), saison 2 en cours à 2400 : aucune carte au-delà de Diamant.
+    const later = stats({ peak: 2400, seasons: [{ id: 1, position: 3, played: 40, peak: 1350 }], currentSeason: { id: 2, peak: 2400 } });
+    const keys = eligibleKeys(later);
+    assert.ok(keys.includes('rang-diamant'));
+    for (const key of ['rang-maitre', 'rang-champion']) assert.ok(!keys.includes(key), key);
+    assert.equal(seasonPeak(later, 1), 1350);
+    assert.equal(seasonPeak(later, 2), 2400);
+    assert.ok(!keys.some((key) => /^sd+-rang-/.test(key)));
+    assert.ok(STATIC_CARDS.filter((card) => card.key.startsWith('rang-')).every((card) => card.exclusive));
+    // Une carte déjà obtenue ne se retire pas.
+    assert.deepEqual(revokedKeys(['rang-legende'], later), []);
   });
 
   it('communauté, MVP et GTA', () => {
