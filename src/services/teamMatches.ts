@@ -182,7 +182,7 @@ async function onTeamMatchCreated(match: TeamMatch): Promise<void> {
     tag: `team-match-${match.id}`,
     urgent: true,
   });
-  if (!discordEnabled) return;
+  if (!discordEnabled || !config.teams.discord) return;
   const { guildId, matchCategoryId } = config.discord;
   const created: Record<string, string> = {};
   try {
@@ -606,7 +606,7 @@ export async function sweepTeamMatches(): Promise<void> {
 async function sweepTeamDiscord(): Promise<void> {
   const rows = (unwrap(await supabase.from('team_matches').select('*').in('status', ['completed', 'cancelled']).eq('discord_done', false).limit(20)) ?? []) as TeamMatch[];
   for (const match of rows) {
-    if (discordEnabled) {
+    if (discordEnabled && config.teams.discord) {
       for (const id of Object.values(match.discord_channels ?? {})) await discord(`/channels/${id}`, { method: 'DELETE' }).catch(() => {});
       const { resultsChannelId } = config.discord;
       if (match.status === 'completed' && match.winner && resultsChannelId) {

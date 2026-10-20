@@ -384,7 +384,7 @@ export async function invitePlayer(userId: string, teamId: string, body: unknown
 
   unwrap(await supabase.from('team_invites').insert({ team_id: teamId, user_id: targetId, kind: 'invite', created_by: userId }));
   await pushToUsers([targetId], { title: `🛡️ Invitation de ${team.name}`, body: `[${team.tag}] t’invite à rejoindre son équipe.`, url: '/cod/equipe', tag: `equipe-${teamId}` });
-  if (discordEnabled) await dm([targetId], `**[${team.tag}] ${team.name}** t’invite à rejoindre son équipe sur SixSence : ${config.siteUrl}/cod/equipe`);
+  if (discordEnabled && config.teams.discord) await dm([targetId], `**[${team.tag}] ${team.name}** t’invite à rejoindre son équipe sur SixSence : ${config.siteUrl}/cod/equipe`);
   return { ok: true };
 }
 
@@ -440,7 +440,7 @@ export async function answerInvite(userId: string, inviteId: unknown, body: unkn
   const team = await teamRow(invite.team_id);
   if (invite.kind === 'request') {
     await pushToUsers([invite.user_id], { title: `✅ Bienvenue dans ${team.name}`, body: 'Ta candidature a été acceptée.', url: teamUrl(team.id), tag: `equipe-${team.id}` });
-    if (discordEnabled) await dm([invite.user_id], `✅ Ta candidature chez **[${team.tag}] ${team.name}** a été acceptée : ${config.siteUrl}${teamUrl(team.id)}`);
+    if (discordEnabled && config.teams.discord) await dm([invite.user_id], `✅ Ta candidature chez **[${team.tag}] ${team.name}** a été acceptée : ${config.siteUrl}${teamUrl(team.id)}`);
   } else {
     await pushToUsers(await leadersOf(team.id), { title: `✅ ${joiner.username} a rejoint ${team.name}`, body: 'Invitation acceptée.', url: '/cod/equipe', tag: `equipe-${team.id}` });
   }
