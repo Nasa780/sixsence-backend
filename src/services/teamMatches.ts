@@ -105,6 +105,16 @@ async function leaderSide(match: TeamMatch, userId: string): Promise<Side | null
 
 // --- File des équipes ----------------------------------------------------------------------
 
+/** Compteurs publics de la Division (page de recherche) : équipes en recherche, matchs en cours, équipes actives. */
+export async function teamStatus() {
+  const [queue, live, teams] = await Promise.all([
+    supabase.from('team_queue').select('team_id', { count: 'exact', head: true }),
+    supabase.from('team_matches').select('id', { count: 'exact', head: true }).in('status', OPEN),
+    supabase.from('teams').select('id', { count: 'exact', head: true }).is('disbanded_at', null),
+  ]);
+  return { teamsSearching: queue.count ?? 0, matchesInProgress: live.count ?? 0, activeTeams: teams.count ?? 0, rosterSize: config.teams.rosterSize };
+}
+
 /** État « jouer » de l'équipe du joueur : recherche en cours, match en cours, équipes en file. */
 export async function teamPlayState(userId: string) {
   const member = await membershipOf(userId);

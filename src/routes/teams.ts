@@ -21,6 +21,7 @@ import {
   resolveTeamMatch,
   teamMatchHistory,
   teamPlayState,
+  teamStatus,
 } from '../services/teamMatches.js';
 import { TEAM_REPORT_REASONS } from '../services/teamPolicy.js';
 import { checkIn, currentTournament, getTournament } from '../services/tournaments.js';
@@ -48,6 +49,7 @@ import {
  *
  * Publics :
  *   GET    /teams                              classement des équipes actives
+ *   GET    /teams/status                       compteurs (équipes en recherche, matchs en cours, équipes actives)
  *   GET    /teams/report-reasons               motifs de signalement
  *   GET    /teams/:id                          fiche d'une équipe et son effectif
  *
@@ -99,6 +101,7 @@ export function teamsRouter(): Router {
   });
 
   router.get('/', asyncHandler(async (_req, res) => void res.json({ teams: await listTeams() })));
+  router.get('/status', asyncHandler(async (_req, res) => void res.json(await teamStatus())));
   router.get('/report-reasons', (_req, res) => void res.json(TEAM_REPORT_REASONS));
   router.get('/me', requireAuth, asyncHandler(async (_req, res) => void res.json(await myTeamState(currentUser(res).id))));
   router.post('/me/leave', requireAuth, asyncHandler(async (_req, res) => void res.json(await leaveTeam(currentUser(res).id))));
