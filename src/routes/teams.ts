@@ -72,7 +72,7 @@ import {
  *   GET    /teams/me/play                      recherche en cours, match en cours, équipes en file
  *   POST   /teams/me/queue                     lancer la recherche (Leader) { roster: [ids des joueurs du match] }
  *   DELETE /teams/me/queue                     arrêter la recherche (Leader)
- *   POST   /teams/me/queue/stay                « Toujours là ? » : relancer les 30 min de recherche (Leader)
+ *   POST   /teams/me/queue/stay                « Toujours là ? » : relancer les 30 min de recherche (Leader ou joueur inscrit)
  *   GET    /teams/players/:userId/matches      matchs de Division d'un joueur (historique du profil)
  *   POST   /teams/matches/:matchId/messages    chat du match { body }
  *   POST   /teams/matches/:matchId/present     « Présents en jeu » (équipe)
