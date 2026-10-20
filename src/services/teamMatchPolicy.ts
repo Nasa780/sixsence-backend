@@ -2,12 +2,10 @@
  * Matchs d'équipe (BO3, ou BO5 en finale de tournoi) : règles pures, testées dans teamMatchPolicy.test.ts.
  *
  *   - chaque map se joue en 6 manches gagnantes : un score valide est [6, 0..5] ou [0..5, 6] ;
- *   - toutes les maps sauf la dernière sont tirées au sort à la création ;
- *   - 1re déclaration : le nombre de maps nécessaire pour gagner (BO3 : maps 1 et 2 ; BO5 : maps 1 à 3),
- *     puis une map à la fois ;
- *   - égalité avant la dernière map (1-1 en BO3, 2-2 en BO5) : la map décisive est choisie par l'équipe
- *     qui a gagné le plus de manches sur les maps jouées ; égalité de manches : tirage au sort parmi
- *     les maps pas encore jouées ;
+ *   - toutes les maps sont tirées au sort à la création (la décisive n'est jouée qu'à égalité) ;
+ *   - une seule déclaration, à la fin : toute la série (BO3 : 2 ou 3 maps), confirmée une fois par
+ *     l'équipe adverse ;
+ *   - (anciens matchs) map décisive choisie par l'équipe qui a gagné le plus de manches : deciderPicker ;
  *   - scores toujours exprimés du point de vue de l'équipe A.
  */
 
@@ -53,19 +51,20 @@ export function deciderPicker(scores: MapScore[]): Side | 'random' {
   return roundsA > roundsB ? 'A' : roundsB > roundsA ? 'B' : 'random';
 }
 
-/** Vérifie une déclaration : le bon nombre de maps, chaque score valide, pas de map après la victoire. */
+/**
+ * Vérifie une déclaration (une seule, à la fin) : chaque score valide, la série terminée sur la dernière
+ * map déclarée, rien après la victoire. confirmed : scores déjà validés (anciens matchs déclarés en deux fois).
+ */
 export function declarationError(confirmed: MapScore[], declared: unknown, bestOf = 3): string | null {
-  const { phase, expected } = seriesState(confirmed, bestOf);
-  if (phase === 'done') return 'Le match est déjà terminé.';
-  if (!Array.isArray(declared) || declared.length !== expected) {
-    if (phase === 'first') return `Déclare les scores des maps 1 à ${expected}.`;
-    return phase === 'decider' ? 'Déclare le score de la map décisive.' : 'Déclare le score de la map suivante.';
-  }
+  if (seriesState(confirmed, bestOf).phase === 'done') return 'Le match est déjà terminé.';
+  if (!Array.isArray(declared) || declared.length === 0) return 'Déclare les scores de toutes les maps jouées.';
   if (!declared.every(isValidMapScore)) return 'Score invalide : une équipe doit avoir 6 manches, l’autre entre 0 et 5.';
   const all = [...confirmed, ...(declared as MapScore[])];
+  if (all.length > bestOf) return `Une série se joue en ${bestOf} maps au plus.`;
   for (let i = confirmed.length; i < all.length - 1; i += 1) {
     if (seriesState(all.slice(0, i + 1), bestOf).winner) return 'Le match était déjà gagné avant la dernière map déclarée.';
   }
+  if (!seriesState(all, bestOf).winner) return 'La série n’est pas terminée : déclare aussi la map décisive.';
   return null;
 }
 

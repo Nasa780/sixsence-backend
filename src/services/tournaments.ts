@@ -432,7 +432,7 @@ export async function advanceTournament(id: string): Promise<void> {
   for (const entry of readyEntries(advanced)) {
     const row = rows.find((r) => r.round === entry.round && r.slot === entry.slot)!;
     const bestOf = bestOfFor(entry.round, rounds);
-    const { data, error } = await supabase.rpc('tournament_create_match', { p_entry: row.id, p_maps: pickMaps(config.cod.maps, bestOf - 1), p_mode: config.cod.modes[0], p_best_of: bestOf });
+    const { data, error } = await supabase.rpc('tournament_create_match', { p_entry: row.id, p_maps: pickMaps(config.cod.maps, bestOf), p_mode: config.cod.modes[0], p_best_of: bestOf });
     if (error) {
       console.error('[tournoi] création du match impossible', error.message);
       continue;

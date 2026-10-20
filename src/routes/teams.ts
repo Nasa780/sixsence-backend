@@ -80,7 +80,7 @@ import {
  *   POST   /teams/matches/:matchId/present     « Présents en jeu » (équipe)
  *   POST   /teams/matches/:matchId/forfeit     déclarer forfait { reason: host_silent | absent }
  *   POST   /teams/matches/:matchId/forfeit/answer  valider ou contester le forfait { accept }
- *   POST   /teams/matches/:matchId/report      déclarer les scores (joueur du match ou Leader) { scores: [[a, b], …] } (point de vue de l'équipe 1)
+ *   POST   /teams/matches/:matchId/report      déclarer toute la série à la fin (joueur du match ou Leader) { scores: [[a, b], …] } (point de vue de l'équipe 1)
  *   POST   /teams/matches/:matchId/confirm     confirmer ou contester (équipe adverse : joueur du match ou Leader) { accept }
  *   POST   /teams/matches/:matchId/map3        choisir la map 3 (équipe qui a gagné le plus de manches : joueur du match ou Leader) { map }
  *   POST   /teams/matches/:matchId/proofs      enregistrer une capture déjà envoyée (joueur du match) { path }
