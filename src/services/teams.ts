@@ -220,6 +220,50 @@ function forbid(message = 'Seul un Leader peut faire cela.'): never {
   throw new HttpError(403, 'TEAM_FORBIDDEN', message);
 }
 
+// --- Lien d'invitation ---------------------------------------------------------------------
+
+const INVITE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
+const newInviteCode = () => Array.from({ length: 8 }, () => INVITE_ALPHABET[Math.floor(Math.random() * INVITE_ALPHABET.length)]).join('');
+
+/** Lien d'invitation de l'équipe (Leader) : créé à la première demande ; reset = nouveau code, l'ancien lien ne marche plus. */
+export async function teamInviteLink(userId: string, teamId: string, reset = false) {
+  const actor = await actorIn(teamId, userId);
+  if (!canDo(actor, 'invite')) forbid();
+  const current = unwrap(await supabase.from('team_invite_links').select('code').eq('team_id', teamId).maybeSingle()) as { code: string } | null;
+  if (current && !reset) return { code: current.code };
+  const code = newInviteCode();
+  unwrap(await supabase.from('team_invite_links').upsert({ team_id: teamId, code, created_by: userId, created_at: new Date().toISOString() }));
+  return { code };
+}
+
+async function teamByInviteCode(code: unknown) {
+  if (typeof code !== 'string' || !/^[a-z0-9]{8}$/.test(code)) throw new HttpError(404, 'INVITE_NOT_FOUND', 'Ce lien d’invitation n’est plus valable.');
+  const link = unwrap(await supabase.from('team_invite_links').select('team_id').eq('code', code).maybeSingle()) as { team_id: string } | null;
+  if (!link) throw new HttpError(404, 'INVITE_NOT_FOUND', 'Ce lien d’invitation n’est plus valable.');
+  const team = await teamRow(link.team_id);
+  if (team.disbanded_at) throw new HttpError(404, 'INVITE_NOT_FOUND', 'Cette équipe a été dissoute.');
+  return team;
+}
+
+/** Aperçu public d'un lien d'invitation : l'équipe et sa taille. */
+export async function inviteLinkPreview(code: unknown) {
+  const team = await teamByInviteCode(code);
+  const team2 = await getTeam(team.id);
+  return { team: { ...team2, members: team2.members.map((member) => ({ id: member.id, username: member.username, avatarUrl: member.avatarUrl, crown: member.crown })) } };
+}
+
+/** Rejoindre une équipe par son lien (mêmes règles qu'une invitation acceptée). */
+export async function joinByInviteLink(userId: string, code: unknown) {
+  const team = await teamByInviteCode(code);
+  await assertTransfersOpen();
+  await assertEligible(userId);
+  unwrap(await supabase.rpc('team_add_member', { p_team: team.id, p_user: userId }));
+  addTeamRole(team.id, userId);
+  const joiner = unwrap(await supabase.from('users').select('username').eq('id', userId).single()) as { username: string };
+  await pushToUsers(await leadersOf(team.id), { title: `✅ ${joiner.username} a rejoint ${team.name}`, body: 'Arrivée par le lien d’invitation.', url: '/cod/equipe', tag: `equipe-${team.id}` });
+  return { ok: true, teamId: team.id };
+}
+
 // --- Mon équipe ------------------------------------------------------------------------
 
 /** Tout ce que la page « Mon équipe » affiche pour ce joueur. */

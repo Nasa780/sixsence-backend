@@ -222,6 +222,46 @@ export async function recentMatches(query: string) {
   return matches.map((match) => ({ ...match, names, openRequests: open.get(match.id) ?? 0 }));
 }
 
+/** Matchs de Division récents pour l'onglet admin « Matchs » (recherche par pseudo d'un joueur du match, nom ou tag d'équipe). */
+export async function recentTeamMatches(query: string) {
+  let request = supabase
+    .from('team_matches')
+    .select('id, status, team_a, team_b, roster_a, roster_b, scores, winner, forfeit, tournament_id, best_of, created_at, completed_at, corrected_at')
+    .order('created_at', { ascending: false })
+    .limit(50);
+  const term = query.trim().slice(0, 40).replace(/[%_,(){}]/g, '');
+  if (term) {
+    const [users, teams] = await Promise.all([
+      supabase.from('users').select('id').ilike('username', `%${term}%`).limit(20),
+      supabase.from('teams').select('id').or(`name.ilike.%${term}%,tag.ilike.%${term}%`).limit(20),
+    ]);
+    const userIds = ((users.data ?? []) as { id: string }[]).map((row) => row.id);
+    const teamIds = ((teams.data ?? []) as { id: string }[]).map((row) => row.id);
+    const filters = [
+      ...(userIds.length ? [`roster_a.ov.{${userIds.join(',')}}`, `roster_b.ov.{${userIds.join(',')}}`] : []),
+      ...(teamIds.length ? [`team_a.in.(${teamIds.join(',')})`, `team_b.in.(${teamIds.join(',')})`] : []),
+    ];
+    if (filters.length === 0) return [];
+    request = request.or(filters.join(','));
+  }
+  const matches = (unwrap(await request) ?? []) as {
+    id: string;
+    team_a: string;
+    team_b: string;
+    scores: [number, number][];
+    winner: 'A' | 'B' | null;
+  }[];
+  if (matches.length === 0) return [];
+  const teamIds = [...new Set(matches.flatMap((match) => [match.team_a, match.team_b]))];
+  const teams = (unwrap(await supabase.from('teams').select('id, name, tag, color').in('id', teamIds)) ?? []) as { id: string; name: string; tag: string; color: string }[];
+  const byId = new Map(teams.map((team) => [team.id, team]));
+  return matches.map((match) => {
+    const mapsA = (match.scores ?? []).filter(([a, b]) => a > b).length;
+    const mapsB = (match.scores ?? []).length - mapsA;
+    return { ...match, kind: 'division', teamA: byId.get(match.team_a) ?? null, teamB: byId.get(match.team_b) ?? null, mapsA, mapsB };
+  });
+}
+
 /** Historique des corrections de matchs terminés (admin) : qui, quand, pourquoi, points avant et après. */
 export async function listCorrections() {
   const rows = (unwrap(
