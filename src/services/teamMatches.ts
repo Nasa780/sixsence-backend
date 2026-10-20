@@ -253,7 +253,8 @@ export async function checkTeamQueueTimeouts(): Promise<void> {
 export async function tryCreateTeamMatches(): Promise<void> {
   for (let i = 0; i < 10; i += 1) {
     const { data, error } = await supabase.rpc('team_match_create', {
-      p_maps: pickMaps(config.cod.maps, 2),
+      // Toutes les maps tirées au sort dès la création (la 3e n'est jouée qu'à 1-1).
+      p_maps: pickMaps(config.cod.maps, 3),
       p_mode: config.cod.modes[0],
       p_rematch_minutes: config.teams.rematchMinutes,
     });
@@ -348,7 +349,7 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
       leaderOf: side,
       referee,
       isPlayer,
-      canReport: Boolean(mySide) && match.status === 'in_progress' && state.phase !== 'done' && (state.phase !== 'decider' || match.maps.length === match.best_of),
+      canReport: Boolean(mySide) && match.status === 'in_progress' && state.phase !== 'done',
       canConfirm: Boolean(mySide) && match.status === 'awaiting_confirmation' && match.reported_team !== mySide,
       canPickMap3: Boolean(side) && match.status === 'in_progress' && state.phase === 'decider' && match.maps.length === match.best_of - 1 && match.map3_picker === mySide,
       canResolve: referee && OPEN.includes(match.status),
@@ -652,13 +653,18 @@ export async function reportTeamScores(userId: string, matchId: string, body: un
   const scores = (body as { scores?: unknown } | undefined)?.scores;
   const problem = declarationError(match.scores, scores, match.best_of);
   if (problem) throw new HttpError(400, 'INVALID_SCORES', problem);
-  if (seriesState(match.scores, match.best_of).phase === 'decider' && match.maps.length < match.best_of) throw new HttpError(409, 'MAP3_NOT_PICKED', 'La map décisive n’est pas encore choisie.');
+  // Anciens matchs (map décisive pas encore tirée) : les maps manquantes sont tirées au sort.
+  const declaredCount = match.scores.length + (scores as unknown[]).length;
+  const maps =
+    match.maps.length >= declaredCount
+      ? match.maps
+      : [...match.maps, ...pickMaps(config.cod.maps, declaredCount - match.maps.length, match.maps.map((m) => m.map)).map((map) => ({ map, pick: 'random' as const }))];
 
   const now = new Date().toISOString();
   const updated = unwrap(
     await supabase
       .from('team_matches')
-      .update({ status: 'awaiting_confirmation', pending_scores: scores, reported_by: userId, reported_team: side, reported_at: now, updated_at: now })
+      .update({ status: 'awaiting_confirmation', pending_scores: scores, maps, reported_by: userId, reported_team: side, reported_at: now, updated_at: now, activity_at: now })
       .eq('id', matchId)
       .eq('status', 'in_progress')
       .select('id')
@@ -667,7 +673,7 @@ export async function reportTeamScores(userId: string, matchId: string, body: un
   if (!updated) throw new HttpError(409, 'MATCH_NOT_REPORTABLE', 'Des scores viennent d’être déclarés : recharge la page.');
   const teams = await teamsById([match.team_a, match.team_b]);
   const reporter = teams.get(side === 'A' ? match.team_a : match.team_b)!;
-  await pushToUsers(await leadersOf(side === 'A' ? match.team_b : match.team_a), {
+  await pushToUsers([...(side === 'A' ? match.roster_b : match.roster_a), ...(await leadersOf(side === 'A' ? match.team_b : match.team_a))], {
     title: `Scores déclarés par [${reporter.tag}]`,
     body: `Confirme ou conteste sous ${config.cod.confirmMinutes} min, sinon ils seront validés.`,
     url: matchUrl(matchId),
@@ -708,40 +714,17 @@ export async function confirmTeamScores(userId: string, matchId: string, body: u
 async function applyConfirmed(match: TeamMatch): Promise<void> {
   const all = [...match.scores, ...(match.pending_scores ?? [])];
   const state = seriesState(all, match.best_of);
-  if (state.winner) {
-    unwrap(await supabase.rpc('team_match_finalize', { p_match: match.id, p_scores: all, p_winner: state.winner, p_resolved_by: null }));
-    await afterClose(match);
-    return;
-  }
-  if (state.phase === 'next') {
-    unwrap(
-      await supabase
-        .from('team_matches')
-        .update({ status: 'in_progress', scores: all, pending_scores: null, reported_by: null, reported_team: null, reported_at: null, updated_at: new Date().toISOString() })
-        .eq('id', match.id)
-        .eq('status', 'awaiting_confirmation'),
-    );
-    return;
-  }
-  const picker = deciderPicker(all);
-  const maps = picker === 'random' ? [...match.maps, { map: pickMaps(config.cod.maps, 1, match.maps.map((m) => m.map))[0]!, pick: 'random' }] : match.maps;
-  const updated = unwrap(
+  if (!state.winner) {
+    // Ne devrait pas arriver (la déclaration couvre toute la série) : retour à la déclaration.
     await supabase
       .from('team_matches')
-      .update({ status: 'in_progress', scores: all, pending_scores: null, reported_by: null, reported_team: null, reported_at: null, map3_picker: picker, maps, updated_at: new Date().toISOString() })
+      .update({ status: 'in_progress', pending_scores: null, reported_by: null, reported_team: null, reported_at: null, updated_at: new Date().toISOString() })
       .eq('id', match.id)
-      .eq('status', 'awaiting_confirmation')
-      .select('id')
-      .maybeSingle(),
-  );
-  if (!updated) return;
-  const teams = await teamsById([match.team_a, match.team_b]);
-  if (picker === 'random') {
-    await pushToUsers([...match.roster_a, ...match.roster_b], { title: 'Égalité : map décisive tirée au sort', body: `Égalité de manches : ce sera ${maps[maps.length - 1]!.map}.`, url: matchUrl(match.id), tag: `team-match-${match.id}` });
-  } else {
-    const pickerTeam = picker === 'A' ? match.team_a : match.team_b;
-    await pushToUsers(await leadersOf(pickerTeam), { title: 'Égalité : à toi de choisir la map décisive', body: `[${teams.get(pickerTeam)?.tag}] a gagné le plus de manches.`, url: matchUrl(match.id), tag: `team-match-${match.id}` });
+      .eq('status', 'awaiting_confirmation');
+    return;
   }
+  unwrap(await supabase.rpc('team_match_finalize', { p_match: match.id, p_scores: all, p_winner: state.winner, p_resolved_by: null }));
+  await afterClose(match);
 }
 
 /** Le Leader de l'équipe qui a gagné le plus de manches choisit la map 3. */

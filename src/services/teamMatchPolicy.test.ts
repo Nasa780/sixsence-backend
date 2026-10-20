@@ -28,13 +28,18 @@ describe('matchs d’équipe (BO3 / BO5)', () => {
     assert.equal(deciderPicker([[6, 4], [4, 6]]), 'random'); // 10 partout
   });
 
-  it('déclaration : bon nombre de maps, scores valides, rien après la victoire', () => {
-    assert.equal(declarationError([], [[6, 4], [3, 6]]), null);
+  it('déclaration unique : série terminée, scores valides, rien après la victoire', () => {
+    assert.equal(declarationError([], [[6, 4], [6, 3]]), null);
+    assert.equal(declarationError([], [[6, 4], [3, 6], [6, 1]]), null);
+    assert.ok(declarationError([], [[6, 4], [3, 6]])); // 1-1 : il manque la map décisive
     assert.ok(declarationError([], [[6, 4]]));
     assert.ok(declarationError([], [[6, 4], [6, 6]]));
-    assert.equal(declarationError([[6, 4], [3, 6]], [[6, 1]]), null);
+    assert.ok(declarationError([], [[6, 4], [6, 1], [6, 2]])); // déjà gagné à la map 2
+    assert.ok(declarationError([], [[6, 4], [3, 6], [6, 1], [6, 0]]));
+    assert.equal(declarationError([[6, 4], [3, 6]], [[6, 1]]), null); // ancien match déclaré en deux fois
     assert.ok(declarationError([[6, 4], [6, 1]], [[6, 1]]));
-    assert.equal(declarationError([], [[6, 1], [2, 6], [6, 3]], 5), null);
+    assert.equal(declarationError([], [[6, 1], [2, 6], [6, 3], [6, 4]], 5), null);
+    assert.ok(declarationError([], [[6, 1], [2, 6], [6, 3]], 5));
   });
 
   it('arbitrage : série complète, vainqueur sur la dernière map', () => {
