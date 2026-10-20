@@ -4,8 +4,14 @@ import { config } from '../config.js';
 import { asyncHandler, uuidParam } from '../errors.js';
 import {
   addTeamProof,
+  answerTeamForfeit,
+  claimTeamForfeit,
   confirmTeamScores,
   correctTeamMatch,
+  markTeamPresent,
+  playerTeamMatches,
+  postTeamMessage,
+  stayInTeamQueue,
   getTeamMatch,
   joinTeamQueue,
   leaveTeamQueue,
@@ -64,12 +70,18 @@ import {
  *   GET    /teams/:id/matches                  derniers matchs d'une équipe (public)
  *   GET    /teams/matches/:matchId             feuille de match (public ; droits du visiteur s'il est connecté)
  *   GET    /teams/me/play                      recherche en cours, match en cours, équipes en file
- *   POST   /teams/me/queue                     lancer la recherche (Leader) { roster: [ids des titulaires] }
+ *   POST   /teams/me/queue                     lancer la recherche (Leader) { roster: [ids des joueurs du match] }
  *   DELETE /teams/me/queue                     arrêter la recherche (Leader)
+ *   POST   /teams/me/queue/stay                « Toujours là ? » : relancer les 30 min de recherche
+ *   GET    /teams/players/:userId/matches      matchs de Division d'un joueur (historique du profil)
+ *   POST   /teams/matches/:matchId/messages    chat du match { body }
+ *   POST   /teams/matches/:matchId/present     « Présents en jeu » (équipe)
+ *   POST   /teams/matches/:matchId/forfeit     déclarer forfait { reason: host_silent | absent }
+ *   POST   /teams/matches/:matchId/forfeit/answer  valider ou contester le forfait { accept }
  *   POST   /teams/matches/:matchId/report      déclarer les scores (Leader) { scores: [[a, b], …] } (point de vue de l'équipe 1)
  *   POST   /teams/matches/:matchId/confirm     confirmer ou contester (Leader adverse) { accept }
  *   POST   /teams/matches/:matchId/map3        choisir la map 3 (Leader de l'équipe qui a gagné le plus de manches) { map }
- *   POST   /teams/matches/:matchId/proofs      enregistrer une capture déjà envoyée (titulaire) { path }
+ *   POST   /teams/matches/:matchId/proofs      enregistrer une capture déjà envoyée (joueur du match) { path }
  *   GET    /teams/tournament                   tournoi prévu ou en cours (sinon le dernier terminé), tableau, droits du visiteur
  *   GET    /teams/tournaments/:id              un tournoi
  *   POST   /teams/tournaments/:id/checkin      check-in d'un Leader (30 min avant) { roster: [ids parmi l'effectif figé] }
@@ -93,6 +105,12 @@ export function teamsRouter(): Router {
   // --- Matchs d'équipe (BO3) ----------------------------------------------------
   router.get('/me/play', requireAuth, asyncHandler(async (_req, res) => void res.json(await teamPlayState(currentUser(res).id))));
   router.post('/me/queue', requireAuth, asyncHandler(async (req, res) => void res.json(await joinTeamQueue(currentUser(res).id, req.body))));
+  router.post('/me/queue/stay', requireAuth, asyncHandler(async (_req, res) => void res.json(await stayInTeamQueue(currentUser(res).id))));
+  router.get('/players/:userId/matches', asyncHandler(async (req, res) => void res.json({ matches: await playerTeamMatches(uuidParam(req, 'userId')) })));
+  router.post('/matches/:matchId/messages', requireAuth, asyncHandler(async (req, res) => void res.json(await postTeamMessage(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
+  router.post('/matches/:matchId/present', requireAuth, asyncHandler(async (req, res) => void res.json(await markTeamPresent(currentUser(res).id, uuidParam(req, 'matchId')))));
+  router.post('/matches/:matchId/forfeit', requireAuth, asyncHandler(async (req, res) => void res.json(await claimTeamForfeit(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
+  router.post('/matches/:matchId/forfeit/answer', requireAuth, asyncHandler(async (req, res) => void res.json(await answerTeamForfeit(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.delete('/me/queue', requireAuth, asyncHandler(async (_req, res) => void res.json(await leaveTeamQueue(currentUser(res).id))));
   router.get('/matches/:matchId', optionalAuth, asyncHandler(async (req, res) => void res.json(await getTeamMatch(uuidParam(req, 'matchId'), viewerOf(res)?.id ?? null))));
   router.post('/matches/:matchId/report', requireAuth, asyncHandler(async (req, res) => void res.json(await reportTeamScores(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));

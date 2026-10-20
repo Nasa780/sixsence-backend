@@ -15,7 +15,7 @@ import { teamsRouter } from './routes/teams.js';
 import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { pointsPreview, sweepMatches } from './services/matches.js';
-import { sweepTeamMatches, tryCreateTeamMatches } from './services/teamMatches.js';
+import { checkTeamQueueTimeouts, sweepTeamMatches, tryCreateTeamMatches } from './services/teamMatches.js';
 import { sweepTournaments } from './services/tournaments.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, syncTeamAndBadgeRoles, welcomeNewPlayers } from './services/community.js';
@@ -258,6 +258,10 @@ const teamTimer = setInterval(() => {
   void sweepTeamMatches();
   void sweepTournaments();
 }, 60_000);
+// Division : durée maximale de recherche (« Toujours là ? »), contrôlée toutes les 20 secondes.
+const teamQueueTimer = setInterval(() => {
+  if (config.teams.enabled) void checkTeamQueueTimeouts();
+}, 20_000);
 // Vérifications « Prêt ? » expirées : contrôlées toutes les 3 secondes.
 const readyTimer = live ? setInterval(() => void expireReadyChecks(), 3_000) : undefined;
 // Durée maximale de recherche : contrôlée toutes les 20 secondes.
@@ -323,6 +327,7 @@ function shutdown(signal: string): void {
   console.log(`[boot] ${signal} reçu, arrêt en cours`);
   clearInterval(sweeper);
   clearInterval(teamTimer);
+  clearInterval(teamQueueTimer);
   clearInterval(weeklyTimer);
   clearInterval(cardsTimer);
   clearInterval(readyTimer);

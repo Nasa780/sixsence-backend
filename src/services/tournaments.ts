@@ -313,7 +313,7 @@ const checkInOpen = (tournament: TournamentRow) => {
 
 // --- Check-in -----------------------------------------------------------------------------
 
-/** Check-in d'un Leader : titulaires choisis parmi l'effectif figé (modifiables jusqu'au début). */
+/** Check-in d'un Leader : joueurs du match choisis parmi l'effectif figé (modifiables jusqu'au début). */
 export async function checkIn(userId: string, id: string, body: unknown) {
   const tournament = await tournamentRow(id);
   if (tournament.status !== 'scheduled') throw new HttpError(409, 'TOURNAMENT_CLOSED', 'Le check-in est fermé.');
@@ -325,7 +325,7 @@ export async function checkIn(userId: string, id: string, body: unknown) {
   const size = config.teams.rosterSize;
   const roster = (body as { roster?: unknown } | undefined)?.roster;
   if (!Array.isArray(roster) || roster.length !== size || new Set(roster).size !== size || !roster.every((rid) => participant.frozen_roster.includes(rid))) {
-    throw new HttpError(400, 'INVALID_ROSTER', `Choisis ${size} titulaire${size > 1 ? 's' : ''} parmi l’effectif inscrit au tournoi.`);
+    throw new HttpError(400, 'INVALID_ROSTER', `Choisis ${size} joueur${size > 1 ? 's' : ''} parmi l’effectif inscrit au tournoi.`);
   }
   unwrap(
     await supabase
