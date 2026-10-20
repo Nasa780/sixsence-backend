@@ -3,7 +3,7 @@ import { currentUser, requireAuth, requireRoles } from '../auth.js';
 import { config } from '../config.js';
 import { ROLES, rolesFor, type Role } from '../roles.js';
 import { HttpError, asyncHandler, unwrap, uuidParam } from '../errors.js';
-import { STAFF_BADGES, listCorrections, overview, parseBadges, parseEventPatch, parseFounder, parsePartner, recentMatches, searchPlayers } from '../services/admin.js';
+import { STAFF_BADGES, listCorrections, overview, parseBadges, parseEventPatch, parseFounder, parsePartner, recentMatches, recentTeamMatches, searchPlayers } from '../services/admin.js';
 import { createEvent, parseNewEvent } from '../services/gtaEvents.js';
 import { listDisputes, resolveMatch } from '../services/matches.js';
 import { closeCase, listForAdmin } from '../services/moderation.js';
@@ -26,7 +26,7 @@ import { supabase } from '../supabase.js';
  *   GET    /admin/overview                 chiffres du tableau de bord
  *   GET    /admin/disputes                 matchs contestés
  *   GET    /admin/team-disputes            matchs d'équipe contestés (arbitrage sur la feuille de match)
- *   GET    /admin/matches?q=               matchs récents (recherche par pseudo), corrections et demandes en attente
+ *   GET    /admin/matches?q=               matchs récents classés et de Division (recherche par pseudo, nom ou tag d'équipe)
  *   GET    /admin/corrections              historique des corrections de matchs terminés (admin)
  *   GET    /admin/arbitrations?status=&match=  demandes d'arbitrage (open | resolved | rejected), d'un match
  *   POST   /admin/arbitrations/:id         { status, resolution } traiter une demande
@@ -78,7 +78,10 @@ export function adminRouter(): Router {
     res.json({ matches: await listTeamDisputes() });
   }));
   router.get('/matches', asyncHandler(async (req, res) => {
-    res.json({ matches: await recentMatches(typeof req.query.q === 'string' ? req.query.q : '') });
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    // Classé et Division : deux listes, que le site affiche ensemble avec une étiquette par mode.
+    const [matches, teamMatches] = await Promise.all([recentMatches(q), recentTeamMatches(q)]);
+    res.json({ matches, teamMatches });
   }));
   router.get('/corrections', asyncHandler(async (_req, res) => {
     res.json({ items: await listCorrections() });

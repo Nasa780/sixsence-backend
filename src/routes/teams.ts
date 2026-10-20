@@ -27,6 +27,9 @@ import { TEAM_REPORT_REASONS } from '../services/teamPolicy.js';
 import { checkIn, currentTournament, getTournament } from '../services/tournaments.js';
 import {
   answerInvite,
+  inviteLinkPreview,
+  joinByInviteLink,
+  teamInviteLink,
   cancelInvite,
   createTeam,
   disbandTeam,
@@ -60,6 +63,8 @@ import {
  *   GET    /teams/:id/search?q=                joueurs à inviter (Leader)
  *   POST   /teams/:id/invites                  inviter un joueur (Leader)  { userId }
  *   POST   /teams/:id/requests                 candidater
+ *   GET    /teams/:id/invite-link              lien d'invitation de l'équipe (Leader) ; POST …/invite-link/reset : nouveau lien
+ *   GET    /teams/join/:code                   aperçu public d'un lien d'invitation ; POST : rejoindre l'équipe
  *   POST   /teams/invites/:inviteId/answer     accepter ou refuser     { accept }
  *   DELETE /teams/invites/:inviteId            annuler une invitation ou sa candidature
  *   PATCH  /teams/:id/members/:userId          { starter? (Leader), role? (couronne) }
@@ -134,6 +139,11 @@ export function teamsRouter(): Router {
   router.post('/invites/:inviteId/answer', requireAuth, asyncHandler(async (req, res) => void res.json(await answerInvite(currentUser(res).id, req.params.inviteId, req.body))));
   router.delete('/invites/:inviteId', requireAuth, asyncHandler(async (req, res) => void res.json(await cancelInvite(currentUser(res).id, req.params.inviteId))));
 
+  // Lien d'invitation : aperçu public, arrivée directe (connecté), lien de l'équipe (Leader).
+  router.get('/join/:code', asyncHandler(async (req, res) => void res.json(await inviteLinkPreview(req.params.code))));
+  router.post('/join/:code', requireAuth, asyncHandler(async (req, res) => void res.json(await joinByInviteLink(currentUser(res).id, req.params.code))));
+  router.get('/:id/invite-link', requireAuth, asyncHandler(async (req, res) => void res.json(await teamInviteLink(currentUser(res).id, uuidParam(req, 'id')))));
+  router.post('/:id/invite-link/reset', requireAuth, asyncHandler(async (req, res) => void res.json(await teamInviteLink(currentUser(res).id, uuidParam(req, 'id'), true))));
   router.get('/:id', asyncHandler(async (req, res) => void res.json(await getTeam(uuidParam(req, 'id')))));
   router.get('/:id/matches', asyncHandler(async (req, res) => void res.json({ matches: await teamMatchHistory(uuidParam(req, 'id')) })));
   router.patch('/:id', requireAuth, asyncHandler(async (req, res) => void res.json(await updateTeam(currentUser(res).id, uuidParam(req, 'id'), req.body))));

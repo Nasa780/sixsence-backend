@@ -353,7 +353,7 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
       side: mySide,
       canSetCode: Boolean(mySide) && mySide === match.host_side && match.status === 'in_progress' && match.scores.length === 0 && !match.pending_scores,
       canChat: Boolean(mySide) || referee,
-      canMarkPresent: Boolean(mySide) && match.status === 'in_progress' && match.scores.length === 0 && !(mySide === 'A' ? match.present_a : match.present_b),
+      canMarkPresent: false,
       canClaimForfeit: forfeit,
       canAnswerForfeit: Boolean(mySide) && match.status === 'forfeit_claimed' && match.forfeit_by !== mySide,
       leaderOf: side,
@@ -458,7 +458,9 @@ async function forfeitOptions(match: TeamMatch, side: Side): Promise<{ host_sile
   if (match.host_side === opponent && now >= minutesAfter(match.created_at, HOST_MINUTES).getTime()) {
     hostSilent = !(await gameCodeOf(match.id));
   }
-  const absent = now >= minutesAfter(match.created_at, PRESENCE_MINUTES).getTime() && !(opponent === 'A' ? match.present_a : match.present_b);
+  // Plus de bouton « Présents en jeu » : passé 15 min sans résultat, le forfait « absente » est possible
+  // (l'équipe visée le conteste si la partie a bien eu lieu ; un arbitre tranche).
+  const absent = now >= minutesAfter(match.created_at, PRESENCE_MINUTES).getTime();
   return { host_silent: hostSilent, absent };
 }
 
