@@ -226,7 +226,7 @@ function forbid(message = 'Seul un Leader peut faire cela.'): never {
 export async function myTeamState(userId: string) {
   const member = await membershipOf(userId);
   const requirements = await requirementsOf(userId, { ignoreTeam: true });
-  const base = { requirements: { missing: requirements.missing, rankedMatches: requirements.rankedMatches, needed: TEAM_LIMITS.minRankedMatches, cooldownEnds: requirements.cooldownEnds } };
+  const base = { requirements: { missing: requirements.missing, rankedMatches: requirements.rankedMatches, cooldownEnds: requirements.cooldownEnds } };
 
   if (!member) {
     const rows = (unwrap(

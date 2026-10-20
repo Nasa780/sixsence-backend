@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { TeamInputError, canDo, isOwnTeamMedia, missingRequirements, parseTeamInput } from './teamPolicy.js';
 
-const eligible = { rankedMatches: 5, activisionId: 'Nasa#123', discordId: '42', bannedUntil: null, teamLeftAt: null, inTeam: false };
+const eligible = { activisionId: 'Nasa#123', discordId: '42', bannedUntil: null, teamLeftAt: null, inTeam: false };
 const now = Date.parse('2026-10-17T12:00:00Z');
 
 describe('équipes', () => {
@@ -18,9 +18,8 @@ describe('équipes', () => {
     assert.throws(() => parseTeamInput({ socials: { x: 'javascript:alert(1)' } }), TeamInputError);
   });
 
-  it('accès : 5 matchs classés, Activision, Discord, pas d’exclusion, 24 h après un départ', () => {
+  it('accès : Activision, Discord, pas d’exclusion, 24 h après un départ', () => {
     assert.deepEqual(missingRequirements(eligible, now), []);
-    assert.equal(missingRequirements({ ...eligible, rankedMatches: 4 }, now).length, 1);
     assert.equal(missingRequirements({ ...eligible, activisionId: null, discordId: null }, now).length, 2);
     assert.equal(missingRequirements({ ...eligible, bannedUntil: '2026-10-17T13:00:00Z' }, now).length, 1);
     assert.equal(missingRequirements({ ...eligible, bannedUntil: '2026-10-17T11:00:00Z' }, now).length, 0);
