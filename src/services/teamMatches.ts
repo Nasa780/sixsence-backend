@@ -182,10 +182,11 @@ export async function leaveTeamQueue(userId: string) {
   return teamPlayState(userId);
 }
 
-/** « Toujours là ? » : n'importe quel membre de l'équipe relance les 30 min de recherche (place conservée). */
+/** « Toujours là ? » : un Leader relance les 30 min de recherche (place conservée). */
 export async function stayInTeamQueue(userId: string) {
   const member = await membershipOf(userId);
   if (!member) throw new HttpError(409, 'NOT_IN_TEAM', 'Tu ne fais partie d’aucune équipe.');
+  if (!(member.role === 'leader' || member.isOwner)) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader peut continuer la recherche.');
   unwrap(await supabase.from('team_queue').update({ confirmed_at: new Date().toISOString(), warned_at: null }).eq('team_id', member.team_id));
   return teamPlayState(userId);
 }
@@ -304,9 +305,9 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
       leaderOf: side,
       referee,
       isPlayer,
-      canReport: Boolean(side) && match.status === 'in_progress' && state.phase !== 'done' && (state.phase !== 'decider' || match.maps.length === match.best_of),
-      canConfirm: Boolean(side) && match.status === 'awaiting_confirmation' && match.reported_team !== side,
-      canPickMap3: Boolean(side) && match.status === 'in_progress' && state.phase === 'decider' && match.maps.length === match.best_of - 1 && match.map3_picker === side,
+      canReport: Boolean(mySide) && match.status === 'in_progress' && state.phase !== 'done' && (state.phase !== 'decider' || match.maps.length === match.best_of),
+      canConfirm: Boolean(mySide) && match.status === 'awaiting_confirmation' && match.reported_team !== mySide,
+      canPickMap3: Boolean(side) && match.status === 'in_progress' && state.phase === 'decider' && match.maps.length === match.best_of - 1 && match.map3_picker === mySide,
       canResolve: referee && OPEN.includes(match.status),
       canProve: isPlayer && proofWindowOpen(match),
       canCorrect: referee && match.status === 'completed' && !match.tournament_id && withinWindow(match.completed_at, correctionWindowHours(await roleOf(viewerId))),
@@ -564,8 +565,9 @@ export async function listTeamDisputes() {
 /** Un Leader déclare les scores de l'étape en cours (maps 1 et 2, ou map 3). */
 export async function reportTeamScores(userId: string, matchId: string, body: unknown) {
   const match = await matchRow(matchId);
-  const side = await leaderSide(match, userId);
-  if (!side) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader d’une des deux équipes peut déclarer les scores.');
+  // Joueurs du match et Leaders des deux équipes.
+  const side = await viewerSide(match, userId);
+  if (!side) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seuls les joueurs du match et les Leaders peuvent déclarer les scores.');
   if (match.status !== 'in_progress') throw new HttpError(409, 'MATCH_NOT_REPORTABLE', 'Des scores sont déjà déclarés ou le match est terminé.');
   const scores = (body as { scores?: unknown } | undefined)?.scores;
   const problem = declarationError(match.scores, scores, match.best_of);
@@ -597,9 +599,9 @@ export async function reportTeamScores(userId: string, matchId: string, body: un
 /** Un Leader adverse confirme (étape suivante ou fin du match) ou conteste (arbitre). */
 export async function confirmTeamScores(userId: string, matchId: string, body: unknown) {
   const match = await matchRow(matchId);
-  const side = await leaderSide(match, userId);
+  const side = await viewerSide(match, userId);
   if (match.status !== 'awaiting_confirmation') throw new HttpError(409, 'MATCH_NOT_CONFIRMABLE', 'Ce match n’attend pas de confirmation.');
-  if (!side || side === match.reported_team) throw new HttpError(403, 'SAME_TEAM_AS_REPORTER', 'La confirmation doit venir d’un Leader de l’équipe adverse.');
+  if (!side || side === match.reported_team) throw new HttpError(403, 'SAME_TEAM_AS_REPORTER', 'La confirmation doit venir de l’équipe adverse (joueur du match ou Leader).');
 
   if ((body as { accept?: unknown } | undefined)?.accept === true) {
     await applyConfirmed(match);
@@ -665,7 +667,7 @@ async function applyConfirmed(match: TeamMatch): Promise<void> {
 /** Le Leader de l'équipe qui a gagné le plus de manches choisit la map 3. */
 export async function pickTeamMap3(userId: string, matchId: string, body: unknown) {
   const match = await matchRow(matchId);
-  const side = await leaderSide(match, userId);
+  const side = await viewerSide(match, userId);
   if (!side || match.map3_picker !== side) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Le choix de la map décisive revient à l’équipe qui a gagné le plus de manches.');
   if (match.status !== 'in_progress' || match.scores.length !== match.best_of - 1 || match.maps.length !== match.best_of - 1) {
     throw new HttpError(409, 'MAP3_CLOSED', 'La map décisive n’est pas à choisir maintenant.');
