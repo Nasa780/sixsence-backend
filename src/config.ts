@@ -129,6 +129,11 @@ export const config = {
     /** Durée maximale d'une recherche sans confirmer sa présence (« Toujours là ? » 5 min avant). */
     queueMaxMinutes: integer('COD_QUEUE_MAX_MINUTES', 30, 10),
     queueWarnMinutes: 5,
+    /**
+     * Groupes (jouer à plusieurs dans la même équipe) : coupés depuis le 2026-10-20, le classé se joue
+     * en solo. Code conservé : COD_GROUPS=on les remet (penser aux textes du site et au barème).
+     */
+    groupsEnabled: process.env.COD_GROUPS?.trim() === 'on',
   },
 
   /** Mode « Match team » : BO3 entre équipes. TEAM_MATCH_PLAYERS : titulaires par équipe (4 ; moins pour tester). */
