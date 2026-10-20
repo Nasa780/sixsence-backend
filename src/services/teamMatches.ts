@@ -9,7 +9,7 @@ import { deciderPicker, declarationError, isCompleteSeries, pickMaps, seriesStat
 import { membershipOf } from './teams.js';
 
 /**
- * Matchs d'équipe (mode « Match team », étape 2) : file des équipes, BO3, déclaration et
+ * Matchs d'équipe (Division, étape 2) : file des équipes, BO3, déclaration et
  * confirmation des scores par les Leaders, choix de la map 3, arbitrage, ménage et Discord.
  * Règles pures dans teamMatchPolicy.ts ; création et clôture atomiques en SQL (migration 0026).
  */
@@ -176,7 +176,7 @@ async function onTeamMatchCreated(match: TeamMatch): Promise<void> {
   const b = teams.get(match.team_b)!;
   const players = [...match.roster_a, ...match.roster_b];
   await pushToUsers(players, {
-    title: `⚔️ Match team : [${a.tag}] vs [${b.tag}]`,
+    title: `⚔️ Division : [${a.tag}] vs [${b.tag}]`,
     body: `BO3 · ${match.maps.map((map) => map.map).join(' puis ')}. Ouvre la feuille de match.`,
     url: matchUrl(match.id),
     tag: `team-match-${match.id}`,
@@ -196,8 +196,8 @@ async function onTeamMatchCreated(match: TeamMatch): Promise<void> {
     await supabase.from('team_matches').update({ discord_channels: created }).eq('id', match.id);
     const link = (id: string) => `https://discord.com/channels/${guildId}/${id}`;
     const sheet = `${config.siteUrl}${matchUrl(match.id)}`;
-    await dm(match.roster_a, `**Match team : [${a.tag}] vs [${b.tag}]** (BO3) — vocal de ton équipe : ${link(created.teamA!)}\nFeuille de match : ${sheet}`);
-    await dm(match.roster_b, `**Match team : [${a.tag}] vs [${b.tag}]** (BO3) — vocal de ton équipe : ${link(created.teamB!)}\nFeuille de match : ${sheet}`);
+    await dm(match.roster_a, `**Division : [${a.tag}] vs [${b.tag}]** (BO3) — vocal de ton équipe : ${link(created.teamA!)}\nFeuille de match : ${sheet}`);
+    await dm(match.roster_b, `**Division : [${a.tag}] vs [${b.tag}]** (BO3) — vocal de ton équipe : ${link(created.teamB!)}\nFeuille de match : ${sheet}`);
   } catch (caught) {
     console.warn('[team-match] salons vocaux impossibles', (caught as Error).message);
     for (const id of Object.values(created)) await discord(`/channels/${id}`, { method: 'DELETE' }).catch(() => {});
@@ -410,7 +410,7 @@ export async function confirmTeamScores(userId: string, matchId: string, body: u
     if (!updated) throw new HttpError(409, 'MATCH_NOT_CONFIRMABLE', 'Ce match n’attend plus de confirmation.');
     const teams = await teamsById([match.team_a, match.team_b]);
     await notifyStaff(
-      `⚔️ Match team contesté : **[${teams.get(match.team_a)?.tag}] vs [${teams.get(match.team_b)?.tag}]** — un arbitre doit trancher.\n${config.siteUrl}${matchUrl(matchId)}`,
+      `⚔️ Match de Division contesté : **[${teams.get(match.team_a)?.tag}] vs [${teams.get(match.team_b)?.tag}]** — un arbitre doit trancher.\n${config.siteUrl}${matchUrl(matchId)}`,
     );
   }
   return getTeamMatch(matchId, userId);
@@ -542,7 +542,7 @@ export async function correctTeamMatch(staffId: string, matchId: string, body: u
     }),
   );
   await pushToUsers([...match.roster_a, ...match.roster_b], {
-    title: 'Résultat du match team corrigé',
+    title: 'Résultat du match de Division corrigé',
     body: input.scores === null ? 'Le match a été annulé par l’équipe SixSence : points rendus.' : 'L’équipe SixSence a corrigé les scores : points recalculés.',
     url: matchUrl(matchId),
     tag: `team-match-${matchId}`,
@@ -619,7 +619,7 @@ async function sweepTeamDiscord(): Promise<void> {
           method: 'POST',
           body: {
             content:
-              `⚔️ **Match team** · [${a?.tag}] ${a?.name} vs [${b?.tag}] ${b?.name} — victoire de **${winner?.name}** (+${gain} pts)${match.corrected_at ? ' (résultat corrigé)' : ''}\n` +
+              `⚔️ **Division** · [${a?.tag}] ${a?.name} vs [${b?.tag}] ${b?.name} — victoire de **${winner?.name}** (+${gain} pts)${match.corrected_at ? ' (résultat corrigé)' : ''}\n` +
               `${match.scores.map(([x, y], i) => `${match.maps[i]?.map ?? `Map ${i + 1}`} ${x}-${y}`).join(' · ')}\n${config.siteUrl}${matchUrl(match.id)}`,
             flags: SUPPRESS_EMBEDS,
           },
@@ -629,7 +629,7 @@ async function sweepTeamDiscord(): Promise<void> {
     await supabase.from('team_matches').update({ discord_done: true }).eq('id', match.id);
     if (match.status === 'completed' && !match.corrected_at) {
       await pushToUsers([...match.roster_a, ...match.roster_b], {
-        title: 'Match team terminé',
+        title: 'Match de Division terminé',
         body: `Victoire de l’équipe ${match.winner === 'A' ? '1' : '2'} · ${match.scores.map(([x, y]) => `${x}-${y}`).join(' · ')}`,
         url: matchUrl(match.id),
         tag: `team-match-${match.id}`,

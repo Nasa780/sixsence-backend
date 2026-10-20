@@ -97,7 +97,7 @@ export function adminRouter(): Router {
     res.json({ item: await closeCase('cod_player_reports', req.params.id, currentUser(res).id, req.body) });
   }));
 
-  // --- Équipes (Match team) ----------------------------------------------------
+  // --- Équipes (Division) ----------------------------------------------------
   router.get('/teams', asyncHandler(async (req, res) => {
     res.json({ teams: await adminTeams(req.query.q) });
   }));
@@ -257,7 +257,7 @@ export function adminRouter(): Router {
   router.post('/discord/sync-roles', asyncHandler(async (_req, res) => {
     const ranks = await syncAllRankRoles();
     const others = await syncTeamAndBadgeRoles();
-    // Rôles des équipes (Match team) : créés s'ils manquent, effectifs remis à jour.
+    // Rôles des équipes (Division) : créés s'ils manquent, effectifs remis à jour.
     const teams = (unwrap(await supabase.from('teams').select('id').is('disbanded_at', null)) ?? []) as { id: string }[];
     if (config.teams.enabled) for (const team of teams) syncTeamRole(team.id);
     res.json({ updated: ranks + others });

@@ -1,5 +1,5 @@
 /**
- * Équipes (mode « Match team ») : règles pures, testées dans teamPolicy.test.ts.
+ * Équipes (Division) : règles pures, testées dans teamPolicy.test.ts.
  *
  *   - accès (créer ou rejoindre) : 5 matchs classés joués (anti-smurf), identifiant Activision
  *     et Discord liés, aucune exclusion en cours, pas déjà dans une équipe, 24 h après un départ ;

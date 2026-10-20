@@ -58,7 +58,7 @@ const DB_ERRORS: Record<string, [status: number, message: string]> = {
   MEMBER_BANNED: [403, '{detail} est temporairement exclu de la file : le groupe ne peut pas la rejoindre.'],
   MEMBER_IN_MATCH: [409, '{detail} a déjà un match en cours.'],
   MEMBER_IN_QUEUE: [409, '{detail} est déjà dans une file.'],
-  // Équipes (Match team)
+  // Équipes (Division)
   ALREADY_IN_TEAM: [409, 'Ce joueur fait déjà partie d’une équipe.'],
   TEAM_NAME_TAKEN: [409, 'Ce nom d’équipe est déjà pris.'],
   TEAM_TAG_TAKEN: [409, 'Ce tag est déjà pris.'],

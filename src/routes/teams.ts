@@ -37,7 +37,7 @@ import {
 } from '../services/teams.js';
 
 /**
- * Équipes du mode « Match team ».
+ * Équipes du Division.
  *
  * Publics :
  *   GET    /teams                              classement des équipes actives
@@ -81,7 +81,7 @@ export function teamsRouter(): Router {
   // Mode en pause (TEAM_MODE) : lectures seules, aucune action.
   router.use((req, res, next) => {
     if (config.teams.enabled || req.method === 'GET') return next();
-    res.status(403).json({ error: { code: 'TEAM_MODE_PAUSED', message: 'Le mode Match team est en pause.' } });
+    res.status(403).json({ error: { code: 'TEAM_MODE_PAUSED', message: 'La Division est en pause.' } });
   });
 
   router.get('/', asyncHandler(async (_req, res) => void res.json({ teams: await listTeams() })));

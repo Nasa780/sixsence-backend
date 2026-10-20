@@ -22,7 +22,7 @@ import {
 } from './tournamentPolicy.js';
 
 /**
- * Tournoi de fin de saison (mode « Match team », étape 3) : création par un admin (qualifiés et
+ * Tournoi de fin de saison (Division, étape 3) : création par un admin (qualifiés et
  * effectifs figés), check-in des Leaders 30 min avant, déroulé automatique en une soirée (matchs
  * créés dès que deux équipes se font face), trophées et rôle Discord du vainqueur.
  * Règles pures dans tournamentPolicy.ts ; tables et fonctions SQL dans la migration 0028.
@@ -64,7 +64,7 @@ interface ParticipantRow {
   forfeit: boolean;
 }
 
-const PAGE = '/cod/equipes/tournoi';
+const PAGE = '/cod/tournoi';
 const toEntry = (row: EntryRow): BracketEntry => ({ round: row.round, slot: row.slot, teamA: row.team_a, teamB: row.team_b, winner: row.winner, status: row.status });
 
 async function tournamentRow(id: string): Promise<TournamentRow> {
@@ -124,7 +124,7 @@ export async function previewQualified(size: unknown) {
 
 /** Crée le tournoi : qualifiés figés (têtes de série, effectifs), tableau du 1er tour. */
 export async function createTournament(adminId: string, body: unknown) {
-  if (!config.teams.enabled) throw new HttpError(403, 'TEAM_MODE_PAUSED', 'Le mode Match team est en pause.');
+  if (!config.teams.enabled) throw new HttpError(403, 'TEAM_MODE_PAUSED', 'La Division est en pause.');
   const { name, startsAt, size } = parseCreate(body);
   const { count, error } = await supabase.from('tournaments').select('id', { count: 'exact', head: true }).in('status', ['scheduled', 'running']);
   if (error) throw fromDbError(error);

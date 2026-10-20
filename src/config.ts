@@ -68,7 +68,7 @@ export const config = {
   /**
    * Mode local sans risque (LOCAL_SAFE=1) : pour essayer le site sur son PC avec la base de production.
    * Aucune tâche du classé (purge de la file au démarrage, ménage des matchs, « Prêt ? », Discord,
-   * MVP, cartes, annonces) et file / groupes du classé fermés ; seul le mode Match team tourne.
+   * MVP, cartes, annonces) et file / groupes du classé fermés ; seul le Division tourne.
    */
   localSafe: process.env.LOCAL_SAFE?.trim() === '1',
   supabaseUrl: required('SUPABASE_URL'),
@@ -136,7 +136,7 @@ export const config = {
     groupsEnabled: process.env.COD_GROUPS?.trim() === 'on',
   },
 
-  /** Mode « Match team » : BO3 entre équipes. TEAM_MATCH_PLAYERS : titulaires par équipe (4 ; moins pour tester). */
+  /** Division : BO3 entre équipes. TEAM_MATCH_PLAYERS : titulaires par équipe (4 ; moins pour tester). */
   teams: {
     /** Mode en pause tant que TEAM_MODE ne vaut pas « on » : pas de création d'équipe, de match ni de tournoi. */
     enabled: process.env.TEAM_MODE?.trim() === 'on',

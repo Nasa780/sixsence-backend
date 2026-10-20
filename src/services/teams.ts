@@ -18,7 +18,7 @@ import {
 } from './teamPolicy.js';
 
 /**
- * Équipes du mode « Match team » (étape 1 : fiches, effectifs, invitations et candidatures).
+ * Équipes du Division (étape 1 : fiches, effectifs, invitations et candidatures).
  * Règles dans teamPolicy.ts ; opérations atomiques dans les fonctions SQL team_* (migration 0025).
  */
 
