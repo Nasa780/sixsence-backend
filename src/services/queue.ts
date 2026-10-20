@@ -68,7 +68,7 @@ export async function getQueueState(userId: string): Promise<QueueState> {
     supabase.from('cod_queue').select('joined_at, format, group_size, confirmed_at, warned_at').eq('user_id', userId).maybeSingle(),
     supabase.rpc('cod_active_match_id', { p_user: userId }),
     supabase.from('cod_profiles').select('banned_until').eq('user_id', userId).maybeSingle(),
-    getPartyOf(userId),
+    config.cod.groupsEnabled ? getPartyOf(userId) : Promise.resolve(null),
   ]);
   if (entry.error) throw fromDbError(entry.error);
   if (active.error) throw fromDbError(active.error);
@@ -103,7 +103,8 @@ const SOLO_ERRORS: Record<string, string> = {
  * isConnected : les membres doivent avoir le site ouvert pour être prévenus du match.
  */
 export async function joinQueue(userId: string, formatId: unknown, isConnected: (id: string) => boolean): Promise<void> {
-  const party = await getPartyOf(userId);
+  // Classé solo (groupes coupés) : chacun entre seul, même s'il lui reste un ancien groupe.
+  const party = config.cod.groupsEnabled ? await getPartyOf(userId) : null;
   let format: QueueFormat | undefined;
   let members: string[];
   let groupId: string;

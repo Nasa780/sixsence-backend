@@ -112,6 +112,12 @@ export function codRouter(hub: QueueHub): Router {
   );
 
   // --- Groupes -----------------------------------------------------------------
+  // Coupés (classé solo) tant que COD_GROUPS n'est pas « on » : aucune action, aucun groupe renvoyé.
+  router.use('/party', (req, res, next) => {
+    if (config.cod.groupsEnabled) return next();
+    if (req.method === 'GET' && req.path === '/') return void res.json({ party: null });
+    res.status(403).json({ error: { code: 'GROUPS_DISABLED', message: 'Le classé se joue en solo : les groupes sont désactivés.' } });
+  });
 
   router.get(
     '/party/invite/:code',
