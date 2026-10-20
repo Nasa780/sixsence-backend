@@ -46,8 +46,9 @@ export function parseTeamInput(body: unknown, { create = false } = {}): TeamInpu
   }
   if (create || input.tag !== undefined) {
     if (typeof input.tag !== 'string') throw new TeamInputError('Indique le tag de l’équipe.');
-    const tag = input.tag.trim().toUpperCase();
-    if (!/^[A-Z0-9]{2,4}$/.test(tag)) throw new TeamInputError('Le tag fait 2 à 4 lettres ou chiffres (ex. NXS).');
+    // Majuscules et minuscules acceptées, casse conservée (unicité sans tenir compte de la casse).
+    const tag = input.tag.trim();
+    if (!/^[A-Za-z0-9]{2,4}$/.test(tag)) throw new TeamInputError('Le tag fait 2 à 4 lettres ou chiffres (ex. NXS ou NxS).');
     out.tag = tag;
   }
   if (input.description !== undefined) {
@@ -134,5 +135,5 @@ export function canDo(actor: TeamActor | null, action: TeamAction, target: TeamA
 export function isOwnTeamMedia(url: unknown, supabaseUrl: string, userId: string): url is string {
   if (typeof url !== 'string' || url.length > 400) return false;
   const prefix = `${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/public/team-media/${userId}/`;
-  return url.startsWith(prefix) && /^[A-Za-z0-9._-]+\.(png|jpe?g|webp)$/.test(url.slice(prefix.length));
+  return url.startsWith(prefix) && /^[A-Za-z0-9._-]+\.(png|jpe?g|webp|gif)$/.test(url.slice(prefix.length));
 }

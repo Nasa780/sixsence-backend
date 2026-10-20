@@ -338,7 +338,7 @@ export async function updateTeam(userId: string, teamId: string, body: unknown) 
   if (input.name !== undefined || input.tag !== undefined) {
     const rows = (unwrap(await supabase.from('teams').select('name, tag').is('disbanded_at', null).neq('id', teamId)) ?? []) as { name: string; tag: string }[];
     if (rows.some((row) => input.name !== undefined && row.name.toLowerCase() === input.name.toLowerCase())) throw new HttpError(409, 'TEAM_NAME_TAKEN', 'Ce nom d’équipe est déjà pris.');
-    if (rows.some((row) => row.tag === input.tag)) throw new HttpError(409, 'TEAM_TAG_TAKEN', 'Ce tag est déjà pris.');
+    if (rows.some((row) => row.tag.toLowerCase() === input.tag!.toLowerCase())) throw new HttpError(409, 'TEAM_TAG_TAKEN', 'Ce tag est déjà pris.');
   }
   unwrap(await supabase.from('teams').update(patch).eq('id', teamId).is('disbanded_at', null));
   if (input.name !== undefined || input.tag !== undefined || input.color !== undefined) syncTeamRole(teamId);
@@ -706,7 +706,7 @@ export async function moderateTeam(staffId: string, teamId: string, body: unknow
     }
     const rows = (unwrap(await supabase.from('teams').select('name, tag').is('disbanded_at', null).neq('id', teamId)) ?? []) as { name: string; tag: string }[];
     if (rows.some((row) => row.name.toLowerCase() === parsed.name!.toLowerCase())) throw new HttpError(409, 'TEAM_NAME_TAKEN', 'Ce nom d’équipe est déjà pris.');
-    if (rows.some((row) => row.tag === parsed.tag)) throw new HttpError(409, 'TEAM_TAG_TAKEN', 'Ce tag est déjà pris.');
+    if (rows.some((row) => row.tag.toLowerCase() === parsed.tag!.toLowerCase())) throw new HttpError(409, 'TEAM_TAG_TAKEN', 'Ce tag est déjà pris.');
     patch.name = parsed.name;
     patch.tag = parsed.tag;
   }
