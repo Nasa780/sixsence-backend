@@ -65,6 +65,12 @@ const DEFAULT_ORIGINS = [
 
 export const config = {
   port: integer('PORT', 4000, 1),
+  /**
+   * Mode local sans risque (LOCAL_SAFE=1) : pour essayer le site sur son PC avec la base de production.
+   * Aucune tâche du classé (purge de la file au démarrage, ménage des matchs, « Prêt ? », Discord,
+   * MVP, cartes, annonces) et file / groupes du classé fermés ; seul le mode Match team tourne.
+   */
+  localSafe: process.env.LOCAL_SAFE?.trim() === '1',
   supabaseUrl: required('SUPABASE_URL'),
   // SUPABASE_KEY : nom historique de la variable sur Render, accepté pour éviter de la renommer.
   supabaseSecretKey: required('SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_KEY'),
