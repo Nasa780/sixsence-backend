@@ -488,7 +488,7 @@ async function completeTournament(tournament: TournamentRow, winner: string | nu
 
 /** Rôle Discord « Vainqueur — <tournoi> » pour l'effectif figé de l'équipe gagnante (créé s'il manque). */
 async function giveWinnerRole(tournament: TournamentRow, roster: string[]): Promise<void> {
-  if (!discordEnabled || roster.length === 0) return;
+  if (!discordEnabled || !config.teams.discord || roster.length === 0) return;
   const { guildId } = config.discord;
   try {
     const name = `Vainqueur — ${tournament.name}`.slice(0, 100);
@@ -504,7 +504,7 @@ async function giveWinnerRole(tournament: TournamentRow, roster: string[]): Prom
 
 async function announce(content: string): Promise<void> {
   const channel = config.discord.codChannelId || config.discord.resultsChannelId;
-  if (!discordEnabled || !channel) return;
+  if (!discordEnabled || !config.teams.discord || !channel) return;
   await discord(`/channels/${channel}/messages`, { method: 'POST', body: { content, flags: SUPPRESS_EMBEDS } }).catch((caught) =>
     console.warn('[tournoi] annonce impossible', (caught as Error).message),
   );

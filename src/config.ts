@@ -135,6 +135,8 @@ export const config = {
   teams: {
     /** Mode en pause tant que TEAM_MODE ne vaut pas « on » : pas de création d'équipe, de match ni de tournoi. */
     enabled: process.env.TEAM_MODE?.trim() === 'on',
+    /** TEAM_DISCORD=off : aucun message, salon ni rôle Discord pour les équipes (tests en ligne discrets). */
+    discord: process.env.TEAM_DISCORD?.trim() !== 'off',
     rosterSize: integer('TEAM_MATCH_PLAYERS', 4, 1),
   },
 
