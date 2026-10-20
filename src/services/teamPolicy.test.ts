@@ -6,8 +6,9 @@ const eligible = { activisionId: 'Nasa#123', discordId: '42', bannedUntil: null,
 const now = Date.parse('2026-10-17T12:00:00Z');
 
 describe('équipes', () => {
-  it('fiche : nom, tag en majuscules, couleur par défaut', () => {
-    assert.deepEqual(parseTeamInput({ name: '  Nexus   Squad ', tag: 'nxs' }, { create: true }), { name: 'Nexus Squad', tag: 'NXS', color: '#d4af37' });
+  it('fiche : nom, tag avec sa casse, couleur par défaut', () => {
+    assert.deepEqual(parseTeamInput({ name: '  Nexus   Squad ', tag: ' NxS ' }, { create: true }), { name: 'Nexus Squad', tag: 'NxS', color: '#d4af37' });
+    assert.throws(() => parseTeamInput({ name: 'Nexus', tag: 'N-X' }, { create: true }), TeamInputError);
     assert.throws(() => parseTeamInput({ name: 'NX', tag: 'NXS' }, { create: true }), TeamInputError);
     assert.throws(() => parseTeamInput({ name: 'Nexus', tag: 'NEXUS' }, { create: true }), TeamInputError);
     assert.throws(() => parseTeamInput({ name: 'Nexus <b>', tag: 'NX' }, { create: true }), TeamInputError);
