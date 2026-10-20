@@ -11,6 +11,7 @@ import {
   markTeamPresent,
   playerTeamMatches,
   postTeamMessage,
+  setTeamGameCode,
   stayInTeamQueue,
   getTeamMatch,
   joinTeamQueue,
@@ -75,6 +76,7 @@ import {
  *   POST   /teams/me/queue/stay                « Toujours là ? » : relancer les 30 min de recherche (Leader ou joueur inscrit)
  *   GET    /teams/players/:userId/matches      matchs de Division d'un joueur (historique du profil)
  *   POST   /teams/matches/:matchId/messages    chat du match { body }
+ *   POST   /teams/matches/:matchId/code        code de la partie privée (équipe hôte, modifiable avant les scores) { code }
  *   POST   /teams/matches/:matchId/present     « Présents en jeu » (équipe)
  *   POST   /teams/matches/:matchId/forfeit     déclarer forfait { reason: host_silent | absent }
  *   POST   /teams/matches/:matchId/forfeit/answer  valider ou contester le forfait { accept }
@@ -108,6 +110,7 @@ export function teamsRouter(): Router {
   router.post('/me/queue/stay', requireAuth, asyncHandler(async (_req, res) => void res.json(await stayInTeamQueue(currentUser(res).id))));
   router.get('/players/:userId/matches', asyncHandler(async (req, res) => void res.json({ matches: await playerTeamMatches(uuidParam(req, 'userId')) })));
   router.post('/matches/:matchId/messages', requireAuth, asyncHandler(async (req, res) => void res.json(await postTeamMessage(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
+  router.post('/matches/:matchId/code', requireAuth, asyncHandler(async (req, res) => void res.json(await setTeamGameCode(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/present', requireAuth, asyncHandler(async (req, res) => void res.json(await markTeamPresent(currentUser(res).id, uuidParam(req, 'matchId')))));
   router.post('/matches/:matchId/forfeit', requireAuth, asyncHandler(async (req, res) => void res.json(await claimTeamForfeit(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/forfeit/answer', requireAuth, asyncHandler(async (req, res) => void res.json(await answerTeamForfeit(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));

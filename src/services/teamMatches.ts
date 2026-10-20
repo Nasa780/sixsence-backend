@@ -328,6 +328,9 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
   let viewer = null;
   let proofs: { id: number; userId: string; username: string; url: string; createdAt: string }[] | null = null;
   let messages: { id: number; userId: string; username: string; side: Side | null; body: string; createdAt: string }[] | null = null;
+  // Code de la partie privée : sa présence est publique, le code seulement pour le match et les arbitres.
+  const code = await gameCodeOf(match.id);
+  let gameCode: string | null = null;
   if (viewerId) {
     const side = await leaderSide(match, viewerId);
     const referee = await isReferee(viewerId);
@@ -337,6 +340,7 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
     const forfeit = mySide ? await forfeitOptions(match, mySide) : { host_silent: false, absent: false };
     viewer = {
       side: mySide,
+      canSetCode: Boolean(mySide) && mySide === match.host_side && match.status === 'in_progress' && match.scores.length === 0 && !match.pending_scores,
       canChat: Boolean(mySide) || referee,
       canMarkPresent: Boolean(mySide) && match.status === 'in_progress' && match.scores.length === 0 && !(mySide === 'A' ? match.present_a : match.present_b),
       canClaimForfeit: forfeit,
@@ -354,7 +358,10 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
     // Captures : visibles des joueurs du match et des arbitres seulement (liens signés d'une heure).
     if (isPlayer || referee) proofs = await proofsOf(match.id, players);
     // Chat : joueurs du match, Leaders des deux équipes et arbitres.
-    if (mySide || referee) messages = await messagesOf(match.id);
+    if (mySide || referee) {
+      messages = await messagesOf(match.id);
+      gameCode = code?.code ?? null;
+    }
   }
   return {
     id: match.id,
@@ -392,6 +399,9 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
     hostSide: match.host_side,
     present: { A: match.present_a, B: match.present_b },
     hostDeadline: minutesAfter(match.created_at, HOST_MINUTES).toISOString(),
+    gameCode,
+    gameCodeAt: code?.set_at ?? null,
+    gameCodeUpdatedAt: code?.updated_at ?? null,
     presenceDeadline: minutesAfter(match.created_at, PRESENCE_MINUTES).toISOString(),
     forfeit: match.forfeit,
     forfeitBy: match.forfeit_by,
@@ -435,11 +445,42 @@ async function forfeitOptions(match: TeamMatch, side: Side): Promise<{ host_sile
   const now = Date.now();
   let hostSilent = false;
   if (match.host_side === opponent && now >= minutesAfter(match.created_at, HOST_MINUTES).getTime()) {
-    const { count } = await supabase.from('team_match_messages').select('id', { count: 'exact', head: true }).eq('match_id', match.id).eq('side', opponent);
-    hostSilent = (count ?? 0) === 0;
+    hostSilent = !(await gameCodeOf(match.id));
   }
   const absent = now >= minutesAfter(match.created_at, PRESENCE_MINUTES).getTime() && !(opponent === 'A' ? match.present_a : match.present_b);
   return { host_silent: hostSilent, absent };
+}
+
+async function gameCodeOf(matchId: string) {
+  return unwrap(await supabase.from('team_match_codes').select('code, set_at, updated_at').eq('match_id', matchId).maybeSingle()) as {
+    code: string;
+    set_at: string;
+    updated_at: string;
+  } | null;
+}
+
+/** Code de la partie privée : donné (ou corrigé) par l'équipe hôte tant qu'aucun score n'est déclaré. */
+export async function setTeamGameCode(userId: string, matchId: string, body: unknown) {
+  const match = await matchRow(matchId);
+  const side = await viewerSide(match, userId);
+  if (!side || side !== match.host_side) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seule l’équipe hôte donne le code de la partie.');
+  if (match.status !== 'in_progress' || match.scores.length > 0 || match.pending_scores) throw new HttpError(409, 'MATCH_STARTED', 'Le match a déjà commencé.');
+  const code = String((body as { code?: unknown } | undefined)?.code ?? '').trim();
+  if (code.length < 1 || code.length > 40 || /[<>]/.test(code)) throw new HttpError(400, 'INVALID_CODE', 'Le code doit contenir entre 1 et 40 caractères.');
+  const before = await gameCodeOf(matchId);
+  const now = new Date().toISOString();
+  if (before) unwrap(await supabase.from('team_match_codes').update({ code, set_by: userId, updated_at: now }).eq('match_id', matchId));
+  else unwrap(await supabase.from('team_match_codes').insert({ match_id: matchId, code, set_by: userId, set_at: now, updated_at: now }));
+  // Le site de l'autre équipe se met à jour en direct (temps réel sur team_matches).
+  await supabase.from('team_matches').update({ activity_at: now }).eq('id', matchId);
+  const guestTeam = side === 'A' ? match.team_b : match.team_a;
+  await pushToUsers([...(side === 'A' ? match.roster_b : match.roster_a), ...(await leadersOf(guestTeam))], {
+    title: before ? 'Code de la partie modifié' : 'Code de la partie disponible',
+    body: 'L’équipe hôte a donné le code : rejoins la partie privée.',
+    url: matchUrl(matchId),
+    tag: `team-match-${matchId}`,
+  });
+  return getTeamMatch(matchId, userId);
 }
 
 /** Message dans le chat du match (joueurs du match, Leaders des deux équipes, arbitres). */
