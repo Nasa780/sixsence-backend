@@ -1,14 +1,14 @@
 /**
- * Équipes (mode « Match team ») : règles pures, testées dans teamPolicy.test.ts.
+ * Équipes (Division) : règles pures, testées dans teamPolicy.test.ts.
  *
- *   - accès (créer ou rejoindre) : 5 matchs classés joués (anti-smurf), identifiant Activision
- *     et Discord liés, aucune exclusion en cours, pas déjà dans une équipe, 24 h après un départ ;
+ *   - accès (créer ou rejoindre) : identifiant Activision et Discord liés (aucun nombre de matchs
+ *     classés exigé depuis le 2026-10-20), aucune exclusion en cours, pas déjà dans une équipe, 24 h après un départ ;
  *   - 8 joueurs au plus dont 4 titulaires ;
  *   - rôles : Leader (plusieurs possibles) ou Joueur ; le créateur porte la couronne, il est Leader
  *     d'office et seul à nommer les Leaders, renommer l'équipe, transmettre la couronne ou dissoudre.
  */
 
-export const TEAM_LIMITS = { maxMembers: 8, maxStarters: 4, minRankedMatches: 5, leaveCooldownHours: 24, maxPendingInvites: 20 } as const;
+export const TEAM_LIMITS = { maxMembers: 8, maxStarters: 4, leaveCooldownHours: 24, maxPendingInvites: 20 } as const;
 
 export const TEAM_COLORS = ['#d4af37', '#5cc8ff', '#f87171', '#a78bfa', '#4ade80', '#facc15', '#fb923c', '#f0abfc', '#e5e7eb'];
 export const SOCIAL_KEYS = ['discord', 'x', 'twitch', 'youtube', 'tiktok'] as const;
@@ -76,7 +76,6 @@ export function parseTeamInput(body: unknown, { create = false } = {}): TeamInpu
 }
 
 export interface TeamEligibilityInput {
-  rankedMatches: number;
   activisionId: string | null;
   discordId: string | null;
   bannedUntil: string | null;
@@ -88,9 +87,6 @@ export interface TeamEligibilityInput {
 export function missingRequirements(input: TeamEligibilityInput, now = Date.now()): string[] {
   const missing: string[] = [];
   if (input.inTeam) missing.push('Tu fais déjà partie d’une équipe.');
-  if (input.rankedMatches < TEAM_LIMITS.minRankedMatches) {
-    missing.push(`Joue ${TEAM_LIMITS.minRankedMatches} matchs classés (${input.rankedMatches} / ${TEAM_LIMITS.minRankedMatches}).`);
-  }
   if (!input.activisionId) missing.push('Renseigne ton identifiant Activision.');
   if (!input.discordId) missing.push('Connecte ton compte Discord.');
   if (input.bannedUntil && new Date(input.bannedUntil).getTime() > now) missing.push('Tu as une exclusion en cours.');

@@ -9,7 +9,7 @@ import { deciderPicker, declarationError, isCompleteSeries, pickMaps, seriesStat
 import { membershipOf } from './teams.js';
 
 /**
- * Matchs d'équipe (mode « Match team », étape 2) : file des équipes, BO3, déclaration et
+ * Matchs d'équipe (Division, étape 2) : file des équipes, BO3, déclaration et
  * confirmation des scores par les Leaders, choix de la map 3, arbitrage, ménage et Discord.
  * Règles pures dans teamMatchPolicy.ts ; création et clôture atomiques en SQL (migration 0026).
  */
@@ -28,7 +28,7 @@ export interface TeamMatch {
   maps: { map: string; pick: Side | 'random' }[];
   scores: MapScore[];
   map3_picker: Side | 'random' | null;
-  status: 'in_progress' | 'awaiting_confirmation' | 'disputed' | 'completed' | 'cancelled';
+  status: 'in_progress' | 'awaiting_confirmation' | 'forfeit_claimed' | 'disputed' | 'completed' | 'cancelled';
   pending_scores: MapScore[] | null;
   reported_by: string | null;
   reported_team: Side | null;
@@ -48,9 +48,23 @@ export interface TeamMatch {
   /** Correction après validation (0029). */
   corrected_at: string | null;
   correction_reason: string | null;
+  /** Déroulé (0033) : équipe hôte, présence en jeu, forfait déclaré puis validé. */
+  host_side: Side | null;
+  present_a: string | null;
+  present_b: string | null;
+  forfeit: boolean;
+  forfeit_by: Side | null;
+  forfeit_reason: 'host_silent' | 'absent' | null;
+  forfeit_claimed_at: string | null;
 }
 
-const OPEN = ['in_progress', 'awaiting_confirmation', 'disputed'];
+const OPEN = ['in_progress', 'awaiting_confirmation', 'forfeit_claimed', 'disputed'];
+/** L'hôte donne le code de la partie dans le chat sous 10 min ; les deux équipes sont en jeu sous 15 min. */
+const HOST_MINUTES = 10;
+const PRESENCE_MINUTES = 15;
+/** Un forfait déclaré non validé par l'équipe visée sous 15 min part chez un arbitre. */
+const FORFEIT_ANSWER_MINUTES = 15;
+const minutesAfter = (iso: string, minutes: number) => new Date(new Date(iso).getTime() + minutes * 60_000);
 const matchUrl = (id: string) => `/cod/equipes/match/${id}`;
 const other = (side: Side): Side => (side === 'A' ? 'B' : 'A');
 
@@ -96,16 +110,26 @@ export async function teamPlayState(userId: string) {
   const member = await membershipOf(userId);
   const queueCount = await supabase.from('team_queue').select('team_id', { count: 'exact', head: true });
   const base = { rosterSize: config.teams.rosterSize, teamsSearching: queueCount.count ?? 0 };
-  if (!member) return { ...base, queued: null, activeMatchId: null };
-  const [queued, active] = await Promise.all([
-    supabase.from('team_queue').select('roster, joined_at').eq('team_id', member.team_id).maybeSingle(),
+  if (!member) return { ...base, queued: null, activeMatchId: null, expiredAt: null };
+  const [queued, active, team] = await Promise.all([
+    supabase.from('team_queue').select('roster, joined_at, confirmed_at, warned_at').eq('team_id', member.team_id).maybeSingle(),
     supabase.from('team_matches').select('id').in('status', OPEN).or(`team_a.eq.${member.team_id},team_b.eq.${member.team_id}`).limit(1).maybeSingle(),
+    supabase.from('teams').select('queue_expired_at').eq('id', member.team_id).maybeSingle(),
   ]);
-  const q = queued.data as { roster: string[]; joined_at: string } | null;
-  return { ...base, queued: q ? { roster: q.roster, since: q.joined_at } : null, activeMatchId: (active.data as { id: string } | null)?.id ?? null };
+  const q = queued.data as { roster: string[]; joined_at: string; confirmed_at: string; warned_at: string | null } | null;
+  const expired = (team.data as { queue_expired_at: string | null } | null)?.queue_expired_at ?? null;
+  return {
+    ...base,
+    queued: q
+      ? { roster: q.roster, since: q.joined_at, warned: Boolean(q.warned_at), expiresAt: minutesAfter(q.confirmed_at, config.cod.queueMaxMinutes).toISOString() }
+      : null,
+    activeMatchId: (active.data as { id: string } | null)?.id ?? null,
+    // Recherche arrêtée faute de confirmation dans les 15 dernières minutes (alerte sur le site).
+    expiredAt: expired && Date.now() - new Date(expired).getTime() < 15 * 60_000 ? expired : null,
+  };
 }
 
-/** Le Leader inscrit son équipe avec ses titulaires (TEAM_MATCH_PLAYERS joueurs de l'équipe). */
+/** Le Leader inscrit son équipe avec les joueurs du match qu'il choisit (TEAM_MATCH_PLAYERS joueurs de l'équipe). */
 export async function joinTeamQueue(userId: string, body: unknown) {
   const member = await membershipOf(userId);
   if (!member) throw new HttpError(409, 'NOT_IN_TEAM', 'Tu ne fais partie d’aucune équipe.');
@@ -115,18 +139,18 @@ export async function joinTeamQueue(userId: string, body: unknown) {
 
   const roster = (body as { roster?: unknown } | undefined)?.roster;
   if (!Array.isArray(roster) || roster.length !== size || new Set(roster).size !== size || !roster.every((id) => typeof id === 'string')) {
-    throw new HttpError(400, 'INVALID_ROSTER', `Choisis ${size} titulaire${size > 1 ? 's' : ''} différent${size > 1 ? 's' : ''}.`);
+    throw new HttpError(400, 'INVALID_ROSTER', `Choisis ${size} joueur${size > 1 ? 's' : ''} différent${size > 1 ? 's' : ''} pour le match.`);
   }
   const members = (unwrap(await supabase.from('team_members').select('user_id').eq('team_id', teamId)) ?? []) as { user_id: string }[];
   const ids = new Set(members.map((row) => row.user_id));
-  if (!roster.every((id) => ids.has(id))) throw new HttpError(400, 'INVALID_ROSTER', 'Les titulaires doivent faire partie de l’équipe.');
+  if (!roster.every((id) => ids.has(id))) throw new HttpError(400, 'INVALID_ROSTER', 'Les joueurs du match doivent faire partie de l’équipe.');
 
   const state = await teamPlayState(userId);
   if (state.activeMatchId) throw new HttpError(409, 'ALREADY_IN_MATCH', 'Ton équipe a déjà un match en cours.');
   const { teamBusyInTournament } = await import('./tournaments.js');
   if (await teamBusyInTournament(teamId)) throw new HttpError(409, 'TEAM_IN_TOURNAMENT', 'Ton équipe est inscrite au tournoi en cours : pas de match ordinaire d’ici la fin de son parcours.');
 
-  // Chaque titulaire : pas d'exclusion, pas de match classé en cours, pas en file classée.
+  // Chaque joueur du match : pas d'exclusion, pas de match classé en cours, pas en file classée.
   const [profiles, users, rankedQueue] = await Promise.all([
     supabase.from('cod_profiles').select('user_id, banned_until, activision_id').in('user_id', roster),
     supabase.from('users').select('id, username').in('id', roster),
@@ -134,17 +158,19 @@ export async function joinTeamQueue(userId: string, body: unknown) {
   ]);
   const name = new Map(((users.data ?? []) as { id: string; username: string }[]).map((row) => [row.id, row.username]));
   for (const profile of (profiles.data ?? []) as { user_id: string; banned_until: string | null; activision_id: string | null }[]) {
-    if (profile.banned_until && new Date(profile.banned_until).getTime() > Date.now()) throw new HttpError(403, 'MEMBER_BANNED', `${name.get(profile.user_id) ?? 'Un titulaire'} est exclu en ce moment.`);
-    if (!profile.activision_id) throw new HttpError(409, 'MEMBER_PROFILE_INCOMPLETE', `${name.get(profile.user_id) ?? 'Un titulaire'} doit renseigner son identifiant Activision.`);
+    if (profile.banned_until && new Date(profile.banned_until).getTime() > Date.now()) throw new HttpError(403, 'MEMBER_BANNED', `${name.get(profile.user_id) ?? 'Un joueur du match'} est exclu en ce moment.`);
+    if (!profile.activision_id) throw new HttpError(409, 'MEMBER_PROFILE_INCOMPLETE', `${name.get(profile.user_id) ?? 'Un joueur du match'} doit renseigner son identifiant Activision.`);
   }
   const inRankedQueue = ((rankedQueue.data ?? []) as { user_id: string }[])[0];
-  if (inRankedQueue) throw new HttpError(409, 'MEMBER_IN_QUEUE', `${name.get(inRankedQueue.user_id) ?? 'Un titulaire'} est dans la file classée.`);
+  if (inRankedQueue) throw new HttpError(409, 'MEMBER_IN_QUEUE', `${name.get(inRankedQueue.user_id) ?? 'Un joueur du match'} est dans la file classée.`);
   for (const id of roster) {
     const active = unwrap(await supabase.rpc('cod_active_match_id', { p_user: id }));
-    if (active) throw new HttpError(409, 'MEMBER_IN_MATCH', `${name.get(id) ?? 'Un titulaire'} a un match classé en cours.`);
+    if (active) throw new HttpError(409, 'MEMBER_IN_MATCH', `${name.get(id) ?? 'Un joueur du match'} a un match classé en cours.`);
   }
 
-  unwrap(await supabase.from('team_queue').upsert({ team_id: teamId, roster, queued_by: userId, joined_at: new Date().toISOString() }));
+  const now = new Date().toISOString();
+  unwrap(await supabase.from('team_queue').upsert({ team_id: teamId, roster, queued_by: userId, joined_at: now, confirmed_at: now, warned_at: null }));
+  await supabase.from('teams').update({ queue_expired_at: null }).eq('id', teamId);
   await tryCreateTeamMatches();
   return teamPlayState(userId);
 }
@@ -156,10 +182,42 @@ export async function leaveTeamQueue(userId: string) {
   return teamPlayState(userId);
 }
 
+/** « Toujours là ? » : un Leader relance les 30 min de recherche (place conservée). */
+export async function stayInTeamQueue(userId: string) {
+  const member = await membershipOf(userId);
+  if (!member) throw new HttpError(409, 'NOT_IN_TEAM', 'Tu ne fais partie d’aucune équipe.');
+  if (!(member.role === 'leader' || member.isOwner)) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader peut continuer la recherche.');
+  unwrap(await supabase.from('team_queue').update({ confirmed_at: new Date().toISOString(), warned_at: null }).eq('team_id', member.team_id));
+  return teamPlayState(userId);
+}
+
+/** Durée maximale de recherche (comme le classé) : avertissement 5 min avant, puis sortie de la file. */
+export async function checkTeamQueueTimeouts(): Promise<void> {
+  try {
+    const rows = (unwrap(await supabase.from('team_queue').select('team_id, confirmed_at, warned_at')) ?? []) as { team_id: string; confirmed_at: string; warned_at: string | null }[];
+    const now = Date.now();
+    for (const row of rows) {
+      const end = minutesAfter(row.confirmed_at, config.cod.queueMaxMinutes).getTime();
+      if (now >= end) {
+        await supabase.from('team_queue').delete().eq('team_id', row.team_id).eq('confirmed_at', row.confirmed_at);
+        await supabase.from('teams').update({ queue_expired_at: new Date().toISOString() }).eq('id', row.team_id);
+      } else if (!row.warned_at && now >= end - config.cod.queueWarnMinutes * 60_000) {
+        await supabase.from('team_queue').update({ warned_at: new Date().toISOString() }).eq('team_id', row.team_id);
+      }
+    }
+  } catch (caught) {
+    console.error('[team-match] durée de recherche', (caught as Error).message);
+  }
+}
+
 /** Crée les matchs tant que deux équipes attendent. */
 export async function tryCreateTeamMatches(): Promise<void> {
   for (let i = 0; i < 10; i += 1) {
-    const { data, error } = await supabase.rpc('team_match_create', { p_maps: pickMaps(config.cod.maps, 2), p_mode: config.cod.modes[0] });
+    const { data, error } = await supabase.rpc('team_match_create', {
+      p_maps: pickMaps(config.cod.maps, 2),
+      p_mode: config.cod.modes[0],
+      p_rematch_minutes: config.teams.rematchMinutes,
+    });
     if (error) {
       console.error('[team-match] création impossible', error.message);
       return;
@@ -176,7 +234,7 @@ async function onTeamMatchCreated(match: TeamMatch): Promise<void> {
   const b = teams.get(match.team_b)!;
   const players = [...match.roster_a, ...match.roster_b];
   await pushToUsers(players, {
-    title: `⚔️ Match team : [${a.tag}] vs [${b.tag}]`,
+    title: `⚔️ Division : [${a.tag}] vs [${b.tag}]`,
     body: `BO3 · ${match.maps.map((map) => map.map).join(' puis ')}. Ouvre la feuille de match.`,
     url: matchUrl(match.id),
     tag: `team-match-${match.id}`,
@@ -196,8 +254,8 @@ async function onTeamMatchCreated(match: TeamMatch): Promise<void> {
     await supabase.from('team_matches').update({ discord_channels: created }).eq('id', match.id);
     const link = (id: string) => `https://discord.com/channels/${guildId}/${id}`;
     const sheet = `${config.siteUrl}${matchUrl(match.id)}`;
-    await dm(match.roster_a, `**Match team : [${a.tag}] vs [${b.tag}]** (BO3) — vocal de ton équipe : ${link(created.teamA!)}\nFeuille de match : ${sheet}`);
-    await dm(match.roster_b, `**Match team : [${a.tag}] vs [${b.tag}]** (BO3) — vocal de ton équipe : ${link(created.teamB!)}\nFeuille de match : ${sheet}`);
+    await dm(match.roster_a, `**Division : [${a.tag}] vs [${b.tag}]** (BO3) — vocal de ton équipe : ${link(created.teamA!)}\nFeuille de match : ${sheet}`);
+    await dm(match.roster_b, `**Division : [${a.tag}] vs [${b.tag}]** (BO3) — vocal de ton équipe : ${link(created.teamB!)}\nFeuille de match : ${sheet}`);
   } catch (caught) {
     console.warn('[team-match] salons vocaux impossibles', (caught as Error).message);
     for (const id of Object.values(created)) await discord(`/channels/${id}`, { method: 'DELETE' }).catch(() => {});
@@ -230,24 +288,34 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
 
   let viewer = null;
   let proofs: { id: number; userId: string; username: string; url: string; createdAt: string }[] | null = null;
+  let messages: { id: number; userId: string; username: string; side: Side | null; body: string; createdAt: string }[] | null = null;
   if (viewerId) {
     const side = await leaderSide(match, viewerId);
     const referee = await isReferee(viewerId);
     const state = seriesState(match.scores, match.best_of);
     const isPlayer = ids.includes(viewerId);
+    const mySide = sideOf(match, viewerId) ?? side;
+    const forfeit = mySide ? await forfeitOptions(match, mySide) : { host_silent: false, absent: false };
     viewer = {
+      side: mySide,
+      canChat: Boolean(mySide) || referee,
+      canMarkPresent: Boolean(mySide) && match.status === 'in_progress' && match.scores.length === 0 && !(mySide === 'A' ? match.present_a : match.present_b),
+      canClaimForfeit: forfeit,
+      canAnswerForfeit: Boolean(mySide) && match.status === 'forfeit_claimed' && match.forfeit_by !== mySide,
       leaderOf: side,
       referee,
       isPlayer,
-      canReport: Boolean(side) && match.status === 'in_progress' && state.phase !== 'done' && (state.phase !== 'decider' || match.maps.length === match.best_of),
-      canConfirm: Boolean(side) && match.status === 'awaiting_confirmation' && match.reported_team !== side,
-      canPickMap3: Boolean(side) && match.status === 'in_progress' && state.phase === 'decider' && match.maps.length === match.best_of - 1 && match.map3_picker === side,
+      canReport: Boolean(mySide) && match.status === 'in_progress' && state.phase !== 'done' && (state.phase !== 'decider' || match.maps.length === match.best_of),
+      canConfirm: Boolean(mySide) && match.status === 'awaiting_confirmation' && match.reported_team !== mySide,
+      canPickMap3: Boolean(side) && match.status === 'in_progress' && state.phase === 'decider' && match.maps.length === match.best_of - 1 && match.map3_picker === mySide,
       canResolve: referee && OPEN.includes(match.status),
       canProve: isPlayer && proofWindowOpen(match),
       canCorrect: referee && match.status === 'completed' && !match.tournament_id && withinWindow(match.completed_at, correctionWindowHours(await roleOf(viewerId))),
     };
     // Captures : visibles des joueurs du match et des arbitres seulement (liens signés d'une heure).
     if (isPlayer || referee) proofs = await proofsOf(match.id, players);
+    // Chat : joueurs du match, Leaders des deux équipes et arbitres.
+    if (mySide || referee) messages = await messagesOf(match.id);
   }
   return {
     id: match.id,
@@ -281,8 +349,147 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
     tournament: match.tournament_id ? await tournamentLabel(match.tournament_id, match.round) : null,
     confirmMinutes: config.cod.confirmMinutes,
     proofs,
+    messages,
+    hostSide: match.host_side,
+    present: { A: match.present_a, B: match.present_b },
+    hostDeadline: minutesAfter(match.created_at, HOST_MINUTES).toISOString(),
+    presenceDeadline: minutesAfter(match.created_at, PRESENCE_MINUTES).toISOString(),
+    forfeit: match.forfeit,
+    forfeitBy: match.forfeit_by,
+    forfeitReason: match.forfeit_reason,
+    forfeitAnswerDeadline: match.forfeit_claimed_at ? minutesAfter(match.forfeit_claimed_at, FORFEIT_ANSWER_MINUTES).toISOString() : null,
     viewer,
   };
+}
+
+/** Côté (A ou B) d'un joueur du match, ou null. */
+function sideOf(match: TeamMatch, userId: string): Side | null {
+  return match.roster_a.includes(userId) ? 'A' : match.roster_b.includes(userId) ? 'B' : null;
+}
+
+/** Côté du visiteur : joueur du match ou Leader d'une des deux équipes. */
+async function viewerSide(match: TeamMatch, userId: string): Promise<Side | null> {
+  return sideOf(match, userId) ?? (await leaderSide(match, userId));
+}
+
+async function messagesOf(matchId: string) {
+  const rows = (unwrap(await supabase.from('team_match_messages').select('id, user_id, side, body, created_at').eq('match_id', matchId).order('created_at').limit(200)) ?? []) as {
+    id: number;
+    user_id: string;
+    side: Side | null;
+    body: string;
+    created_at: string;
+  }[];
+  const ids = [...new Set(rows.map((row) => row.user_id))];
+  const users = ids.length ? ((unwrap(await supabase.from('users').select('id, username').in('id', ids)) ?? []) as { id: string; username: string }[]) : [];
+  const names = new Map(users.map((user) => [user.id, user.username]));
+  return rows.map((row) => ({ id: row.id, userId: row.user_id, username: names.get(row.user_id) ?? 'Joueur', side: row.side, body: row.body, createdAt: row.created_at }));
+}
+
+/**
+ * Forfaits qu'une équipe peut déclarer contre l'autre (match pas encore commencé) : l'hôte adverse n'a
+ * rien écrit dans le chat en 10 min, ou l'équipe adverse n'est pas « présente en jeu » au bout de 15 min.
+ */
+async function forfeitOptions(match: TeamMatch, side: Side): Promise<{ host_silent: boolean; absent: boolean }> {
+  if (match.status !== 'in_progress' || match.scores.length > 0) return { host_silent: false, absent: false };
+  const opponent = other(side);
+  const now = Date.now();
+  let hostSilent = false;
+  if (match.host_side === opponent && now >= minutesAfter(match.created_at, HOST_MINUTES).getTime()) {
+    const { count } = await supabase.from('team_match_messages').select('id', { count: 'exact', head: true }).eq('match_id', match.id).eq('side', opponent);
+    hostSilent = (count ?? 0) === 0;
+  }
+  const absent = now >= minutesAfter(match.created_at, PRESENCE_MINUTES).getTime() && !(opponent === 'A' ? match.present_a : match.present_b);
+  return { host_silent: hostSilent, absent };
+}
+
+/** Message dans le chat du match (joueurs du match, Leaders des deux équipes, arbitres). */
+export async function postTeamMessage(userId: string, matchId: string, body: unknown) {
+  const match = await matchRow(matchId);
+  const side = await viewerSide(match, userId);
+  if (!side && !(await isReferee(userId))) throw new HttpError(403, 'NOT_A_PLAYER', 'Tu ne participes pas à ce match.');
+  const text = typeof body === 'object' && body ? String((body as { body?: unknown }).body ?? '').trim() : '';
+  if (text.length < 1 || text.length > 300) throw new HttpError(400, 'INVALID_MESSAGE', 'Le message doit contenir entre 1 et 300 caractères.');
+  if (match.status === 'cancelled' || (match.status === 'completed' && Date.now() - new Date(match.completed_at!).getTime() > 24 * 3600_000)) {
+    throw new HttpError(409, 'MATCH_CLOSED', 'Le chat de ce match est fermé.');
+  }
+  unwrap(await supabase.from('team_match_messages').insert({ match_id: matchId, user_id: userId, side, body: text }));
+  // Le site se met à jour en direct (temps réel sur team_matches).
+  await supabase.from('team_matches').update({ activity_at: new Date().toISOString() }).eq('id', matchId);
+  return getTeamMatch(matchId, userId);
+}
+
+/** « Présents en jeu » : un joueur ou un Leader de l'équipe le confirme pour toute l'équipe. */
+export async function markTeamPresent(userId: string, matchId: string) {
+  const match = await matchRow(matchId);
+  const side = await viewerSide(match, userId);
+  if (!side) throw new HttpError(403, 'NOT_A_PLAYER', 'Tu ne participes pas à ce match.');
+  if (match.status !== 'in_progress' || match.scores.length > 0) throw new HttpError(409, 'MATCH_STARTED', 'Le match a déjà commencé.');
+  const column = side === 'A' ? 'present_a' : 'present_b';
+  unwrap(await supabase.from('team_matches').update({ [column]: new Date().toISOString(), activity_at: new Date().toISOString() }).eq('id', matchId).is(column, null));
+  return getTeamMatch(matchId, userId);
+}
+
+/** Déclarer forfait contre l'autre équipe (hôte muet 10 min, ou absent en jeu à 15 min). */
+export async function claimTeamForfeit(userId: string, matchId: string, body: unknown) {
+  const match = await matchRow(matchId);
+  const side = await viewerSide(match, userId);
+  if (!side) throw new HttpError(403, 'NOT_A_PLAYER', 'Tu ne participes pas à ce match.');
+  const reason = (body as { reason?: unknown } | undefined)?.reason;
+  if (reason !== 'host_silent' && reason !== 'absent') throw new HttpError(400, 'INVALID_REASON', 'Motif de forfait inconnu.');
+  const options = await forfeitOptions(match, side);
+  if (!options[reason]) throw new HttpError(409, 'FORFEIT_NOT_ALLOWED', reason === 'host_silent' ? 'L’hôte a encore le temps ou a déjà écrit dans le chat.' : 'L’équipe adverse a encore le temps ou est déjà en jeu.');
+  const now = new Date().toISOString();
+  const updated = unwrap(
+    await supabase
+      .from('team_matches')
+      .update({ status: 'forfeit_claimed', forfeit_by: side, forfeit_reason: reason, forfeit_claimed_at: now, activity_at: now })
+      .eq('id', matchId)
+      .eq('status', 'in_progress')
+      .select('id')
+      .maybeSingle(),
+  );
+  if (!updated) throw new HttpError(409, 'MATCH_CHANGED', 'Le match vient de changer : recharge la page.');
+  const opponentTeam = side === 'A' ? match.team_b : match.team_a;
+  await pushToUsers([...(side === 'A' ? match.roster_b : match.roster_a), ...(await leadersOf(opponentTeam))], {
+    title: 'Forfait déclaré contre ton équipe',
+    body: `Valide ou conteste sous ${FORFEIT_ANSWER_MINUTES} min, sinon un arbitre tranchera.`,
+    url: matchUrl(matchId),
+    tag: `team-match-${matchId}`,
+  });
+  return getTeamMatch(matchId, userId);
+}
+
+/** L'équipe visée valide le forfait (défaite) ou le conteste (arbitre). */
+export async function answerTeamForfeit(userId: string, matchId: string, body: unknown) {
+  const match = await matchRow(matchId);
+  const side = await viewerSide(match, userId);
+  if (match.status !== 'forfeit_claimed') throw new HttpError(409, 'MATCH_CHANGED', 'Aucun forfait en attente.');
+  if (!side || side === match.forfeit_by) throw new HttpError(403, 'TEAM_FORBIDDEN', 'La réponse doit venir de l’équipe visée.');
+  if ((body as { accept?: unknown } | undefined)?.accept === true) {
+    unwrap(await supabase.rpc('team_match_finalize', { p_match: matchId, p_scores: [], p_winner: match.forfeit_by, p_resolved_by: null, p_forfeit: true }));
+    await afterClose(match);
+  } else {
+    await disputeForfeit(match, 'contesté par l’équipe visée');
+  }
+  return getTeamMatch(matchId, userId);
+}
+
+async function disputeForfeit(match: TeamMatch, why: string): Promise<void> {
+  const updated = unwrap(
+    await supabase
+      .from('team_matches')
+      .update({ status: 'disputed', activity_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', match.id)
+      .eq('status', 'forfeit_claimed')
+      .select('id')
+      .maybeSingle(),
+  );
+  if (!updated) return;
+  const teams = await teamsById([match.team_a, match.team_b]);
+  await notifyStaff(
+    `⚔️ Forfait de Division ${why} : **[${teams.get(match.team_a)?.tag}] vs [${teams.get(match.team_b)?.tag}]** — un arbitre doit trancher.\n${config.siteUrl}${matchUrl(match.id)}`,
+  );
 }
 
 // --- Captures de preuve -----------------------------------------------------------------------
@@ -316,7 +523,7 @@ async function proofsOf(matchId: string, players: { id: string; username: string
     .map((row) => ({ id: row.id, userId: row.user_id, username: names.get(row.user_id) ?? 'Joueur', url: urls.get(row.storage_path)!, createdAt: row.created_at }));
 }
 
-/** Enregistre une capture déjà envoyée par un titulaire dans le bucket (dossier <match>/<joueur>/). */
+/** Enregistre une capture déjà envoyée par un joueur du match dans le bucket (dossier <match>/<joueur>/). */
 export async function addTeamProof(userId: string, matchId: string, body: unknown) {
   const match = await matchRow(matchId);
   if (![...match.roster_a, ...match.roster_b].includes(userId)) throw new HttpError(403, 'NOT_A_PLAYER', 'Tu ne joues pas ce match.');
@@ -358,8 +565,9 @@ export async function listTeamDisputes() {
 /** Un Leader déclare les scores de l'étape en cours (maps 1 et 2, ou map 3). */
 export async function reportTeamScores(userId: string, matchId: string, body: unknown) {
   const match = await matchRow(matchId);
-  const side = await leaderSide(match, userId);
-  if (!side) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader d’une des deux équipes peut déclarer les scores.');
+  // Joueurs du match et Leaders des deux équipes.
+  const side = await viewerSide(match, userId);
+  if (!side) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seuls les joueurs du match et les Leaders peuvent déclarer les scores.');
   if (match.status !== 'in_progress') throw new HttpError(409, 'MATCH_NOT_REPORTABLE', 'Des scores sont déjà déclarés ou le match est terminé.');
   const scores = (body as { scores?: unknown } | undefined)?.scores;
   const problem = declarationError(match.scores, scores, match.best_of);
@@ -391,9 +599,9 @@ export async function reportTeamScores(userId: string, matchId: string, body: un
 /** Un Leader adverse confirme (étape suivante ou fin du match) ou conteste (arbitre). */
 export async function confirmTeamScores(userId: string, matchId: string, body: unknown) {
   const match = await matchRow(matchId);
-  const side = await leaderSide(match, userId);
+  const side = await viewerSide(match, userId);
   if (match.status !== 'awaiting_confirmation') throw new HttpError(409, 'MATCH_NOT_CONFIRMABLE', 'Ce match n’attend pas de confirmation.');
-  if (!side || side === match.reported_team) throw new HttpError(403, 'SAME_TEAM_AS_REPORTER', 'La confirmation doit venir d’un Leader de l’équipe adverse.');
+  if (!side || side === match.reported_team) throw new HttpError(403, 'SAME_TEAM_AS_REPORTER', 'La confirmation doit venir de l’équipe adverse (joueur du match ou Leader).');
 
   if ((body as { accept?: unknown } | undefined)?.accept === true) {
     await applyConfirmed(match);
@@ -410,7 +618,7 @@ export async function confirmTeamScores(userId: string, matchId: string, body: u
     if (!updated) throw new HttpError(409, 'MATCH_NOT_CONFIRMABLE', 'Ce match n’attend plus de confirmation.');
     const teams = await teamsById([match.team_a, match.team_b]);
     await notifyStaff(
-      `⚔️ Match team contesté : **[${teams.get(match.team_a)?.tag}] vs [${teams.get(match.team_b)?.tag}]** — un arbitre doit trancher.\n${config.siteUrl}${matchUrl(matchId)}`,
+      `⚔️ Match de Division contesté : **[${teams.get(match.team_a)?.tag}] vs [${teams.get(match.team_b)?.tag}]** — un arbitre doit trancher.\n${config.siteUrl}${matchUrl(matchId)}`,
     );
   }
   return getTeamMatch(matchId, userId);
@@ -459,7 +667,7 @@ async function applyConfirmed(match: TeamMatch): Promise<void> {
 /** Le Leader de l'équipe qui a gagné le plus de manches choisit la map 3. */
 export async function pickTeamMap3(userId: string, matchId: string, body: unknown) {
   const match = await matchRow(matchId);
-  const side = await leaderSide(match, userId);
+  const side = await viewerSide(match, userId);
   if (!side || match.map3_picker !== side) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Le choix de la map décisive revient à l’équipe qui a gagné le plus de manches.');
   if (match.status !== 'in_progress' || match.scores.length !== match.best_of - 1 || match.maps.length !== match.best_of - 1) {
     throw new HttpError(409, 'MAP3_CLOSED', 'La map décisive n’est pas à choisir maintenant.');
@@ -487,6 +695,12 @@ export async function resolveTeamMatch(staffId: string, matchId: string, body: u
   const match = await matchRow(matchId);
   if (!OPEN.includes(match.status)) throw new HttpError(409, 'MATCH_CLOSED', 'Ce match est déjà clôturé.');
   const scores = (body as { scores?: unknown } | undefined)?.scores;
+  const forfeitWinner = (body as { forfeitWinner?: unknown } | undefined)?.forfeitWinner;
+  if (forfeitWinner === 'A' || forfeitWinner === 'B') {
+    unwrap(await supabase.rpc('team_match_finalize', { p_match: matchId, p_scores: [], p_winner: forfeitWinner, p_resolved_by: staffId, p_forfeit: true }));
+    await afterClose(match);
+    return getTeamMatch(matchId, staffId);
+  }
   if (scores === null) {
     unwrap(
       await supabase
@@ -542,7 +756,7 @@ export async function correctTeamMatch(staffId: string, matchId: string, body: u
     }),
   );
   await pushToUsers([...match.roster_a, ...match.roster_b], {
-    title: 'Résultat du match team corrigé',
+    title: 'Résultat du match de Division corrigé',
     body: input.scores === null ? 'Le match a été annulé par l’équipe SixSence : points rendus.' : 'L’équipe SixSence a corrigé les scores : points recalculés.',
     url: matchUrl(matchId),
     tag: `team-match-${matchId}`,
@@ -556,12 +770,12 @@ export async function teamMatchHistory(teamId: string) {
   const rows = (unwrap(
     await supabase
       .from('team_matches')
-      .select('id, team_a, team_b, status, scores, winner, points_changes, created_at, completed_at')
+      .select('id, team_a, team_b, status, scores, winner, points_changes, created_at, completed_at, forfeit')
       .or(`team_a.eq.${teamId},team_b.eq.${teamId}`)
       .in('status', ['completed', ...OPEN])
       .order('created_at', { ascending: false })
       .limit(10),
-  ) ?? []) as Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'status' | 'scores' | 'winner' | 'points_changes' | 'created_at' | 'completed_at'>[];
+  ) ?? []) as Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'status' | 'scores' | 'winner' | 'points_changes' | 'created_at' | 'completed_at' | 'forfeit'>[];
   const teams = await teamsById([...new Set(rows.flatMap((row) => [row.team_a, row.team_b]))]);
   return rows.map((row) => {
     const side: Side = row.team_a === teamId ? 'A' : 'B';
@@ -575,6 +789,44 @@ export async function teamMatchHistory(teamId: string) {
       mapsAgainst: side === 'A' ? state.mapsB : state.mapsA,
       won: row.winner ? row.winner === side : null,
       points: row.points_changes?.[side] ?? null,
+      forfeit: row.forfeit,
+      date: row.completed_at ?? row.created_at,
+    };
+  });
+}
+
+/** Matchs de Division d'un joueur (joueur du match), pour l'historique de son profil. Public. */
+export async function playerTeamMatches(userId: string) {
+  const rows = (unwrap(
+    await supabase
+      .from('team_matches')
+      .select('id, team_a, team_b, roster_a, roster_b, status, scores, winner, points_changes, created_at, completed_at, forfeit, tournament_id')
+      .or(`roster_a.cs.{${userId}},roster_b.cs.{${userId}}`)
+      .in('status', ['completed', ...OPEN])
+      .order('created_at', { ascending: false })
+      .limit(30),
+  ) ?? []) as (Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'roster_a' | 'roster_b' | 'status' | 'scores' | 'winner' | 'points_changes' | 'created_at' | 'completed_at' | 'forfeit' | 'tournament_id'>)[];
+  const teams = await teamsById([...new Set(rows.flatMap((row) => [row.team_a, row.team_b]))]);
+  const card = (id: string) => {
+    const team = teams.get(id);
+    return team ? { id: team.id, name: team.name, tag: team.tag, color: team.color, logoUrl: team.logo_url } : null;
+  };
+  return rows.map((row) => {
+    const side: Side = row.roster_a.includes(userId) ? 'A' : 'B';
+    const state = seriesState(row.scores, 5);
+    const won = row.winner ? row.winner === side : null;
+    return {
+      id: row.id,
+      status: row.status,
+      team: card(side === 'A' ? row.team_a : row.team_b),
+      opponent: card(side === 'A' ? row.team_b : row.team_a),
+      mapsFor: side === 'A' ? state.mapsA : state.mapsB,
+      mapsAgainst: side === 'A' ? state.mapsB : state.mapsA,
+      won,
+      forfeit: row.forfeit,
+      tournament: Boolean(row.tournament_id),
+      teamPoints: row.points_changes?.[side] ?? null,
+      xp: won === null ? null : won ? 500 : 150,
       date: row.completed_at ?? row.created_at,
     };
   });
@@ -589,6 +841,10 @@ export async function sweepTeamMatches(): Promise<void> {
     const cancelBefore = new Date(Date.now() - config.cod.cancelMinutes * 60_000).toISOString();
     const late = (unwrap(await supabase.from('team_matches').select('*').eq('status', 'awaiting_confirmation').lt('reported_at', confirmBefore)) ?? []) as TeamMatch[];
     for (const match of late) await applyConfirmed(match);
+    // Forfait non validé par l'équipe visée sous 15 min : arbitre.
+    const answerBefore = new Date(Date.now() - FORFEIT_ANSWER_MINUTES * 60_000).toISOString();
+    const claims = (unwrap(await supabase.from('team_matches').select('*').eq('status', 'forfeit_claimed').lt('forfeit_claimed_at', answerBefore)) ?? []) as TeamMatch[];
+    for (const match of claims) await disputeForfeit(match, 'non validé à temps');
     unwrap(
       await supabase
         .from('team_matches')
@@ -619,7 +875,7 @@ async function sweepTeamDiscord(): Promise<void> {
           method: 'POST',
           body: {
             content:
-              `⚔️ **Match team** · [${a?.tag}] ${a?.name} vs [${b?.tag}] ${b?.name} — victoire de **${winner?.name}** (+${gain} pts)${match.corrected_at ? ' (résultat corrigé)' : ''}\n` +
+              `⚔️ **Division** · [${a?.tag}] ${a?.name} vs [${b?.tag}] ${b?.name} — victoire de **${winner?.name}** (+${gain} pts)${match.corrected_at ? ' (résultat corrigé)' : ''}\n` +
               `${match.scores.map(([x, y], i) => `${match.maps[i]?.map ?? `Map ${i + 1}`} ${x}-${y}`).join(' · ')}\n${config.siteUrl}${matchUrl(match.id)}`,
             flags: SUPPRESS_EMBEDS,
           },
@@ -629,7 +885,7 @@ async function sweepTeamDiscord(): Promise<void> {
     await supabase.from('team_matches').update({ discord_done: true }).eq('id', match.id);
     if (match.status === 'completed' && !match.corrected_at) {
       await pushToUsers([...match.roster_a, ...match.roster_b], {
-        title: 'Match team terminé',
+        title: 'Match de Division terminé',
         body: `Victoire de l’équipe ${match.winner === 'A' ? '1' : '2'} · ${match.scores.map(([x, y]) => `${x}-${y}`).join(' · ')}`,
         url: matchUrl(match.id),
         tag: `team-match-${match.id}`,

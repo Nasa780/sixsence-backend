@@ -1,5 +1,5 @@
 /**
- * Tournoi de fin de saison (mode « Match team », étape 3) : règles pures, testées dans
+ * Tournoi de fin de saison (Division, étape 3) : règles pures, testées dans
  * tournamentPolicy.test.ts.
  *
  *   - 8, 16 ou 32 places ; qualifiés : les meilleures équipes du classement avec 25 matchs ou plus ;

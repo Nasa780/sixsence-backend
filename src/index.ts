@@ -15,7 +15,7 @@ import { teamsRouter } from './routes/teams.js';
 import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { pointsPreview, sweepMatches } from './services/matches.js';
-import { sweepTeamMatches, tryCreateTeamMatches } from './services/teamMatches.js';
+import { checkTeamQueueTimeouts, sweepTeamMatches, tryCreateTeamMatches } from './services/teamMatches.js';
 import { sweepTournaments } from './services/tournaments.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, syncTeamAndBadgeRoles, welcomeNewPlayers } from './services/community.js';
@@ -253,11 +253,15 @@ const live = !config.localSafe; // mode local sans risque : aucune tâche du cla
 const sweeper = live ? setInterval(() => void sweepMatches(), 60_000) : undefined;
 // Matchs d'équipe : file (au cas où), scores non confirmés, matchs abandonnés, salons et résultats Discord ; tournois (départ, tableau).
 const teamTimer = setInterval(() => {
-  if (!config.teams.enabled) return; // mode Match team en pause (TEAM_MODE)
+  if (!config.teams.enabled) return; // Division en pause (TEAM_MODE)
   void tryCreateTeamMatches();
   void sweepTeamMatches();
   void sweepTournaments();
 }, 60_000);
+// Division : durée maximale de recherche (« Toujours là ? »), contrôlée toutes les 20 secondes.
+const teamQueueTimer = setInterval(() => {
+  if (config.teams.enabled) void checkTeamQueueTimeouts();
+}, 20_000);
 // Vérifications « Prêt ? » expirées : contrôlées toutes les 3 secondes.
 const readyTimer = live ? setInterval(() => void expireReadyChecks(), 3_000) : undefined;
 // Durée maximale de recherche : contrôlée toutes les 20 secondes.
@@ -323,6 +327,7 @@ function shutdown(signal: string): void {
   console.log(`[boot] ${signal} reçu, arrêt en cours`);
   clearInterval(sweeper);
   clearInterval(teamTimer);
+  clearInterval(teamQueueTimer);
   clearInterval(weeklyTimer);
   clearInterval(cardsTimer);
   clearInterval(readyTimer);
