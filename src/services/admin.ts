@@ -174,7 +174,7 @@ export async function overview() {
     supabase.from('cod_matches').select('id', { count: 'exact', head: true }).eq('status', 'disputed'),
     supabase.from('users').select('id', { count: 'exact', head: true }),
     supabase.from('gta_events').select('id', { count: 'exact', head: true }).gte('starts_at', now).neq('status', 'cancelled'),
-    supabase.from('seasons').select('id, name, starts_at').eq('is_active', true).maybeSingle(),
+    supabase.from('seasons').select('id, name, starts_at, ends_at').eq('is_active', true).maybeSingle(),
     supabase.from('cod_profiles').select('user_id', { count: 'exact', head: true }).gt('banned_until', now),
     openCounts(),
   ]);

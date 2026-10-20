@@ -2,7 +2,7 @@ import { isReferee, roleOf } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
-import { SUPPRESS_EMBEDS, discord, discordEnabled, dm, notifyStaff } from './discord.js';
+import { discord, discordEnabled, dm, notifyStaff } from './discord.js';
 import { correctionWindowHours, withinWindow } from './correctionPolicy.js';
 import { pushToUsers } from './push.js';
 import { deciderPicker, declarationError, isCompleteSeries, pickMaps, seriesState, type MapScore, type Side } from './teamMatchPolicy.js';
@@ -110,12 +110,13 @@ export async function teamPlayState(userId: string) {
   const member = await membershipOf(userId);
   const queueCount = await supabase.from('team_queue').select('team_id', { count: 'exact', head: true });
   const base = { rosterSize: config.teams.rosterSize, teamsSearching: queueCount.count ?? 0 };
-  if (!member) return { ...base, queued: null, activeMatchId: null, expiredAt: null };
+  if (!member) return { ...base, queued: null, activeMatchId: null, expiredAt: null, blockedUntil: null };
   const [queued, active, team] = await Promise.all([
     supabase.from('team_queue').select('roster, joined_at, confirmed_at, warned_at').eq('team_id', member.team_id).maybeSingle(),
     supabase.from('team_matches').select('id').in('status', OPEN).or(`team_a.eq.${member.team_id},team_b.eq.${member.team_id}`).limit(1).maybeSingle(),
     supabase.from('teams').select('queue_expired_at').eq('id', member.team_id).maybeSingle(),
   ]);
+  const blockedUntil = await forfeitBlockedUntil(member.team_id);
   const q = queued.data as { roster: string[]; joined_at: string; confirmed_at: string; warned_at: string | null } | null;
   const expired = (team.data as { queue_expired_at: string | null } | null)?.queue_expired_at ?? null;
   return {
@@ -124,9 +125,32 @@ export async function teamPlayState(userId: string) {
       ? { roster: q.roster, since: q.joined_at, warned: Boolean(q.warned_at), expiresAt: minutesAfter(q.confirmed_at, config.cod.queueMaxMinutes).toISOString() }
       : null,
     activeMatchId: (active.data as { id: string } | null)?.id ?? null,
+    blockedUntil,
     // Recherche arrêtée faute de confirmation dans les 15 dernières minutes (alerte sur le site).
     expiredAt: expired && Date.now() - new Date(expired).getTime() < 15 * 60_000 ? expired : null,
   };
+}
+
+/**
+ * Forfaits à répétition : une équipe qui a perdu plus de TEAM_FORFEIT_LIMIT matchs par forfait sur les
+ * TEAM_FORFEIT_DAYS derniers jours ne peut plus chercher de match pendant 24 h après le dernier. Pas d'autre sanction.
+ */
+export async function forfeitBlockedUntil(teamId: string): Promise<string | null> {
+  const since = new Date(Date.now() - config.teams.forfeitDays * 24 * 3600_000).toISOString();
+  const rows = (unwrap(
+    await supabase
+      .from('team_matches')
+      .select('team_a, winner, completed_at')
+      .eq('status', 'completed')
+      .eq('forfeit', true)
+      .gte('completed_at', since)
+      .or(`team_a.eq.${teamId},team_b.eq.${teamId}`)
+      .order('completed_at', { ascending: false }),
+  ) ?? []) as { team_a: string; winner: Side; completed_at: string }[];
+  const lost = rows.filter((row) => (row.team_a === teamId ? 'A' : 'B') !== row.winner);
+  if (lost.length <= config.teams.forfeitLimit) return null;
+  const until = new Date(new Date(lost[0]!.completed_at).getTime() + 24 * 3600_000);
+  return until.getTime() > Date.now() ? until.toISOString() : null;
 }
 
 /** Le Leader inscrit son équipe avec les joueurs du match qu'il choisit (TEAM_MATCH_PLAYERS joueurs de l'équipe). */
@@ -136,6 +160,11 @@ export async function joinTeamQueue(userId: string, body: unknown) {
   if (!(member.role === 'leader' || member.isOwner)) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader peut lancer une recherche.');
   const teamId = member.team_id;
   const size = config.teams.rosterSize;
+  const blocked = await forfeitBlockedUntil(teamId);
+  if (blocked) {
+    const at = new Date(blocked).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', hour: '2-digit', minute: '2-digit' });
+    throw new HttpError(403, 'TEAM_FORFEIT_BLOCKED', `Trop de forfaits ces ${config.teams.forfeitDays} derniers jours : recherche bloquée jusqu’à ${at}.`);
+  }
 
   const roster = (body as { roster?: unknown } | undefined)?.roster;
   if (!Array.isArray(roster) || roster.length !== size || new Set(roster).size !== size || !roster.every((id) => typeof id === 'string')) {
@@ -870,14 +899,34 @@ async function sweepTeamDiscord(): Promise<void> {
         const a = teams.get(match.team_a);
         const b = teams.get(match.team_b);
         const winner = match.winner === 'A' ? a : b;
-        const gain = match.points_changes?.[match.winner] ?? 0;
+        const loser = match.winner === 'A' ? b : a;
+        const state = seriesState(match.scores, match.best_of);
+        const [won, lost] = match.winner === 'A' ? [state.mapsA, state.mapsB] : [state.mapsB, state.mapsA];
+        const points = (side: Side) => {
+          const value = match.points_changes?.[side];
+          return typeof value === 'number' ? ` (${value >= 0 ? '+' : ''}${value} pts)` : '';
+        };
+        const loserSide: Side = match.winner === 'A' ? 'B' : 'A';
         await discord(`/channels/${resultsChannelId}/messages`, {
           method: 'POST',
           body: {
-            content:
-              `⚔️ **Division** · [${a?.tag}] ${a?.name} vs [${b?.tag}] ${b?.name} — victoire de **${winner?.name}** (+${gain} pts)${match.corrected_at ? ' (résultat corrigé)' : ''}\n` +
-              `${match.scores.map(([x, y], i) => `${match.maps[i]?.map ?? `Map ${i + 1}`} ${x}-${y}`).join(' · ')}\n${config.siteUrl}${matchUrl(match.id)}`,
-            flags: SUPPRESS_EMBEDS,
+            allowed_mentions: { parse: [] },
+            embeds: [
+              {
+                author: { name: `⚔️ DIVISION · BO${match.best_of}${match.tournament_id ? ' · TOURNOI' : ''}` },
+                title: `[${a?.tag}] ${a?.name}  vs  [${b?.tag}] ${b?.name}`,
+                url: `${config.siteUrl}${matchUrl(match.id)}`,
+                color: Number.parseInt((winner?.color ?? '#d4af37').replace('#', ''), 16) || 0xd4af37,
+                description:
+                  `🏆 Victoire de **[${winner?.tag}] ${winner?.name}**${points(match.winner)} ${match.forfeit ? 'par forfait' : `${won} – ${lost}`}\n` +
+                  `[${loser?.tag}] ${loser?.name}${points(loserSide)}${match.corrected_at ? '\n_Résultat corrigé par l’équipe SixSence_' : ''}`,
+                fields: match.forfeit
+                  ? []
+                  : match.scores.map(([x, y], i) => ({ name: `Map ${i + 1} · ${match.maps[i]?.map ?? '?'}`, value: `[${a?.tag}] ${x} – ${y} [${b?.tag}]`, inline: true })),
+                footer: { text: 'Division · matchs d’équipe' },
+                timestamp: match.completed_at ?? undefined,
+              },
+            ],
           },
         }).catch((caught) => console.warn('[team-match] résultat Discord impossible', (caught as Error).message));
       }

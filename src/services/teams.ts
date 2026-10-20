@@ -223,10 +223,35 @@ function forbid(message = 'Seul un Leader peut faire cela.'): never {
 // --- Mon équipe ------------------------------------------------------------------------
 
 /** Tout ce que la page « Mon équipe » affiche pour ce joueur. */
+/**
+ * Transferts verrouillés (aucune arrivée ni départ d'équipe) pendant un tournoi prévu ou en cours, et pendant
+ * les TEAM_TRANSFER_LOCK_DAYS derniers jours de la saison (date de fin fixée par l'admin). Renvoie le motif, ou null.
+ */
+export async function transferLock(): Promise<string | null> {
+  const [tournament, season] = await Promise.all([
+    supabase.from('tournaments').select('id').in('status', ['scheduled', 'running']).limit(1).maybeSingle(),
+    supabase.from('seasons').select('ends_at').eq('is_active', true).maybeSingle(),
+  ]);
+  if (tournament.data) return 'Transferts verrouillés pendant le tournoi de fin de saison : aucune arrivée ni départ d’équipe.';
+  const endsAt = (season.data as { ends_at: string | null } | null)?.ends_at;
+  if (endsAt && config.teams.transferLockDays > 0 && Date.now() >= new Date(endsAt).getTime() - config.teams.transferLockDays * 24 * 3600_000) {
+    return `Transferts verrouillés pendant les ${config.teams.transferLockDays} derniers jours de la saison : aucune arrivée ni départ d’équipe.`;
+  }
+  return null;
+}
+
+async function assertTransfersOpen(): Promise<void> {
+  const reason = await transferLock();
+  if (reason) throw new HttpError(409, 'TRANSFERS_LOCKED', reason);
+}
+
 export async function myTeamState(userId: string) {
   const member = await membershipOf(userId);
   const requirements = await requirementsOf(userId, { ignoreTeam: true });
-  const base = { requirements: { missing: requirements.missing, rankedMatches: requirements.rankedMatches, cooldownEnds: requirements.cooldownEnds } };
+  const base = {
+    requirements: { missing: requirements.missing, rankedMatches: requirements.rankedMatches, cooldownEnds: requirements.cooldownEnds },
+    transferLock: await transferLock(),
+  };
 
   if (!member) {
     const rows = (unwrap(
@@ -366,6 +391,7 @@ async function leadersOf(teamId: string): Promise<string[]> {
 export async function invitePlayer(userId: string, teamId: string, body: unknown) {
   const actor = await actorIn(teamId, userId);
   if (!canDo(actor, 'invite')) forbid();
+  await assertTransfersOpen();
   const targetId = (body as { userId?: unknown } | undefined)?.userId;
   if (typeof targetId !== 'string' || !/^[0-9a-f-]{36}$/i.test(targetId)) throw new HttpError(400, 'INVALID_TARGET', 'Joueur invalide.');
   if (targetId === userId) throw new HttpError(400, 'INVALID_TARGET', 'Tu fais déjà partie de l’équipe.');
@@ -389,6 +415,7 @@ export async function invitePlayer(userId: string, teamId: string, body: unknown
 }
 
 export async function requestToJoin(userId: string, teamId: string) {
+  await assertTransfersOpen();
   await assertEligible(userId);
   const team = await teamRow(teamId);
   if (team.disbanded_at) throw new HttpError(404, 'TEAM_NOT_FOUND', 'Équipe introuvable.');
@@ -431,6 +458,7 @@ export async function answerInvite(userId: string, inviteId: unknown, body: unkn
     return { ok: true };
   }
 
+  await assertTransfersOpen();
   const joiner = unwrap(await supabase.from('users').select('username').eq('id', invite.user_id).single()) as { username: string };
   await assertEligible(invite.user_id, invite.kind === 'invite' ? 'Tu' : joiner.username);
   unwrap(await supabase.rpc('team_add_member', { p_team: invite.team_id, p_user: invite.user_id }));
@@ -500,6 +528,7 @@ export async function kickMember(userId: string, teamId: string, targetId: strin
   const actor = await actorIn(teamId, userId);
   const target = await targetIn(teamId, targetId);
   if (!canDo(actor, 'kick', target)) forbid(target.isOwner ? 'Le Leader à la couronne ne peut pas être exclu.' : 'Seul le Leader à la couronne peut exclure un Leader.');
+  await assertTransfersOpen();
   unwrap(await supabase.rpc('team_remove_member', { p_team: teamId, p_user: targetId, p_left: false }));
   await leaveQueueOnChange(teamId);
   removeTeamRole(teamId, targetId);
@@ -512,6 +541,7 @@ export async function kickMember(userId: string, teamId: string, targetId: strin
 export async function leaveTeam(userId: string) {
   const member = await membershipOf(userId);
   if (!member) throw new HttpError(409, 'NOT_IN_TEAM', 'Tu ne fais partie d’aucune équipe.');
+  await assertTransfersOpen();
   unwrap(await supabase.rpc('team_remove_member', { p_team: member.team_id, p_user: userId, p_left: true }));
   await leaveQueueOnChange(member.team_id);
   // Seul membre restant : l'équipe vient d'être dissoute, son rôle disparaît.
@@ -534,6 +564,7 @@ export async function transferCrown(userId: string, teamId: string, body: unknow
 export async function disbandTeam(userId: string, teamId: string) {
   const actor = await actorIn(teamId, userId);
   if (!canDo(actor, 'disband')) forbid('Seul le Leader à la couronne peut dissoudre l’équipe.');
+  await assertTransfersOpen();
   const members = (await membersOf(teamId)).map((member) => member.user_id).filter((id) => id !== userId);
   const team = await teamRow(teamId);
   unwrap(await supabase.rpc('team_disband', { p_team: teamId }));

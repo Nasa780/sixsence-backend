@@ -56,6 +56,7 @@ import { supabase } from '../supabase.js';
  *   POST   /admin/sanctions/:id/lift       { reason? } lever une sanction
  *   POST   /admin/players/:id/unban        lever une exclusion de la file
  *   POST   /admin/season/close             { nextName } clôturer la saison
+ *   POST   /admin/season/end-date          { endsAt | null } date de fin prévue de la saison active
  *   POST   /admin/discord/rules            publier ou mettre à jour le règlement du serveur (bot, DISCORD_RULES_CHANNEL_ID)
  *   POST   /admin/discord/sync-roles       remettre à jour les rôles Discord (rangs, équipe, badges, MVP du mois, rôles des équipes)
  */
@@ -236,6 +237,16 @@ export function adminRouter(): Router {
   }));
 
   // --- Saison ------------------------------------------------------------------
+  // Date de fin prévue (affichée, et verrou des transferts d'équipe les derniers jours) ; null pour l'effacer.
+  router.post('/season/end-date', asyncHandler(async (req, res) => {
+    const value = (req.body as { endsAt?: unknown } | undefined)?.endsAt;
+    const endsAt = value === null || value === '' ? null : typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? new Date(value).toISOString() : undefined;
+    if (endsAt === undefined) throw new HttpError(400, 'INVALID_DATE', 'Date invalide.');
+    if (endsAt && new Date(endsAt).getTime() < Date.now()) throw new HttpError(400, 'INVALID_DATE', 'La date de fin doit être dans le futur.');
+    const season = unwrap(await supabase.from('seasons').update({ ends_at: endsAt }).eq('is_active', true).select('id, name, starts_at, ends_at').maybeSingle());
+    forgetSeasons();
+    res.json({ season });
+  }));
   router.post('/season/close', asyncHandler(async (req, res) => {
     const nextName = (req.body as { nextName?: unknown } | undefined)?.nextName;
     const closing = unwrap(await supabase.from('seasons').select('id').eq('is_active', true).maybeSingle()) as { id: number } | null;

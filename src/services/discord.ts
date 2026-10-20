@@ -209,10 +209,22 @@ async function sweepOnce(): Promise<void> {
         const posted = (await discord(`/channels/${resultsChannelId}/messages`, {
           method: 'POST',
           body: {
-            content:
-              `**${match.map}** · ${match.mode} — victoire de l'Équipe ${match.winner === 'A' ? '1' : '2'}${match.corrected_at ? ' (résultat corrigé)' : ''}\n` +
-              `Gagnants : ${team(winners)}\nPerdants : ${team(losers)}\n${matchUrl(match)}`,
-            flags: SUPPRESS_EMBEDS,
+            allowed_mentions: { parse: [] },
+            embeds: [
+              {
+                author: { name: `🎯 CLASSÉ · ${match.team_size}v${match.team_size}` },
+                title: `${match.map} · ${match.mode}`,
+                url: matchUrl(match),
+                color: 0xd4af37,
+                description: `🏆 Victoire de l'Équipe ${match.winner === 'A' ? '1' : '2'}${match.corrected_at ? '\n_Résultat corrigé par l’équipe SixSence_' : ''}`,
+                fields: [
+                  { name: 'Gagnants', value: team(winners).slice(0, 1000) || '—' },
+                  { name: 'Perdants', value: team(losers).slice(0, 1000) || '—' },
+                ],
+                footer: { text: 'Classé solo' },
+                timestamp: match.completed_at ?? undefined,
+              },
+            ],
           },
         })) as { id?: string } | null;
         resultMessage = posted?.id ?? null;

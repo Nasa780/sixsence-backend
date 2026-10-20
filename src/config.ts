@@ -145,6 +145,11 @@ export const config = {
     rosterSize: integer('TEAM_MATCH_PLAYERS', 4, 1),
     /** Pas deux matchs contre la même équipe dans ce délai (minutes). */
     rematchMinutes: integer('TEAM_REMATCH_MINUTES', 120, 0),
+    /** Plus de TEAM_FORFEIT_LIMIT forfaits perdus en TEAM_FORFEIT_DAYS jours : recherche bloquée 24 h. */
+    forfeitLimit: integer('TEAM_FORFEIT_LIMIT', 3, 1),
+    forfeitDays: integer('TEAM_FORFEIT_DAYS', 7, 1),
+    /** Transferts verrouillés pendant les TEAM_TRANSFER_LOCK_DAYS derniers jours de la saison (et pendant le tournoi). */
+    transferLockDays: integer('TEAM_TRANSFER_LOCK_DAYS', 7, 0),
   },
 
   /**
