@@ -122,7 +122,13 @@ export async function teamPlayState(userId: string) {
   return {
     ...base,
     queued: q
-      ? { roster: q.roster, since: q.joined_at, warned: Boolean(q.warned_at), expiresAt: minutesAfter(q.confirmed_at, config.cod.queueMaxMinutes).toISOString() }
+      ? {
+          roster: q.roster,
+          since: q.joined_at,
+          warned: Boolean(q.warned_at),
+          // « Continuer » : Leaders et joueurs inscrits dans la recherche.
+          canStay: member.role === 'leader' || member.isOwner || q.roster.includes(userId),
+          expiresAt: minutesAfter(q.confirmed_at, config.cod.queueMaxMinutes).toISOString() }
       : null,
     activeMatchId: (active.data as { id: string } | null)?.id ?? null,
     blockedUntil,
@@ -211,11 +217,15 @@ export async function leaveTeamQueue(userId: string) {
   return teamPlayState(userId);
 }
 
-/** « Toujours là ? » : un Leader relance les 30 min de recherche (place conservée). */
+/** « Toujours là ? » : un Leader ou un joueur inscrit dans la recherche relance les 30 min (place conservée). */
 export async function stayInTeamQueue(userId: string) {
   const member = await membershipOf(userId);
   if (!member) throw new HttpError(409, 'NOT_IN_TEAM', 'Tu ne fais partie d’aucune équipe.');
-  if (!(member.role === 'leader' || member.isOwner)) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader peut continuer la recherche.');
+  const queued = unwrap(await supabase.from('team_queue').select('roster').eq('team_id', member.team_id).maybeSingle()) as { roster: string[] } | null;
+  if (!queued) throw new HttpError(409, 'NOT_QUEUED', 'Ton équipe ne cherche pas de match.');
+  if (!(member.role === 'leader' || member.isOwner || queued.roster.includes(userId))) {
+    throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seuls les Leaders et les joueurs inscrits peuvent continuer la recherche.');
+  }
   unwrap(await supabase.from('team_queue').update({ confirmed_at: new Date().toISOString(), warned_at: null }).eq('team_id', member.team_id));
   return teamPlayState(userId);
 }
