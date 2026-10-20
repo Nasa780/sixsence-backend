@@ -214,6 +214,12 @@ app.get(
   }),
 );
 
+if (config.localSafe) {
+  app.use(/^\/cod\/(queue|party)/, (req: Request, res: Response, next: NextFunction) => {
+    if (req.method === 'GET') return next();
+    res.status(403).json({ error: { code: 'LOCAL_SAFE', message: 'File et groupes du classé fermés en mode local.' } });
+  });
+}
 app.use('/cod', codRouter(hub));
 app.use('/gta', gtaRouter());
 app.use('/push', pushRouter());
@@ -237,12 +243,14 @@ hub.attach(server);
 
 // Après un redémarrage plus personne n'est connecté : la file repart de zéro.
 // Les navigateurs encore ouverts se reconnectent seuls et affichent "hors file".
-clearQueue().catch((error) => console.error('[boot] purge de la file impossible', error));
+// (Pas en mode local : la base est celle du site en ligne, ses joueurs en file ne doivent pas en sortir.)
+if (!config.localSafe) clearQueue().catch((error) => console.error('[boot] purge de la file impossible', error));
 // Clés des notifications push (générées et gardées en base au premier démarrage).
 void pushPublicKey();
 
 // Ménage des matchs sans réponse ou abandonnés, une fois par minute.
-const sweeper = setInterval(() => void sweepMatches(), 60_000);
+const live = !config.localSafe; // mode local sans risque : aucune tâche du classé
+const sweeper = live ? setInterval(() => void sweepMatches(), 60_000) : undefined;
 // Matchs d'équipe : file (au cas où), scores non confirmés, matchs abandonnés, salons et résultats Discord ; tournois (départ, tableau).
 const teamTimer = setInterval(() => {
   if (!config.teams.enabled) return; // mode Match team en pause (TEAM_MODE)
@@ -251,11 +259,11 @@ const teamTimer = setInterval(() => {
   void sweepTournaments();
 }, 60_000);
 // Vérifications « Prêt ? » expirées : contrôlées toutes les 3 secondes.
-const readyTimer = setInterval(() => void expireReadyChecks(), 3_000);
+const readyTimer = live ? setInterval(() => void expireReadyChecks(), 3_000) : undefined;
 // Durée maximale de recherche : contrôlée toutes les 20 secondes.
-const queueTimer = setInterval(() => void checkQueueTimeouts(), 20_000);
+const queueTimer = live ? setInterval(() => void checkQueueTimeouts(), 20_000) : undefined;
 // Discord : suppression des salons vocaux et publication des résultats.
-const discordTimer = setInterval(() => void sweepDiscord(), 30_000);
+const discordTimer = live ? setInterval(() => void sweepDiscord(), 30_000) : undefined;
 // MVP du mois : attribué dès le début du mois suivant (vérifié au démarrage puis toutes les heures).
 const awardMvp = () =>
   awardPreviousMonthMvp()
@@ -267,30 +275,34 @@ const awardMvp = () =>
       await syncCards(award.userId);
     })
     .catch((error) => console.error('[mvp]', error));
-void awardMvp();
-const mvpTimer = setInterval(awardMvp, 60 * 60_000);
+if (live) void awardMvp();
+const mvpTimer = live ? setInterval(awardMvp, 60 * 60_000) : undefined;
 // Rappels Discord 1 h avant les événements GTA 6, et bienvenue aux nouveaux inscrits.
-const reminderTimer = setInterval(() => {
-  void sendEventReminders();
-  void welcomeNewPlayers();
-}, 5 * 60_000);
+const reminderTimer = live
+  ? setInterval(() => {
+      void sendEventReminders();
+      void welcomeNewPlayers();
+    }, 5 * 60_000)
+  : undefined;
 // Cartes de visite : attribution rétroactive une seule fois (sans notification), puis
 // rattrapage toutes les heures (événements GTA terminés, etc.).
-setTimeout(() => {
+if (live) setTimeout(() => {
   void (async () => {
     const { data: first } = await supabase.rpc('app_claim', { p_key: 'cards_backfill', p_value: 'v1' });
     const added = await syncAllCards({ silent: Boolean(first) });
     if (added) console.log(`[cartes] ${added} carte(s) attribuée(s)${first ? ' (attribution rétroactive)' : ''}`);
   })().catch((error) => console.warn('[cartes]', (error as Error).message));
 }, 30_000);
-const cardsTimer = setInterval(() => void syncAllCards().catch(() => {}), 60 * 60_000);
+const cardsTimer = live ? setInterval(() => void syncAllCards().catch(() => {}), 60 * 60_000) : undefined;
 // Top de la semaine (lundi 10 h, heure de Paris) et relance de l'équipe (attente de plus de 2 h), vérifiés toutes les 15 minutes.
-const weeklyTimer = setInterval(() => {
-  void postWeeklyTop();
-  void remindStaff();
-}, 15 * 60_000);
+const weeklyTimer = live
+  ? setInterval(() => {
+      void postWeeklyTop();
+      void remindStaff();
+    }, 15 * 60_000)
+  : undefined;
 // Rôles Discord de tous les joueurs (rangs, équipe, badges, MVP du mois), une fois au démarrage.
-setTimeout(
+if (live) setTimeout(
   () =>
     void syncAllRankRoles()
       .then((count) => count && console.log(`[discord] rôles de rang mis à jour pour ${count} joueur(s)`))
@@ -303,6 +315,7 @@ server.listen(config.port, () => {
   console.log(`[boot] SixSence API en écoute sur le port ${config.port}`);
   console.log(`[boot] files : ${config.cod.formats.map((format) => format.label).join(', ')} · origines : ${config.corsOrigins.join(', ')}`);
   console.log(`[boot] vérification « Prêt ? » : ${config.cod.readySeconds} s · Discord : ${discordEnabled ? 'activé' : 'désactivé'}`);
+  if (config.localSafe) console.log('[boot] MODE LOCAL SANS RISQUE : tâches du classé coupées, file et groupes du classé fermés');
 });
 
 // Arrêt propre : Render envoie SIGTERM à chaque redéploiement.
