@@ -25,6 +25,7 @@ import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, p
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
 import { calendarEvents, calendarIcs } from './services/calendar.js';
+import { hallOfFame, highlights } from './services/highlights.js';
 import { globalSearch } from './services/search.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
 import { noticeMatchAbandoned, noticeMatchFinished, noticeMatchMissed, remindStaff } from './services/matchNotices.js';
@@ -259,6 +260,10 @@ app.get(
     res.send(await calendarIcs());
   }),
 );
+
+// Temps forts (joueur et match de la semaine, fil d'activité) et Hall of Fame, publics.
+app.get('/highlights', asyncHandler(async (_req, res) => void res.json(await highlights())));
+app.get('/hall-of-fame', asyncHandler(async (_req, res) => void res.json(await hallOfFame())));
 
 // Compteurs publics de la page d'accueil.
 app.get(
