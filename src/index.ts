@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { verifyAccessToken } from './auth.js';
+import { MATCH_REFEREES, requireAuth, requireRoles, verifyAccessToken } from './auth.js';
 import { config, isOriginAllowed } from './config.js';
 import { asyncHandler, errorHandler, isUnexpected, notFoundHandler } from './errors.js';
 import { bus } from './events.js';
@@ -231,10 +231,12 @@ app.post('/presence', (req: Request, res: Response) => {
   res.json({ online: onlineVisitors() });
 });
 
-// Recherche globale (joueurs et équipes), pendant la frappe : 60 requêtes par minute et par adresse.
+// Recherche rapide de l'équipe SixSence (joueurs, identifiant Activision, équipes), pendant la frappe.
 app.get(
   '/search',
   rateLimit(60, 60_000),
+  requireAuth,
+  requireRoles(...MATCH_REFEREES),
   asyncHandler(async (req, res) => {
     res.json(await globalSearch(typeof req.query.q === 'string' ? req.query.q : ''));
   }),

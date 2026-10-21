@@ -67,11 +67,11 @@ npm start            # node dist/index.js
 
 ## Routes
 
-Publiques : `GET /search?q=` (recherche globale du site : joueurs, même au pseudo stylisé, et équipes actives ; `services/search.ts`, index en mémoire 60 s, pas d'identifiant Activision), `POST /discord/interactions` (commandes du bot, signées par Discord : `services/discordCommands.ts`), `GET /health`, `GET /stats`, `POST /presence` (présence sur le site : identifiant aléatoire du visiteur, compté 90 s, `siteOnline` dans `GET /cod/status` ; `services/presence.ts`, en mémoire), `POST /errors`, `GET /cod/status`, `GET /cod/matches/:id` (chat et preuves seulement pour les joueurs du match et les admins, jeton facultatif), `GET /gta/events`, `GET /gta/events/:id`.
+Publiques : `POST /discord/interactions` (commandes du bot, signées par Discord : `services/discordCommands.ts`), `GET /health`, `GET /stats`, `POST /presence` (présence sur le site : identifiant aléatoire du visiteur, compté 90 s, `siteOnline` dans `GET /cod/status` ; `services/presence.ts`, en mémoire), `POST /errors`, `GET /cod/status`, `GET /cod/matches/:id` (chat et preuves seulement pour les joueurs du match et les admins, jeton facultatif), `GET /gta/events`, `GET /gta/events/:id`.
 
 Connexion Discord requise (`Authorization: Bearer <jeton Supabase>`) : `GET /cod/queue`, `POST /cod/queue/join|leave|stay`, `GET|POST /cod/party`, `POST /cod/party/join|leave|kick|format`, `GET /cod/matches/:id/me`, `GET /cod/cards`, `POST /cod/cards/equip|seen`, `POST /cod/matches/:id/mvp|arbitration`, `POST /cod/reports`, `POST /cod/matches/:id/ready|report|confirm|messages|proofs`, `POST|DELETE /gta/events/:id/register`.
 
-Équipe : `POST /cod/matches/:id/resolve` et `POST /cod/matches/:id/correct` (admin, staff, arbitre) ; `/admin/*` selon le rôle (voir `src/roles.ts` et l'en-tête de `src/routes/admin.ts`) ; `POST /gta/events` (admin).
+Équipe : `GET /search?q=` (recherche rapide, admin, staff et arbitres : joueurs au pseudo même stylisé ou à l'identifiant Activision, équipes actives ; `services/search.ts`, index en mémoire 60 s), `POST /cod/matches/:id/resolve` et `POST /cod/matches/:id/correct` (admin, staff, arbitre) ; `/admin/*` selon le rôle (voir `src/roles.ts` et l'en-tête de `src/routes/admin.ts`) ; `POST /gta/events` (admin).
 
 Erreurs : `{ "error": { "code": "EVENT_FULL", "message": "..." } }`.
 
