@@ -410,7 +410,7 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
         ? config.cod.maps.filter((map) => !match.maps.some((m) => m.map === map))
         : [],
     bestOf: match.best_of,
-    tournament: match.tournament_id ? await tournamentLabel(match.tournament_id, match.round) : null,
+    tournament: match.tournament_id ? await tournamentLabel(match.tournament_id, match.round, match.id) : null,
     confirmMinutes: config.cod.confirmMinutes,
     proofs,
     messages,
@@ -805,11 +805,21 @@ async function afterClose(match: TeamMatch): Promise<void> {
   await advanceTournament(match.tournament_id).catch((caught: Error) => console.error('[tournoi] avancement impossible', caught.message));
 }
 
-async function tournamentLabel(tournamentId: string, round: number | null) {
-  const row = unwrap(await supabase.from('tournaments').select('id, name, size').eq('id', tournamentId).maybeSingle()) as { id: string; name: string; size: number } | null;
+/** Nom du tournoi et du tour d'un match (petite finale, tableaux de la double élimination compris). */
+async function tournamentLabel(tournamentId: string, round: number | null, matchId: string) {
+  const row = unwrap(await supabase.from('tournaments').select('id, name, size, bracket').eq('id', tournamentId).maybeSingle()) as {
+    id: string;
+    name: string;
+    size: number;
+    bracket: 'single' | 'double';
+  } | null;
   if (!row) return null;
-  const { roundName, roundsFor } = await import('./tournamentPolicy.js');
-  return { id: row.id, name: row.name, round: round ? roundName(round, roundsFor(row.size)) : null };
+  const { isThirdPlace, roundName, roundNameDouble, roundsFor } = await import('./tournamentPolicy.js');
+  if (!round) return { id: row.id, name: row.name, round: null };
+  if (row.bracket === 'double') return { id: row.id, name: row.name, round: roundNameDouble(round, row.size) };
+  const entry = unwrap(await supabase.from('tournament_bracket').select('slot').eq('match_id', matchId).maybeSingle()) as { slot: number } | null;
+  const rounds = roundsFor(row.size);
+  return { id: row.id, name: row.name, round: entry && isThirdPlace({ round, slot: entry.slot }, rounds) ? 'Petite finale' : roundName(round, rounds) };
 }
 
 /**
