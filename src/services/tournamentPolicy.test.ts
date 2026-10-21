@@ -4,6 +4,8 @@ import {
   GRAND_FINAL,
   LOSERS_BASE,
   advanceBracket,
+  anubisCapacity,
+  formTeams,
   advanceDouble,
   bestOfDouble,
   bestOfFor,
@@ -187,3 +189,34 @@ describe('Coupe Horus en double élimination', () => {
   });
 });
 
+
+describe('Coupe Anubis : formation des équipes', () => {
+  const players = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `p${i}`, points: i * 10 }));
+
+  it('forme des équipes complètes, remplaçants répartis un par équipe', () => {
+    const teams = formTeams(players(19), 4, 8);
+    assert.equal(teams.length, 4);
+    assert.ok(teams.every((team) => team.starters.length === 4));
+    assert.deepEqual(teams.map((team) => team.subs.length), [1, 1, 1, 0]);
+    const all = teams.flatMap((team) => [...team.starters, ...team.subs]);
+    assert.equal(new Set(all).size, 19);
+  });
+
+  it('capitaine : le titulaire le mieux classé', () => {
+    for (const team of formTeams(players(16), 4, 8)) {
+      const best = team.starters.reduce((a, b) => (Number(a.slice(1)) > Number(b.slice(1)) ? a : b));
+      assert.equal(team.captain, best);
+    }
+  });
+
+  it('respecte le nombre d’équipes maximum', () => {
+    const teams = formTeams(players(40), 4, 8);
+    assert.equal(teams.length, 8);
+    assert.ok(teams.every((team) => team.subs.length === 1));
+  });
+
+  it('pas assez de joueurs : moins d’équipes', () => {
+    assert.equal(formTeams(players(7), 2, 8).length, 3);
+    assert.equal(anubisCapacity(8, 4), 40);
+  });
+});
