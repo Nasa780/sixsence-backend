@@ -7,6 +7,7 @@ import { asyncHandler, errorHandler, isUnexpected, notFoundHandler } from './err
 import { bus } from './events.js';
 import { rateLimit } from './rateLimit.js';
 import { isVisitorId, markPresent, onlineVisitors } from './services/presence.js';
+import { postDailyReport, recordVisit } from './services/siteLog.js';
 import { adminRouter } from './routes/admin.js';
 import { codRouter } from './routes/cod.js';
 import { errorsRouter } from './routes/errors.js';
@@ -210,7 +211,10 @@ app.use(rateLimit(120, 60_000));
 // Présence sur le site (compteur « En ligne maintenant ») : un signal toutes les 45 s par onglet ouvert.
 app.post('/presence', (req: Request, res: Response) => {
   const id = (req.body as { id?: unknown } | undefined)?.id;
-  if (isVisitorId(id)) markPresent(id);
+  if (isVisitorId(id)) {
+    markPresent(id);
+    recordVisit(id);
+  }
   res.json({ online: onlineVisitors() });
 });
 
@@ -311,6 +315,7 @@ const weeklyTimer = live
   ? setInterval(() => {
       void postWeeklyTop();
       void remindStaff();
+      void postDailyReport().catch((error) => console.warn('[journal]', (error as Error).message));
     }, 15 * 60_000)
   : undefined;
 // Rôles Discord de tous les joueurs (rangs, équipe, badges, MVP du mois), une fois au démarrage.
