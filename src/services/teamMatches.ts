@@ -852,12 +852,12 @@ export async function teamMatchHistory(teamId: string) {
   const rows = (unwrap(
     await supabase
       .from('team_matches')
-      .select('id, team_a, team_b, status, scores, winner, points_changes, created_at, completed_at, forfeit')
+      .select('id, team_a, team_b, status, scores, winner, points_changes, created_at, completed_at, forfeit, tournament_id')
       .or(`team_a.eq.${teamId},team_b.eq.${teamId}`)
       .in('status', ['completed', ...OPEN])
       .order('created_at', { ascending: false })
       .limit(10),
-  ) ?? []) as Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'status' | 'scores' | 'winner' | 'points_changes' | 'created_at' | 'completed_at' | 'forfeit'>[];
+  ) ?? []) as Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'status' | 'scores' | 'winner' | 'points_changes' | 'created_at' | 'completed_at' | 'forfeit' | 'tournament_id'>[];
   const teams = await teamsById([...new Set(rows.flatMap((row) => [row.team_a, row.team_b]))]);
   return rows.map((row) => {
     const side: Side = row.team_a === teamId ? 'A' : 'B';
@@ -872,6 +872,7 @@ export async function teamMatchHistory(teamId: string) {
       won: row.winner ? row.winner === side : null,
       points: row.points_changes?.[side] ?? null,
       forfeit: row.forfeit,
+      tournament: Boolean(row.tournament_id),
       date: row.completed_at ?? row.created_at,
     };
   });

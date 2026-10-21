@@ -274,7 +274,7 @@ export async function joinByInviteLink(userId: string, code: unknown) {
  */
 export async function transferLock(): Promise<string | null> {
   const [tournament, season] = await Promise.all([
-    supabase.from('tournaments').select('id').in('status', ['scheduled', 'running']).limit(1).maybeSingle(),
+    supabase.from('tournaments').select('id').eq('kind', 'saison').in('status', ['scheduled', 'running']).limit(1).maybeSingle(),
     supabase.from('seasons').select('ends_at').eq('is_active', true).maybeSingle(),
   ]);
   if (tournament.data) return 'Transferts verrouillés pendant le tournoi de fin de saison : aucune arrivée ni départ d’équipe.';
