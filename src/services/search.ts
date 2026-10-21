@@ -3,9 +3,9 @@ import { supabase } from '../supabase.js';
 import { normalizeName, rankPlayers } from './playerSearch.js';
 
 /**
- * Recherche globale du site (GET /search?q=) : joueurs (pseudo, même stylisé) et équipes actives (nom
- * ou tag). Informations publiques seulement (jamais l'identifiant Activision). Index gardé en mémoire
- * 60 s : la recherche se fait pendant la frappe.
+ * Recherche rapide de l'équipe SixSence (GET /search?q=, admin, staff et arbitres) : joueurs (pseudo, même
+ * stylisé, ou identifiant Activision) et équipes actives (nom ou tag). Index gardé en mémoire 60 s : la
+ * recherche se fait pendant la frappe.
  */
 
 const TTL = 60_000;
@@ -18,7 +18,7 @@ interface IndexedPlayer {
   points: number;
   position: number | null;
   team: { tag: string; color: string } | null;
-  activisionId: null;
+  activisionId: string | null;
 }
 
 interface IndexedTeam {
@@ -38,7 +38,7 @@ async function index() {
   if (cache && Date.now() - cache.at < TTL) return cache;
   const [users, profiles, teams, members] = await Promise.all([
     supabase.from('users').select('id, username, avatar_url').limit(10000),
-    supabase.from('cod_profiles').select('user_id, points, wins, losses').limit(10000),
+    supabase.from('cod_profiles').select('user_id, points, wins, losses, activision_id').limit(10000),
     supabase.from('teams').select('id, name, tag, color, logo_url, points, wins').is('disbanded_at', null).order('points', { ascending: false }).order('wins', { ascending: false }),
     supabase.from('team_members').select('user_id, team_id').limit(10000),
   ]);
@@ -52,10 +52,11 @@ async function index() {
   for (const row of memberRows) sizes.set(row.team_id, (sizes.get(row.team_id) ?? 0) + 1);
 
   // Place au classement : joueurs ayant joué, triés par points.
-  const profileRows = (profiles.data ?? []) as { user_id: string; points: number; wins: number; losses: number }[];
+  const profileRows = (profiles.data ?? []) as { user_id: string; points: number; wins: number; losses: number; activision_id: string | null }[];
   const ranked = profileRows.filter((p) => p.wins + p.losses > 0).sort((a, b) => b.points - a.points);
   const position = new Map(ranked.map((p, i) => [p.user_id, i + 1]));
   const points = new Map(profileRows.map((p) => [p.user_id, p.points]));
+  const activision = new Map(profileRows.map((p) => [p.user_id, p.activision_id]));
 
   cache = {
     at: Date.now(),
@@ -68,7 +69,7 @@ async function index() {
         points: points.get(user.id) ?? 0,
         position: position.get(user.id) ?? null,
         team: team ? { tag: team.tag, color: team.color } : null,
-        activisionId: null,
+        activisionId: activision.get(user.id) ?? null,
       };
     }),
     teams: teamRows.map((team, i) => ({
@@ -101,9 +102,7 @@ export async function globalSearch(query: string) {
   if (!term) return { players: [], teams: [] };
   const { players, teams } = await index();
   return {
-    players: rankPlayers(players, term)
-      .slice(0, LIMIT)
-      .map(({ activisionId: _a, ...player }) => player),
+    players: rankPlayers(players, term).slice(0, LIMIT),
     teams: teams
       .map((team) => ({ team, score: teamScore(team, term) }))
       .filter((entry): entry is { team: IndexedTeam; score: number } => entry.score !== null)
