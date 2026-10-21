@@ -1,6 +1,25 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { advanceBracket, bestOfFor, bracketSizeFor, emptyRounds, firstRound, podium, qualifiedTeams, readyEntries, roundName, seedOrder, shuffle } from './tournamentPolicy.js';
+import {
+  GRAND_FINAL,
+  LOSERS_BASE,
+  advanceBracket,
+  advanceDouble,
+  bestOfDouble,
+  bestOfFor,
+  bracketSizeFor,
+  doubleBracket,
+  emptyRounds,
+  firstRound,
+  podium,
+  podiumDouble,
+  qualifiedTeams,
+  readyEntries,
+  roundName,
+  roundNameDouble,
+  seedOrder,
+  shuffle,
+} from './tournamentPolicy.js';
 
 const seeds = (n: number) => Array.from({ length: n }, (_, i) => `t${i + 1}`);
 
@@ -105,3 +124,66 @@ describe('Coupe Horus', () => {
     assert.deepEqual([...shuffle(['a', 'b', 'c'], () => 0)].sort(), ['a', 'b', 'c']);
   });
 });
+
+describe('Coupe Horus en double élimination', () => {
+  // Joue toutes les rencontres prêtes : la meilleure tête de série (numéro le plus petit) gagne.
+  const playAll = (entries: ReturnType<typeof doubleBracket>, size: number, pick = (a: string, b: string) => (Number(a.slice(1)) < Number(b.slice(1)) ? a : b)) => {
+    let current = advanceDouble(entries, size);
+    for (let guard = 0; guard < 40; guard += 1) {
+      const ready = readyEntries(current);
+      if (ready.length === 0) break;
+      for (const entry of ready) {
+        const target = current.find((e) => e.round === entry.round && e.slot === entry.slot)!;
+        target.winner = pick(entry.teamA!, entry.teamB!);
+        target.status = 'done';
+      }
+      current = advanceDouble(current, size);
+    }
+    return current;
+  };
+
+  it('4 équipes : finale des perdants puis grande finale, bronze au perdant des perdants', () => {
+    const done = playAll(doubleBracket(seeds(4), 4), 4);
+    assert.equal(done.filter((e) => e.round > LOSERS_BASE && e.round < GRAND_FINAL).length, 2);
+    assert.deepEqual(podiumDouble(done, 4), { winner: 't1', finalist: 't2', third: 't3' });
+  });
+
+  it('8 équipes : tableau complet, 14 rencontres jouées', () => {
+    const done = playAll(doubleBracket(seeds(8), 8), 8);
+    assert.equal(done.filter((e) => e.status === 'done').length, 14);
+    assert.deepEqual(podiumDouble(done, 8), { winner: 't1', finalist: 't2', third: 't3' });
+  });
+
+  it('le vainqueur des perdants peut gagner la grande finale (un seul match)', () => {
+    // t2 bat t1 en grande finale après être passé par les perdants.
+    let flip = 0;
+    const done = playAll(doubleBracket(seeds(4), 4), 4, (a, b) => {
+      const both = [a, b].sort().join();
+      if (both === 't1,t2') return flip++ === 0 ? 't1' : 't2';
+      return Number(a.slice(1)) < Number(b.slice(1)) ? a : b;
+    });
+    const result = podiumDouble(done, 4)!;
+    assert.equal(result.winner, 't2');
+    assert.equal(result.finalist, 't1');
+  });
+
+  it('5 équipes dans un tableau de 8 : places vides et forfaits résolus jusqu’au podium', () => {
+    const done = playAll(doubleBracket(seeds(5), 8), 8);
+    const result = podiumDouble(done, 8)!;
+    assert.equal(result.winner, 't1');
+    assert.ok(result.finalist);
+  });
+
+  it('podium en attente tant que la grande finale n’est pas jouée', () => {
+    assert.equal(podiumDouble(advanceDouble(doubleBracket(seeds(4), 4), 4), 4), null);
+  });
+
+  it('formats et noms', () => {
+    assert.equal(bestOfDouble(GRAND_FINAL, { bestOf: 1, finalBestOf: 3 }), 3);
+    assert.equal(bestOfDouble(LOSERS_BASE + 1, { bestOf: 1, finalBestOf: 3 }), 1);
+    assert.equal(roundNameDouble(GRAND_FINAL, 8), 'Grande finale');
+    assert.equal(roundNameDouble(LOSERS_BASE + 4, 8), 'Finale des perdants');
+    assert.equal(roundNameDouble(3, 8), 'Finale des gagnants');
+  });
+});
+

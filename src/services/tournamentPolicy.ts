@@ -162,3 +162,97 @@ export function podium(entries: BracketEntry[], rounds: number): { winner: strin
   if (!settled(final) || (third && !settled(third))) return null;
   return { winner: final!.winner, finalist: final!.winner === final!.teamA ? final!.teamB : final!.teamA, third: third?.winner ?? null };
 }
+
+// --- Double élimination (Coupe Horus) ------------------------------------------------------------
+//
+// Tableau des gagnants : tours 1..n (n = log2(taille)). Tableau des perdants : tours LB+1..LB+2(n-1) :
+//   - LB+1 : les perdants du 1er tour des gagnants, deux par deux ;
+//   - LB+2k (k ≥ 1) : vainqueurs du tour perdants précédent contre les perdants du tour k+1 des gagnants ;
+//   - LB+2k+1 : vainqueurs du tour perdants précédent, deux par deux.
+// Grande finale (GF) : vainqueur des gagnants contre vainqueur des perdants, en un seul match (pas de
+// « reset »). Bronze : le perdant de la finale des perdants.
+
+export const LOSERS_BASE = 100;
+export const GRAND_FINAL = 200;
+export type BracketType = 'single' | 'double';
+
+const isLosers = (round: number) => round > LOSERS_BASE && round < GRAND_FINAL;
+
+/** Tableau complet d'une double élimination (1er tour placé, le reste vide). */
+export function doubleBracket(seeds: string[], size: number): BracketEntry[] {
+  const n = roundsFor(size);
+  const entries = [...firstRound(seeds, size), ...emptyRounds(size)];
+  for (let k = 1; k <= 2 * (n - 1); k += 1) {
+    // Tours perdants 1 et 2 : taille / 4 rencontres, 3 et 4 : taille / 8, etc.
+    const count = size / 2 ** (Math.floor((k + 1) / 2) + 1);
+    for (let slot = 0; slot < count; slot += 1) entries.push({ round: LOSERS_BASE + k, slot, teamA: null, teamB: null, winner: null, status: 'pending' });
+  }
+  entries.push({ round: GRAND_FINAL, slot: 0, teamA: null, teamB: null, winner: null, status: 'pending' });
+  return entries;
+}
+
+/** Fait avancer une double élimination (mêmes règles que advanceBracket pour les places vides et forfaits). */
+export function advanceDouble(entries: BracketEntry[], size: number): BracketEntry[] {
+  const n = roundsFor(size);
+  const next = entries.map((entry) => ({ ...entry }));
+  const at = (round: number, slot: number) => next.find((entry) => entry.round === round && entry.slot === slot);
+  const settled = (entry: BracketEntry | undefined) => entry?.status === 'done' || entry?.status === 'empty';
+  const winnerOf = (entry: BracketEntry) => entry.winner;
+  const loserOf = (entry: BracketEntry) => (entry.status === 'done' && entry.teamA && entry.teamB ? (entry.winner === entry.teamA ? entry.teamB : entry.teamA) : null);
+
+  const feeds = (entry: BracketEntry): [BracketEntry | undefined, (e: BracketEntry) => string | null, BracketEntry | undefined, (e: BracketEntry) => string | null] | null => {
+    const { round, slot } = entry;
+    if (round === 1) return null;
+    if (round <= n) return [at(round - 1, slot * 2), winnerOf, at(round - 1, slot * 2 + 1), winnerOf];
+    if (round === GRAND_FINAL) return [at(n, 0), winnerOf, at(LOSERS_BASE + 2 * (n - 1), 0), winnerOf];
+    const k = round - LOSERS_BASE;
+    if (k === 1) return [at(1, slot * 2), loserOf, at(1, slot * 2 + 1), loserOf];
+    if (k % 2 === 0) return [at(round - 1, slot), winnerOf, at(k / 2 + 1, slot), loserOf];
+    return [at(round - 1, slot * 2), winnerOf, at(round - 1, slot * 2 + 1), winnerOf];
+  };
+
+  const order = [...next].sort((a, b) => a.round - b.round || a.slot - b.slot);
+  for (const entry of order) {
+    let known = true;
+    const feed = feeds(entry);
+    if (feed) {
+      const [feedA, fromA, feedB, fromB] = feed;
+      if (settled(feedA) && !entry.teamA) entry.teamA = fromA(feedA!);
+      if (settled(feedB) && !entry.teamB) entry.teamB = fromB(feedB!);
+      known = settled(feedA) && settled(feedB);
+    }
+    if (!known || entry.status !== 'pending') continue;
+    if (!entry.teamA && !entry.teamB) entry.status = 'empty';
+    else if (!entry.teamA || !entry.teamB) {
+      entry.winner = entry.teamA ?? entry.teamB;
+      entry.status = 'done';
+    }
+  }
+  return next;
+}
+
+/** Podium d'une double élimination : grande finale jouée, bronze = perdant de la finale des perdants. */
+export function podiumDouble(entries: BracketEntry[], size: number): { winner: string | null; finalist: string | null; third: string | null } | null {
+  const n = roundsFor(size);
+  const settled = (entry: BracketEntry | undefined) => entry?.status === 'done' || entry?.status === 'empty';
+  const final = entries.find((entry) => entry.round === GRAND_FINAL);
+  if (!settled(final)) return null;
+  const lbFinal = entries.find((entry) => entry.round === LOSERS_BASE + 2 * (n - 1));
+  const third = lbFinal && lbFinal.status === 'done' && lbFinal.teamA && lbFinal.teamB ? (lbFinal.winner === lbFinal.teamA ? lbFinal.teamB : lbFinal.teamA) : null;
+  return { winner: final!.winner, finalist: final!.winner === final!.teamA ? final!.teamB : final!.teamA, third };
+}
+
+/** Format en double élimination : la grande finale a le sien, tout le reste suit les autres matchs. */
+export const bestOfDouble = (round: number, format: MatchFormat) => (round === GRAND_FINAL ? format.finalBestOf : format.bestOf);
+
+/** Nom d'un tour en double élimination. */
+export function roundNameDouble(round: number, size: number): string {
+  const n = roundsFor(size);
+  if (round === GRAND_FINAL) return 'Grande finale';
+  if (isLosers(round)) {
+    const k = round - LOSERS_BASE;
+    return k === 2 * (n - 1) ? 'Finale des perdants' : `Perdants · tour ${k}`;
+  }
+  return round === n ? 'Finale des gagnants' : `Gagnants · ${roundName(round, n).toLowerCase()}`;
+}
+

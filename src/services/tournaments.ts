@@ -10,21 +10,29 @@ import {
   CUP_BONUS,
   CUP_MIN_TEAMS,
   CUP_SIZES,
+  GRAND_FINAL,
+  LOSERS_BASE,
   QUALIFY_MATCHES,
   TOURNAMENT_SIZES,
   advanceBracket,
+  advanceDouble,
+  bestOfDouble,
   bestOfFor,
   bracketSizeFor,
+  doubleBracket,
   emptyRounds,
   firstRound,
   isThirdPlace,
   podium,
+  podiumDouble,
   qualifiedTeams,
   readyEntries,
   roundName,
+  roundNameDouble,
   roundsFor,
   shuffle,
   type BracketEntry,
+  type BracketType,
 } from './tournamentPolicy.js';
 
 /**
@@ -50,6 +58,7 @@ interface TournamentRow {
   best_of: number;
   final_best_of: number;
   third_place: boolean;
+  bracket: BracketType;
   third_team: string | null;
   schedule_id: string | null;
   name: string;
@@ -265,7 +274,12 @@ export async function getTournament(id: string, viewerId: string | null) {
     : [];
   const matchById = new Map(matches.map((match) => [match.id, match]));
   // Avant le début : le tableau affiche déjà les têtes de série et les places vides.
-  const display = tournament.status === 'scheduled' ? advanceBracket(rows.map(toEntry), rounds) : rows.map(toEntry);
+  const display =
+    tournament.status === 'scheduled'
+      ? tournament.bracket === 'double'
+        ? advanceDouble(rows.map(toEntry), tournament.size)
+        : advanceBracket(rows.map(toEntry), rounds)
+      : rows.map(toEntry);
   const card = (teamId: string | null) => {
     const team = teamId ? teamById.get(teamId) : null;
     const participant = participants.find((p) => p.team_id === teamId);
@@ -343,15 +357,36 @@ export async function getTournament(id: string, viewerId: string | null) {
     winner: card(tournament.winner_team),
     finalist: card(tournament.finalist_team),
     teams: participants.map((p) => ({ ...card(p.team_id)!, checkedIn: Boolean(p.checked_in_at), forfeit: p.forfeit })),
+    bracket: tournament.bracket,
     rounds: Array.from({ length: rounds }, (_, index) => {
       const round = index + 1;
+      const double = tournament.bracket === 'double';
       return {
         round,
-        name: roundName(round, rounds),
-        bestOf: bestOfFor(round, rounds, formatOf(tournament)),
+        name: double ? roundNameDouble(round, tournament.size) : roundName(round, rounds),
+        bestOf: double ? bestOfDouble(round, formatOf(tournament)) : bestOfFor(round, rounds, formatOf(tournament)),
         entries: display.filter((entry) => entry.round === round && !isThirdPlace(entry, rounds)).map(present),
       };
     }),
+    losers:
+      tournament.bracket === 'double'
+        ? Array.from({ length: 2 * (rounds - 1) }, (_, index) => {
+            const round = LOSERS_BASE + index + 1;
+            return {
+              round,
+              name: roundNameDouble(round, tournament.size),
+              bestOf: bestOfDouble(round, formatOf(tournament)),
+              entries: display.filter((entry) => entry.round === round).map(present),
+            };
+          })
+        : null,
+    grandFinal:
+      tournament.bracket === 'double'
+        ? (() => {
+            const entry = display.find((e) => e.round === GRAND_FINAL);
+            return entry ? { name: 'Grande finale', bestOf: tournament.final_best_of, entry: present(entry) } : null;
+          })()
+        : null,
     viewer,
   };
 }
@@ -524,7 +559,7 @@ async function startCup(tournament: TournamentRow): Promise<void> {
   for (const [index, teamId] of drawn.entries()) {
     unwrap(await supabase.from('tournament_teams').update({ seed: index + 1 }).eq('tournament_id', tournament.id).eq('team_id', teamId));
   }
-  const bracket = [...firstRound(drawn, size), ...emptyRounds(size, tournament.third_place)];
+  const bracket = tournament.bracket === 'double' ? doubleBracket(drawn, size) : [...firstRound(drawn, size), ...emptyRounds(size, tournament.third_place)];
   unwrap(
     await supabase
       .from('tournament_bracket')
@@ -563,7 +598,8 @@ export async function advanceTournament(id: string): Promise<void> {
     }
   }
 
-  const advanced = advanceBracket(rows.map(toEntry), rounds);
+  const double = tournament.bracket === 'double';
+  const advanced = double ? advanceDouble(rows.map(toEntry), tournament.size) : advanceBracket(rows.map(toEntry), rounds);
   for (const [index, entry] of advanced.entries()) {
     const row = rows[index]!;
     if (entry.teamA !== row.team_a || entry.teamB !== row.team_b || entry.winner !== row.winner || entry.status !== row.status) {
@@ -574,7 +610,7 @@ export async function advanceTournament(id: string): Promise<void> {
   // Rencontres prêtes : match créé (maps tirées au sort, format de la rencontre).
   for (const entry of readyEntries(advanced)) {
     const row = rows.find((r) => r.round === entry.round && r.slot === entry.slot)!;
-    const bestOf = bestOfFor(entry.round, rounds, formatOf(tournament), entry.slot);
+    const bestOf = double ? bestOfDouble(entry.round, formatOf(tournament)) : bestOfFor(entry.round, rounds, formatOf(tournament), entry.slot);
     const { data, error } = await supabase.rpc('tournament_create_match', { p_entry: row.id, p_maps: pickMaps(config.cod.maps, bestOf), p_mode: config.cod.modes[0], p_best_of: bestOf });
     if (error) {
       console.error('[tournoi] création du match impossible', error.message);
@@ -583,7 +619,7 @@ export async function advanceTournament(id: string): Promise<void> {
     const match = data as { id: string; roster_a: string[]; roster_b: string[] } | null;
     if (!match?.id) continue;
     await pushToUsers([...match.roster_a, ...match.roster_b], {
-      title: `🏆 ${isThirdPlace(entry, rounds) ? 'Petite finale' : roundName(entry.round, rounds)} : à vous de jouer`,
+      title: `🏆 ${double ? roundNameDouble(entry.round, tournament.size) : isThirdPlace(entry, rounds) ? 'Petite finale' : roundName(entry.round, rounds)} : à vous de jouer`,
       body: `${tournament.name} · BO${bestOf}. Ouvre la feuille de match.`,
       url: `/cod/equipes/match/${match.id}`,
       tag: `team-match-${match.id}`,
@@ -591,7 +627,7 @@ export async function advanceTournament(id: string): Promise<void> {
     });
   }
 
-  const result = podium(advanced, rounds);
+  const result = double ? podiumDouble(advanced, tournament.size) : podium(advanced, rounds);
   if (result) await completeTournament(tournament, result.winner, result.finalist, result.third);
 }
 
@@ -743,6 +779,7 @@ interface ScheduleRow {
   size: number;
   best_of: number;
   final_best_of: number;
+  bracket: BracketType;
   active: boolean;
   last_date: string | null;
   created_by: string | null;
@@ -790,12 +827,21 @@ async function ensureScheduledCups(): Promise<void> {
     if ((count ?? 0) > 0) continue;
     const next = nextOccurrence(schedule.weekday, schedule.start_time);
     if (schedule.last_date === next.day) continue;
-    await openCup({ name: schedule.name, size: schedule.size, bestOf: schedule.best_of, finalBestOf: schedule.final_best_of, startsAt: next.startsAt, scheduleId: schedule.id, adminId: schedule.created_by });
+    await openCup({
+      name: schedule.name,
+      size: schedule.size,
+      bestOf: schedule.best_of,
+      finalBestOf: schedule.final_best_of,
+      bracket: schedule.bracket,
+      startsAt: next.startsAt,
+      scheduleId: schedule.id,
+      adminId: schedule.created_by,
+    });
     unwrap(await supabase.from('cup_schedules').update({ last_date: next.day }).eq('id', schedule.id));
   }
 }
 
-async function openCup(input: { name: string; size: number; bestOf: number; finalBestOf: number; startsAt: Date; scheduleId: string | null; adminId: string | null }) {
+async function openCup(input: { name: string; size: number; bestOf: number; finalBestOf: number; bracket: BracketType; startsAt: Date; scheduleId: string | null; adminId: string | null }) {
   const season = unwrap(await supabase.from('seasons').select('id').eq('is_active', true).maybeSingle()) as { id: number } | null;
   const tournament = unwrap(
     await supabase
@@ -806,7 +852,8 @@ async function openCup(input: { name: string; size: number; bestOf: number; fina
         size: input.size,
         best_of: input.bestOf,
         final_best_of: input.finalBestOf,
-        third_place: true,
+        bracket: input.bracket,
+        third_place: input.bracket === 'single',
         starts_at: input.startsAt.toISOString(),
         season_id: season?.id ?? null,
         schedule_id: input.scheduleId,
@@ -817,7 +864,7 @@ async function openCup(input: { name: string; size: number; bestOf: number; fina
   ) as TournamentRow;
   const date = input.startsAt.toLocaleString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   await announce(
-    `🏆 **${input.name}** : inscriptions ouvertes ! ${input.size} équipes max, BO${input.bestOf} (finale BO${input.finalBestOf}), ${date}. Check-in ${CHECKIN_MINUTES} min avant.\n${config.siteUrl}${PAGE}`,
+    `🏆 **${input.name}** : inscriptions ouvertes ! ${input.size} équipes max, ${input.bracket === 'double' ? 'double élimination' : 'élimination directe'}, BO${input.bestOf} (finale BO${input.finalBestOf}), ${date}. Check-in ${CHECKIN_MINUTES} min avant.\n${config.siteUrl}${PAGE}`,
     'horus',
   );
   return tournament;
@@ -835,7 +882,8 @@ function parseCupInput(body: unknown) {
   if (bestOf !== 1 && bestOf !== 3) throw new HttpError(400, 'INVALID_CUP', 'Matchs en BO1 ou BO3.');
   const finalBestOf = Number(input.finalBestOf);
   if (!(bestOf === 1 ? [3] : [3, 5]).includes(finalBestOf)) throw new HttpError(400, 'INVALID_CUP', bestOf === 1 ? 'En BO1, la finale se joue en BO3.' : 'Finale en BO3 ou BO5.');
-  return { name, size, bestOf, finalBestOf };
+  const bracket: BracketType = (body as { bracket?: unknown } | undefined)?.bracket === 'double' ? 'double' : 'single';
+  return { name, size, bestOf, finalBestOf, bracket };
 }
 
 export async function cupAdmin() {
@@ -854,10 +902,20 @@ export async function cupAdmin() {
       size: row.size,
       bestOf: row.best_of,
       finalBestOf: row.final_best_of,
+      bracket: row.bracket,
       active: row.active,
       next: nextOccurrence(row.weekday, row.start_time).startsAt.toISOString(),
     })),
-    cups: ((cups.data ?? []) as TournamentRow[]).map((row) => ({ id: row.id, name: row.name, size: row.size, startsAt: row.starts_at, status: row.status, bestOf: row.best_of, finalBestOf: row.final_best_of })),
+    cups: ((cups.data ?? []) as TournamentRow[]).map((row) => ({
+      id: row.id,
+      name: row.name,
+      size: row.size,
+      startsAt: row.starts_at,
+      status: row.status,
+      bestOf: row.best_of,
+      finalBestOf: row.final_best_of,
+      bracket: row.bracket,
+    })),
   };
 }
 
@@ -888,6 +946,7 @@ export async function createSchedule(adminId: string, body: unknown) {
       size: input.size,
       best_of: input.bestOf,
       final_best_of: input.finalBestOf,
+      bracket: input.bracket,
       created_by: adminId,
     }),
   );
@@ -904,7 +963,16 @@ export async function updateSchedule(id: string, body: unknown) {
     unwrap(
       await supabase
         .from('cup_schedules')
-        .update({ name: input.name, weekday: input.weekday, start_time: input.time, size: input.size, best_of: input.bestOf, final_best_of: input.finalBestOf, last_date: null })
+        .update({
+          name: input.name,
+          weekday: input.weekday,
+          start_time: input.time,
+          size: input.size,
+          best_of: input.bestOf,
+          final_best_of: input.finalBestOf,
+          bracket: input.bracket,
+          last_date: null,
+        })
         .eq('id', id),
     );
   }
