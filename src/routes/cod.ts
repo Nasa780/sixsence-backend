@@ -13,6 +13,7 @@ import { createParty, getPartyOf, joinParty, kickMember, leaveParty, previewInvi
 import { getQueueState, getQueueSummaries, joinQueue, leaveQueue, stayInQueue } from '../services/queue.js';
 import { getSiteStats } from '../services/stats.js';
 import type { QueueHub } from '../ws/hub.js';
+import { onlineVisitors } from '../services/presence.js';
 
 /**
  * Endpoints du classé COD.
@@ -55,6 +56,8 @@ export function codRouter(hub: QueueHub): Router {
         playersInQueue: queues.reduce((sum, queue) => sum + queue.size, 0),
         matchesInProgress: stats.matchesInProgress,
         playersOnline: hub.onlineCount(),
+        // Visiteurs du site (onglet ouvert, signal de moins de 90 s), joueurs de la file compris.
+        siteOnline: Math.max(onlineVisitors(), hub.onlineCount()),
       });
     }),
   );
