@@ -24,6 +24,7 @@ import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, syncTeamAndBadgeRoles, welcomeNewPlayers } from './services/community.js';
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
+import { globalSearch } from './services/search.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
 import { noticeMatchAbandoned, noticeMatchFinished, noticeMatchMissed, remindStaff } from './services/matchNotices.js';
 import { syncAllCards, syncCards } from './services/cards.js';
@@ -229,6 +230,15 @@ app.post('/presence', (req: Request, res: Response) => {
   }
   res.json({ online: onlineVisitors() });
 });
+
+// Recherche globale (joueurs et équipes), pendant la frappe : 60 requêtes par minute et par adresse.
+app.get(
+  '/search',
+  rateLimit(60, 60_000),
+  asyncHandler(async (req, res) => {
+    res.json(await globalSearch(typeof req.query.q === 'string' ? req.query.q : ''));
+  }),
+);
 
 // Compteurs publics de la page d'accueil.
 app.get(
