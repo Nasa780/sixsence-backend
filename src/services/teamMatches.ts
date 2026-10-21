@@ -222,7 +222,7 @@ export async function joinTeamQueue(userId: string, body: unknown) {
   const queued = (waiting ?? []) as { team_id: string }[];
   if (queued.some((row) => row.team_id === teamId)) {
     const { announceDivisionSearch } = await import('./community.js');
-    announceDivisionSearch(size, queued.length);
+    announceDivisionSearch(teamId, size, queued.length);
   }
   return teamPlayState(userId);
 }

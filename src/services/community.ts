@@ -296,7 +296,6 @@ export function onQueueChanged(queues: QueueSummary[]): void {
     void announce(
       codChannelId,
       `🔥 **File ${queue.label}** : ${queue.size}/${queue.needed} joueurs — ${missing === 1 ? 'plus qu’**une place** !' : `il manque **${missing} joueurs**.`} Viens jouer : ${site}/cod/ranked`,
-      'COD',
     );
   }
 }
@@ -310,7 +309,6 @@ export function announceSeasonClosed(archived: number, nextName: string): Promis
   return announce(
     codChannelId,
     `🏆 **Fin de saison** : ${archived} joueurs classés, le classement final est archivé. **${nextName}** commence maintenant, les points repartent de zéro ! ${site}/cod/leaderboard`,
-    'COD',
   );
 }
 
@@ -460,21 +458,22 @@ export async function postWeeklyTop(now = new Date()): Promise<void> {
 
 /**
  * Division : une équipe lance une recherche sans trouver d'adversaire tout de suite. Annonce anonyme
- * (ni nom d'équipe ni joueurs) pour donner envie aux autres équipes de lancer la leur ; au plus une
- * toutes les 10 minutes.
+ * (ni nom d'équipe ni joueurs) pour donner envie aux autres équipes de lancer la leur. Une annonce par
+ * équipe qui lance une recherche (pas de nouvelle annonce si la même équipe relance dans les 10 minutes).
  */
-let divisionAnnouncedAt = 0;
+const divisionAnnounced = new Map<string, number>();
 
-export function announceDivisionSearch(playersPerTeam: number, searching: number): void {
+export function announceDivisionSearch(teamId: string, playersPerTeam: number, searching: number): void {
   const channel = config.discord.divisionChannelId || codChannelId;
   if (!discordEnabled || !channel || !config.teams.enabled || !config.teams.discord) return;
-  if (Date.now() - divisionAnnouncedAt < 10 * 60_000) return;
-  divisionAnnouncedAt = Date.now();
+  const now = Date.now();
+  for (const [id, at] of divisionAnnounced) if (now - at >= 10 * 60_000) divisionAnnounced.delete(id);
+  if (divisionAnnounced.has(teamId)) return;
+  divisionAnnounced.set(teamId, now);
   const format = `${playersPerTeam}v${playersPerTeam}`;
   void announce(
     channel,
     `⚔️ **Division ${format}** : ${searching > 1 ? `**${searching} équipes** cherchent` : 'une équipe cherche'} un adversaire ! Lance une recherche avec la tienne : ${site}/cod/division`,
-    'COD',
   );
 }
 
