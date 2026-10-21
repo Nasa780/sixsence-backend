@@ -158,6 +158,8 @@ export const config = {
   discord: {
     botToken: process.env.DISCORD_BOT_TOKEN?.trim() || '',
     guildId: process.env.DISCORD_GUILD_ID?.trim() || '',
+    /** Clé publique de l'application (portail développeur, « Public Key ») : commandes du bot (/discord/interactions). */
+    publicKey: process.env.DISCORD_PUBLIC_KEY?.trim() || '',
     /** Catégorie où créer les salons vocaux des matchs (facultatif). */
     matchCategoryId: process.env.DISCORD_MATCH_CATEGORY_ID?.trim() || '',
     /** Salon où publier les résultats (facultatif). */
