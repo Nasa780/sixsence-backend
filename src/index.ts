@@ -6,6 +6,7 @@ import { config, isOriginAllowed } from './config.js';
 import { asyncHandler, errorHandler, isUnexpected, notFoundHandler } from './errors.js';
 import { bus } from './events.js';
 import { rateLimit } from './rateLimit.js';
+import { isVisitorId, markPresent, onlineVisitors } from './services/presence.js';
 import { adminRouter } from './routes/admin.js';
 import { codRouter } from './routes/cod.js';
 import { errorsRouter } from './routes/errors.js';
@@ -205,6 +206,13 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 app.use(rateLimit(120, 60_000));
+
+// Présence sur le site (compteur « En ligne maintenant ») : un signal toutes les 45 s par onglet ouvert.
+app.post('/presence', (req: Request, res: Response) => {
+  const id = (req.body as { id?: unknown } | undefined)?.id;
+  if (isVisitorId(id)) markPresent(id);
+  res.json({ online: onlineVisitors() });
+});
 
 // Compteurs publics de la page d'accueil.
 app.get(

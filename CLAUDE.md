@@ -64,7 +64,7 @@ npm start            # node dist/index.js
 
 ## Routes
 
-Publiques : `GET /health`, `GET /stats`, `POST /errors`, `GET /cod/status`, `GET /cod/matches/:id` (chat et preuves seulement pour les joueurs du match et les admins, jeton facultatif), `GET /gta/events`, `GET /gta/events/:id`.
+Publiques : `GET /health`, `GET /stats`, `POST /presence` (présence sur le site : identifiant aléatoire du visiteur, compté 90 s, `siteOnline` dans `GET /cod/status` ; `services/presence.ts`, en mémoire), `POST /errors`, `GET /cod/status`, `GET /cod/matches/:id` (chat et preuves seulement pour les joueurs du match et les admins, jeton facultatif), `GET /gta/events`, `GET /gta/events/:id`.
 
 Connexion Discord requise (`Authorization: Bearer <jeton Supabase>`) : `GET /cod/queue`, `POST /cod/queue/join|leave|stay`, `GET|POST /cod/party`, `POST /cod/party/join|leave|kick|format`, `GET /cod/matches/:id/me`, `GET /cod/cards`, `POST /cod/cards/equip|seen`, `POST /cod/matches/:id/mvp|arbitration`, `POST /cod/reports`, `POST /cod/matches/:id/ready|report|confirm|messages|proofs`, `POST|DELETE /gta/events/:id/register`.
 
