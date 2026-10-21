@@ -24,6 +24,7 @@ import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, syncTeamAndBadgeRoles, welcomeNewPlayers } from './services/community.js';
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
+import { calendarEvents, calendarIcs } from './services/calendar.js';
 import { globalSearch } from './services/search.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
 import { noticeMatchAbandoned, noticeMatchFinished, noticeMatchMissed, remindStaff } from './services/matchNotices.js';
@@ -237,6 +238,23 @@ app.get(
   rateLimit(60, 60_000),
   asyncHandler(async (req, res) => {
     res.json(await globalSearch(typeof req.query.q === 'string' ? req.query.q : ''));
+  }),
+);
+
+// Calendrier public : coupes, événements GTA 6, saison (JSON pour le site, .ics pour les agendas).
+app.get(
+  '/calendar',
+  asyncHandler(async (req, res) => {
+    res.json({ events: await calendarEvents(req.query.from, req.query.to) });
+  }),
+);
+app.get(
+  '/calendar.ics',
+  asyncHandler(async (_req, res) => {
+    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="sixsence.ics"');
+    res.setHeader('Cache-Control', 'public, max-age=900');
+    res.send(await calendarIcs());
   }),
 );
 

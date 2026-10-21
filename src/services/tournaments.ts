@@ -1078,7 +1078,7 @@ function parisOffset(at: Date): number {
 }
 
 /** Instant UTC d'une date (AAAA-MM-JJ) et heure (HH:MM) de Paris. */
-function parisInstant(day: string, time: string): Date {
+export function parisInstant(day: string, time: string): Date {
   const guess = new Date(`${day}T${time.slice(0, 5)}:00Z`);
   return new Date(guess.getTime() - parisOffset(guess) * 60_000);
 }
