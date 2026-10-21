@@ -4,6 +4,7 @@ import { supabase } from '../supabase.js';
 import { discordEnabled, dm, notifyStaff } from './discord.js';
 import { rankPlayers } from './playerSearch.js';
 import { pushToUsers } from './push.js';
+import { logToDiscord } from './siteLog.js';
 import { addTeamRole, deleteTeamRole, removeTeamRole, syncTeamRole } from './teamDiscord.js';
 import {
   TEAM_LIMITS,
@@ -355,6 +356,8 @@ export async function createTeam(userId: string, body: unknown) {
     await supabase.rpc('team_create', { p_owner: userId, p_name: input.name, p_tag: input.tag, p_description: input.description ?? null, p_color: input.color }),
   ) as TeamRow;
   syncTeamRole(team.id);
+  const { data: creator } = await supabase.from('users').select('username').eq('id', userId).maybeSingle();
+  logToDiscord(`🛡️ **Équipe créée** : [${input.tag}] ${input.name} par ${(creator as { username?: string } | null)?.username ?? 'un joueur'} — ${config.siteUrl}/cod/equipes/${team.id}`);
   return getTeam(team.id);
 }
 

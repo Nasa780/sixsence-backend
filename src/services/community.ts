@@ -4,6 +4,7 @@ import type { Role } from '../roles.js';
 import { supabase } from '../supabase.js';
 import { SUPPRESS_EMBEDS, discord, discordEnabled, discordIds, dm } from './discord.js';
 import { pushToUsers } from './push.js';
+import { logToDiscord } from './siteLog.js';
 import { queueLevel, shouldAnnounce } from './announcePolicy.js';
 import type { QueueSummary } from './queue.js';
 
@@ -295,7 +296,6 @@ export function onQueueChanged(queues: QueueSummary[]): void {
     void announce(
       codChannelId,
       `🔥 **File ${queue.label}** : ${queue.size}/${queue.needed} joueurs — ${missing === 1 ? 'plus qu’**une place** !' : `il manque **${missing} joueurs**.`} Viens jouer : ${site}/cod/ranked`,
-      'COD',
     );
   }
 }
@@ -309,7 +309,6 @@ export function announceSeasonClosed(archived: number, nextName: string): Promis
   return announce(
     codChannelId,
     `🏆 **Fin de saison** : ${archived} joueurs classés, le classement final est archivé. **${nextName}** commence maintenant, les points repartent de zéro ! ${site}/cod/leaderboard`,
-    'COD',
   );
 }
 
@@ -457,6 +456,27 @@ export async function postWeeklyTop(now = new Date()): Promise<void> {
   );
 }
 
+/**
+ * Division : une équipe lance une recherche sans trouver d'adversaire tout de suite. Annonce anonyme
+ * (ni nom d'équipe ni joueurs) pour donner envie aux autres équipes de lancer la leur. Une annonce par
+ * équipe qui lance une recherche (pas de nouvelle annonce si la même équipe relance dans les 10 minutes).
+ */
+const divisionAnnounced = new Map<string, number>();
+
+export function announceDivisionSearch(teamId: string, playersPerTeam: number, searching: number): void {
+  const channel = config.discord.divisionChannelId || codChannelId;
+  if (!discordEnabled || !channel || !config.teams.enabled || !config.teams.discord) return;
+  const now = Date.now();
+  for (const [id, at] of divisionAnnounced) if (now - at >= 10 * 60_000) divisionAnnounced.delete(id);
+  if (divisionAnnounced.has(teamId)) return;
+  divisionAnnounced.set(teamId, now);
+  const format = `${playersPerTeam}v${playersPerTeam}`;
+  void announce(
+    channel,
+    `⚔️ **Division ${format}** : ${searching > 1 ? `**${searching} équipes** cherchent` : 'une équipe cherche'} un adversaire ! Lance une recherche avec la tienne : ${site}/cod/division`,
+  );
+}
+
 /** Message privé de bienvenue aux nouveaux inscrits (une seule fois, users.welcomed_at). */
 export async function welcomeNewPlayers(): Promise<void> {
   if (!discordEnabled) return;
@@ -466,13 +486,15 @@ export async function welcomeNewPlayers(): Promise<void> {
     .update({ welcomed_at: new Date().toISOString() })
     .is('welcomed_at', null)
     .gte('created_at', since)
-    .select('id');
+    .select('id, username');
   if (error) {
     console.warn('[discord] bienvenue impossible', error.message);
     return;
   }
-  const ids = ((data ?? []) as { id: string }[]).map((row) => row.id);
+  const rows = (data ?? []) as { id: string; username: string | null }[];
+  const ids = rows.map((row) => row.id);
   if (ids.length === 0) return;
+  logToDiscord(`🆕 **Nouvel${rows.length > 1 ? 'les' : ''} inscription${rows.length > 1 ? 's' : ''}** (1re connexion Discord) : ${rows.map((row) => row.username ?? 'joueur').join(', ')}`);
   await dm(
     ids,
     `👋 **Bienvenue sur SixSence !**\n` +

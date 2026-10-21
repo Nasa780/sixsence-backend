@@ -217,6 +217,13 @@ export async function joinTeamQueue(userId: string, body: unknown) {
   unwrap(await supabase.from('team_queue').upsert({ team_id: teamId, roster, queued_by: userId, joined_at: now, confirmed_at: now, warned_at: null }));
   await supabase.from('teams').update({ queue_expired_at: null }).eq('id', teamId);
   await tryCreateTeamMatches();
+  // Toujours en recherche (pas d'adversaire tout de suite) : annonce anonyme sur Discord.
+  const { data: waiting } = await supabase.from('team_queue').select('team_id');
+  const queued = (waiting ?? []) as { team_id: string }[];
+  if (queued.some((row) => row.team_id === teamId)) {
+    const { announceDivisionSearch } = await import('./community.js');
+    announceDivisionSearch(teamId, size, queued.length);
+  }
   return teamPlayState(userId);
 }
 
