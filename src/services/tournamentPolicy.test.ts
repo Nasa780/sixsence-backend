@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { advanceBracket, bestOfFor, emptyRounds, firstRound, podium, qualifiedTeams, readyEntries, roundName, seedOrder } from './tournamentPolicy.js';
+import { advanceBracket, bestOfFor, bracketSizeFor, emptyRounds, firstRound, podium, qualifiedTeams, readyEntries, roundName, seedOrder, shuffle } from './tournamentPolicy.js';
 
 const seeds = (n: number) => Array.from({ length: n }, (_, i) => `t${i + 1}`);
 
@@ -44,7 +44,7 @@ describe('tournoi de fin de saison', () => {
     assert.equal(bracket[0]!.status, 'empty');
     bracket[1] = { ...bracket[1]!, winner: 't3', status: 'done' };
     bracket = advanceBracket(bracket, 2);
-    assert.deepEqual(podium(bracket, 2), { winner: 't3', finalist: null });
+    assert.deepEqual(podium(bracket, 2), { winner: 't3', finalist: null, third: null });
   });
 
   it('vainqueurs reportés jusqu’à la finale', () => {
@@ -55,6 +55,53 @@ describe('tournoi de fin de saison', () => {
     assert.deepEqual([final.teamA, final.teamB], ['t1', 't2']);
     assert.equal(podium(bracket, 2), null);
     bracket = bracket.map((e) => (e.round === 2 ? { ...e, winner: 't2', status: 'done' as const } : e));
-    assert.deepEqual(podium(bracket, 2), { winner: 't2', finalist: 't1' });
+    assert.deepEqual(podium(bracket, 2), { winner: 't2', finalist: 't1', third: null });
+  });
+});
+
+describe('Coupe Horus', () => {
+  const play = (entries: ReturnType<typeof firstRound>, rounds: number, pick: (a: string, b: string) => string) => {
+    let current = advanceBracket(entries, rounds);
+    for (let guard = 0; guard < 10; guard += 1) {
+      const ready = readyEntries(current);
+      if (ready.length === 0) break;
+      for (const entry of ready) {
+        const target = current.find((e) => e.round === entry.round && e.slot === entry.slot)!;
+        target.winner = pick(entry.teamA!, entry.teamB!);
+        target.status = 'done';
+      }
+      current = advanceBracket(current, rounds);
+    }
+    return current;
+  };
+
+  it('petite finale : les perdants des demies se disputent le bronze', () => {
+    const entries = [...firstRound(seeds(4), 4), ...emptyRounds(4, true)];
+    const done = play(entries, 2, (a, b) => (a < b ? a : b));
+    assert.deepEqual(podium(done, 2), { winner: 't1', finalist: 't2', third: 't3' });
+  });
+
+  it('sans petite finale : pas de 3e', () => {
+    const done = play([...firstRound(seeds(4), 4), ...emptyRounds(4)], 2, (a, b) => (a < b ? a : b));
+    assert.deepEqual(podium(done, 2), { winner: 't1', finalist: 't2', third: null });
+  });
+
+  it('podium en attente tant que la petite finale n’est pas jouée', () => {
+    const entries = advanceBracket([...firstRound(seeds(4), 4), ...emptyRounds(4, true)], 2);
+    assert.equal(podium(entries, 2), null);
+  });
+
+  it('formats : finale à part, petite finale au format des autres matchs', () => {
+    const format = { bestOf: 1, finalBestOf: 3 };
+    assert.equal(bestOfFor(2, 2, format, 0), 3);
+    assert.equal(bestOfFor(2, 2, format, 1), 1);
+    assert.equal(bestOfFor(1, 2, format), 1);
+  });
+
+  it('taille du tableau selon les inscrits', () => {
+    assert.equal(bracketSizeFor(4, 16), 4);
+    assert.equal(bracketSizeFor(5, 16), 8);
+    assert.equal(bracketSizeFor(9, 8), 8);
+    assert.deepEqual([...shuffle(['a', 'b', 'c'], () => 0)].sort(), ['a', 'b', 'c']);
   });
 });

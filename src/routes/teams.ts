@@ -24,7 +24,7 @@ import {
   teamStatus,
 } from '../services/teamMatches.js';
 import { TEAM_REPORT_REASONS } from '../services/teamPolicy.js';
-import { checkIn, currentTournament, getTournament } from '../services/tournaments.js';
+import { checkIn, currentTournament, getTournament, registerTeam, unregisterTeam } from '../services/tournaments.js';
 import {
   answerInvite,
   inviteLinkPreview,
@@ -94,6 +94,8 @@ import {
  *   GET    /teams/tournament                   tournoi prévu ou en cours (sinon le dernier terminé), tableau, droits du visiteur
  *   GET    /teams/tournaments/:id              un tournoi
  *   POST   /teams/tournaments/:id/checkin      check-in d'un Leader (30 min avant) { roster: [ids parmi l'effectif figé] }
+ *   POST   /teams/tournaments/:id/register     Coupe Horus : inscrire son équipe (Leader) ; DELETE : la désinscrire
+ *   GET    /teams/tournament?kind=horus        Coupe Horus prévue ou en cours (sinon la dernière terminée)
  *   POST   /teams/matches/:matchId/correct     correction d'un match terminé (arbitre 48 h, admin sans limite) { scores | null, reason }
  *   POST   /teams/matches/:matchId/resolve     arbitrage { scores: [[a, b], …] | null (annuler) }
  */
@@ -132,9 +134,15 @@ export function teamsRouter(): Router {
   router.post('/matches/:matchId/resolve', requireAuth, asyncHandler(async (req, res) => void res.json(await resolveTeamMatch(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
 
   // --- Tournoi de fin de saison ------------------------------------------------------
-  router.get('/tournament', optionalAuth, asyncHandler(async (_req, res) => void res.json({ tournament: await currentTournament(viewerOf(res)?.id ?? null) })));
+  router.get(
+    '/tournament',
+    optionalAuth,
+    asyncHandler(async (req, res) => void res.json({ tournament: await currentTournament(viewerOf(res)?.id ?? null, req.query.kind === 'horus' ? 'horus' : 'saison') })),
+  );
   router.get('/tournaments/:tournamentId', optionalAuth, asyncHandler(async (req, res) => void res.json(await getTournament(uuidParam(req, 'tournamentId'), viewerOf(res)?.id ?? null))));
   router.post('/tournaments/:tournamentId/checkin', requireAuth, asyncHandler(async (req, res) => void res.json(await checkIn(currentUser(res).id, uuidParam(req, 'tournamentId'), req.body))));
+  router.post('/tournaments/:tournamentId/register', requireAuth, asyncHandler(async (req, res) => void res.json(await registerTeam(currentUser(res).id, uuidParam(req, 'tournamentId')))));
+  router.delete('/tournaments/:tournamentId/register', requireAuth, asyncHandler(async (req, res) => void res.json(await unregisterTeam(currentUser(res).id, uuidParam(req, 'tournamentId')))));
 
   router.post('/invites/:inviteId/answer', requireAuth, asyncHandler(async (req, res) => void res.json(await answerInvite(currentUser(res).id, req.params.inviteId, req.body))));
   router.delete('/invites/:inviteId', requireAuth, asyncHandler(async (req, res) => void res.json(await cancelInvite(currentUser(res).id, req.params.inviteId))));
