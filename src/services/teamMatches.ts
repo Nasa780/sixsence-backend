@@ -75,7 +75,7 @@ async function matchRow(matchId: string): Promise<TeamMatch> {
 }
 
 async function teamsById(ids: string[]) {
-  const rows = (unwrap(await supabase.from('teams').select('id, name, tag, color, logo_url, owner_id, points').in('id', ids)) ?? []) as {
+  const rows = (unwrap(await supabase.from('teams').select('id, name, tag, color, logo_url, owner_id, points, cup_tournament').in('id', ids)) ?? []) as {
     id: string;
     name: string;
     tag: string;
@@ -83,6 +83,7 @@ async function teamsById(ids: string[]) {
     logo_url: string | null;
     owner_id: string;
     points: number;
+    cup_tournament: string | null;
   }[];
   return new Map(rows.map((team) => [team.id, team]));
 }
@@ -96,8 +97,14 @@ async function leadersOf(teamId: string): Promise<string[]> {
   return [...new Set([(team.data as { owner_id: string } | null)?.owner_id, ...((rows.data ?? []) as { user_id: string }[]).map((row) => row.user_id)].filter(Boolean) as string[])];
 }
 
-/** Côté (A ou B) dont ce joueur est Leader dans ce match, ou null. */
+/** Côté (A ou B) dont ce joueur est Leader dans ce match (ou capitaine / remplaçant d'une équipe de Coupe Anubis), ou null. */
 async function leaderSide(match: TeamMatch, userId: string): Promise<Side | null> {
+  if (match.tournament_id) {
+    const squads = ((await supabase.from('tournament_teams').select('team_id, frozen_roster, captain').eq('tournament_id', match.tournament_id).in('team_id', [match.team_a, match.team_b])).data ??
+      []) as { team_id: string; frozen_roster: string[]; captain: string | null }[];
+    const squad = squads.find((row) => row.captain && row.frozen_roster.includes(userId));
+    if (squad) return squad.team_id === match.team_a ? 'A' : 'B';
+  }
   const member = await membershipOf(userId);
   if (!member || !(member.role === 'leader' || member.isOwner)) return null;
   return member.team_id === match.team_a ? 'A' : member.team_id === match.team_b ? 'B' : null;
@@ -297,22 +304,35 @@ async function onTeamMatchCreated(match: TeamMatch): Promise<void> {
     tag: `team-match-${match.id}`,
     urgent: true,
   });
+  await openMatchVoice(match, 'Division');
+}
+
+/** Salon vocal Discord par équipe pour un match (Division ou coupe), lien envoyé en DM aux joueurs (et remplaçants d'une Coupe Anubis). */
+export async function openMatchVoice(match: Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'roster_a' | 'roster_b'>, label: string): Promise<void> {
   if (!discordEnabled || !config.teams.discord) return;
+  const teams = await teamsById([match.team_a, match.team_b]);
+  const a = teams.get(match.team_a)!;
+  const b = teams.get(match.team_b)!;
   const { guildId, matchCategoryId } = config.discord;
   const created: Record<string, string> = {};
   try {
+    const benchOf = async (teamId: string) => {
+      const row = (await supabase.from('tournament_teams').select('frozen_roster, captain').eq('team_id', teamId).maybeSingle()).data as { frozen_roster: string[]; captain: string | null } | null;
+      return row?.captain ? row.frozen_roster : [];
+    };
+    const audience = { teamA: [...new Set([...match.roster_a, ...(await benchOf(match.team_a))])], teamB: [...new Set([...match.roster_b, ...(await benchOf(match.team_b))])] };
     for (const [key, team] of [['teamA', a], ['teamB', b]] as const) {
       const channel = (await discord(`/guilds/${guildId}/channels`, {
         method: 'POST',
-        body: { name: `[${a.tag}] vs [${b.tag}] · ${team.tag}`, type: 2, user_limit: config.teams.rosterSize + 1, ...(matchCategoryId ? { parent_id: matchCategoryId } : {}) },
+        body: { name: `[${a.tag}] vs [${b.tag}] · ${team.tag}`, type: 2, user_limit: audience[key].length + 1, ...(matchCategoryId ? { parent_id: matchCategoryId } : {}) },
       })) as { id: string };
       created[key] = channel.id;
     }
     await supabase.from('team_matches').update({ discord_channels: created }).eq('id', match.id);
     const link = (id: string) => `https://discord.com/channels/${guildId}/${id}`;
     const sheet = `${config.siteUrl}${matchUrl(match.id)}`;
-    await dm(match.roster_a, `**Division : [${a.tag}] vs [${b.tag}]** (BO3) — vocal de ton équipe : ${link(created.teamA!)}\nFeuille de match : ${sheet}`);
-    await dm(match.roster_b, `**Division : [${a.tag}] vs [${b.tag}]** (BO3) — vocal de ton équipe : ${link(created.teamB!)}\nFeuille de match : ${sheet}`);
+    await dm(audience.teamA, `**${label} : [${a.tag}] vs [${b.tag}]** — vocal de ton équipe : ${link(created.teamA!)}\nFeuille de match : ${sheet}`);
+    await dm(audience.teamB, `**${label} : [${a.tag}] vs [${b.tag}]** — vocal de ton équipe : ${link(created.teamB!)}\nFeuille de match : ${sheet}`);
   } catch (caught) {
     console.warn('[team-match] salons vocaux impossibles', (caught as Error).message);
     for (const id of Object.values(created)) await discord(`/channels/${id}`, { method: 'DELETE' }).catch(() => {});
@@ -340,7 +360,7 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
   }));
   const team = (id: string) => {
     const row = teams.get(id);
-    return row ? { id: row.id, name: row.name, tag: row.tag, color: row.color, logoUrl: row.logo_url, points: row.points } : null;
+    return row ? { id: row.id, name: row.name, tag: row.tag, color: row.color, logoUrl: row.logo_url, points: row.points, cup: Boolean(row.cup_tournament) } : null;
   };
 
   let viewer = null;
@@ -648,7 +668,7 @@ export async function listTeamDisputes() {
   const teams = await teamsById([...new Set(rows.flatMap((row) => [row.team_a, row.team_b]))]);
   const card = (id: string) => {
     const team = teams.get(id);
-    return team ? { id: team.id, name: team.name, tag: team.tag, color: team.color, logoUrl: team.logo_url } : null;
+    return team ? { id: team.id, name: team.name, tag: team.tag, color: team.color, logoUrl: team.logo_url, cup: Boolean(team.cup_tournament) } : null;
   };
   return rows.map((row) => ({
     id: row.id,
@@ -902,7 +922,7 @@ export async function playerTeamMatches(userId: string) {
   const teams = await teamsById([...new Set(rows.flatMap((row) => [row.team_a, row.team_b]))]);
   const card = (id: string) => {
     const team = teams.get(id);
-    return team ? { id: team.id, name: team.name, tag: team.tag, color: team.color, logoUrl: team.logo_url } : null;
+    return team ? { id: team.id, name: team.name, tag: team.tag, color: team.color, logoUrl: team.logo_url, cup: Boolean(team.cup_tournament) } : null;
   };
   return rows.map((row) => {
     const side: Side = row.roster_a.includes(userId) ? 'A' : 'B';

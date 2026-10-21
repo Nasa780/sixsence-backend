@@ -256,3 +256,64 @@ export function roundNameDouble(round: number, size: number): string {
   return round === n ? 'Finale des gagnants' : `Gagnants · ${roundName(round, n).toLowerCase()}`;
 }
 
+
+// --- Coupe Anubis : équipes formées au hasard --------------------------------------------------
+
+/** Tailles d'équipe proposées pour la Coupe Anubis (1 : test à deux comptes seulement). */
+export const ANUBIS_TEAM_SIZES = [2, 3, 4] as const;
+
+/** Noms des équipes formées (nom, tag, couleur), dans l'ordre du tirage. */
+export const ANUBIS_TEAMS = [
+  { name: 'Scarabée', tag: 'SCA', color: '#e7c05a' },
+  { name: 'Sphinx', tag: 'SPH', color: '#d9a441' },
+  { name: 'Chacal', tag: 'CHA', color: '#8c6cf0' },
+  { name: 'Cobra', tag: 'COB', color: '#3fbf7f' },
+  { name: 'Ibis', tag: 'IBI', color: '#4fb3e8' },
+  { name: 'Faucon', tag: 'FAU', color: '#e06a3a' },
+  { name: 'Lotus', tag: 'LOT', color: '#e46fa6' },
+  { name: 'Pharaon', tag: 'PHA', color: '#c9a227' },
+  { name: 'Obélisque', tag: 'OBE', color: '#9aa4b2' },
+  { name: 'Papyrus', tag: 'PAP', color: '#c8b48a' },
+  { name: 'Oasis', tag: 'OAS', color: '#2bb3a3' },
+  { name: 'Nil', tag: 'NIL', color: '#3a7bd5' },
+  { name: 'Pyramide', tag: 'PYR', color: '#d4b26a' },
+  { name: 'Sobek', tag: 'SOB', color: '#5c9e45' },
+  { name: 'Bastet', tag: 'BAS', color: '#b0558f' },
+  { name: 'Thot', tag: 'THO', color: '#6f86d6' },
+] as const;
+
+/** Joueurs au plus dans une Coupe Anubis : une place de remplaçant par équipe. */
+export const anubisCapacity = (teams: number, teamSize: number) => teams * (teamSize + 1);
+
+export interface AnubisPlayer {
+  id: string;
+  points: number;
+}
+
+export interface FormedTeam {
+  starters: string[];
+  subs: string[];
+  captain: string;
+}
+
+/**
+ * Forme les équipes d'une Coupe Anubis parmi les joueurs présents : tirage au sort, autant d'équipes
+ * complètes que possible (au plus `maxTeams`), joueurs restants en remplaçants (un par équipe) ;
+ * capitaine = titulaire avec le plus de points en Classé (égalité : au hasard, l'ordre étant tiré au sort).
+ */
+export function formTeams(players: AnubisPlayer[], teamSize: number, maxTeams: number, random = Math.random): FormedTeam[] {
+  const drawn = shuffle(players, random);
+  const count = Math.min(maxTeams, Math.floor(drawn.length / teamSize));
+  const teams: FormedTeam[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const starters = drawn.slice(index * teamSize, (index + 1) * teamSize);
+    const captain = [...starters].sort((a, b) => b.points - a.points)[0]!;
+    teams.push({ starters: starters.map((player) => player.id), subs: [], captain: captain.id });
+  }
+  const rest = drawn.slice(count * teamSize);
+  for (const [index, player] of rest.entries()) {
+    if (index >= count) break;
+    teams[index]!.subs.push(player.id);
+  }
+  return teams;
+}
