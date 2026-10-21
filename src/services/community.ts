@@ -28,7 +28,7 @@ import type { QueueSummary } from './queue.js';
  *     - message privé aux inscrits 1 h avant un événement GTA.
  */
 
-const RANK_ROLES = [
+export const RANK_ROLES = [
   { name: 'Légende', min: 3000, color: 0xff6b4a },
   { name: 'Champion', min: 2100, color: 0xe8b4f8 },
   { name: 'Grand Maître', min: 1800, color: 0xc084fc },

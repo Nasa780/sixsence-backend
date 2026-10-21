@@ -16,6 +16,7 @@ import { pushRouter } from './routes/push.js';
 import { teamsRouter } from './routes/teams.js';
 import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
+import { commandsEnabled, handleInteraction, registerCommands, validSignature } from './services/discordCommands.js';
 import { pointsPreview, sweepMatches } from './services/matches.js';
 import { checkTeamQueueTimeouts, sweepTeamMatches, tryCreateTeamMatches } from './services/teamMatches.js';
 import { sweepTournaments } from './services/tournaments.js';
@@ -192,6 +193,19 @@ app.use(
     maxAge: 600,
   }),
 );
+// Commandes Discord du bot : corps brut, nécessaire pour vérifier la signature de Discord.
+app.post('/discord/interactions', express.raw({ type: '*/*', limit: '64kb' }), (req: Request, res: Response) => {
+  const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+  if (!commandsEnabled || !validSignature(raw, req.header('x-signature-ed25519'), req.header('x-signature-timestamp'))) {
+    res.status(401).send('Signature invalide');
+    return;
+  }
+  try {
+    res.json(handleInteraction(JSON.parse(raw.toString('utf8'))));
+  } catch {
+    res.status(400).send('Requête invalide');
+  }
+});
 app.use(express.json({ limit: '32kb' }));
 app.use((_req: Request, res: Response, next: NextFunction) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -331,6 +345,7 @@ server.listen(config.port, () => {
   console.log(`[boot] files : ${config.cod.formats.map((format) => format.label).join(', ')} · origines : ${config.corsOrigins.join(', ')}`);
   console.log(`[boot] vérification « Prêt ? » : ${config.cod.readySeconds} s · Discord : ${discordEnabled ? 'activé' : 'désactivé'}`);
   if (config.localSafe) console.log('[boot] MODE LOCAL SANS RISQUE : tâches du classé coupées, file et groupes du classé fermés');
+  if (!config.localSafe) void registerCommands();
 });
 
 // Arrêt propre : Render envoie SIGTERM à chaque redéploiement.
