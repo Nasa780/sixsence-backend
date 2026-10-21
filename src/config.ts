@@ -119,11 +119,9 @@ export const config = {
     cancelMinutes: integer('COD_CANCEL_MINUTES', 180, 5),
     /** Temps laissé à chaque joueur pour accepter un match trouvé (vérification « Prêt ? »). */
     readySeconds: integer('COD_READY_SECONDS', 60, 10),
-    /** Délai de grâce après une déconnexion avant de retirer le joueur de la file. */
-    disconnectGraceMs: 30_000,
     /**
-     * Sur téléphone, le système coupe la connexion dès que le joueur verrouille l'écran ou
-     * change d'appli : il garde sa place plus longtemps et la notification push le prévient.
+     * Délai de grâce après une déconnexion (page fermée, écran verrouillé, autre appli), le même sur
+     * ordinateur et téléphone : le joueur garde sa place, la notification push le prévient du match.
      */
     mobileGraceMinutes: integer('COD_MOBILE_GRACE_MINUTES', 30, 1),
     /** Durée maximale d'une recherche sans confirmer sa présence (« Toujours là ? » 5 min avant). */
