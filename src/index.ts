@@ -43,14 +43,12 @@ const hub = new QueueHub({
   getState: async (userId) => ({ ...(await getQueueState(userId)) }),
   // Joueur parti sans revenir : on libère sa place dans la file (avec son groupe)
   // et on prévient par notification ceux dont la recherche s'arrête.
-  onUserGone: async (userId, { mobile }) => {
+  onUserGone: async (userId) => {
     const removed = await leaveQueue(userId, 'Un membre du groupe a quitté le site : recherche annulée.');
     if (removed.length === 0) return;
     void pushToUsers([userId], {
       title: 'Recherche arrêtée',
-      body: mobile
-        ? `Tu n'es plus sur SixSence depuis ${config.cod.mobileGraceMinutes} min : ta recherche est arrêtée. Touche ici pour la relancer.`
-        : 'Tu as quitté SixSence : ta recherche est arrêtée. Touche ici pour la relancer.',
+      body: `Tu n'es plus sur SixSence depuis ${config.cod.mobileGraceMinutes} min : ta recherche est arrêtée. Touche ici pour la relancer.`,
       url: '/cod/ranked',
       tag: 'file',
     });
@@ -65,8 +63,8 @@ const hub = new QueueHub({
     );
   },
   isOriginAllowed,
-  graceMs: config.cod.disconnectGraceMs,
-  mobileGraceMs: config.cod.mobileGraceMinutes * 60_000,
+  // Même délai sur ordinateur et téléphone (30 min par défaut, COD_MOBILE_GRACE_MINUTES).
+  graceMs: config.cod.mobileGraceMinutes * 60_000,
 });
 
 // Les services émettent des événements ; on les relaie aux navigateurs.
