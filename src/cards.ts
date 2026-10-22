@@ -5,7 +5,7 @@
  * Familles : par défaut, rangs (rang atteint pendant la saison des cartes de rang, RANK_CARDS_SEASON ;
  * exclusives, nouvelles cartes à chaque saison), succès, saison (participant, top 10, champion ; exclusives),
  * MVP (MVP du mois : une carte par mois, regroupées ; MVP ×10), communauté, GTA 6.
- * Une carte obtenue est définitive, sauf Partenaire, Staff et Arbitre (retirées avec le badge ou le rôle).
+ * Une carte obtenue est définitive, sauf Partenaire et Staff (retirées avec le badge ou le rôle).
  */
 
 export type Rarity = 'commune' | 'rare' | 'epique' | 'legendaire';
@@ -31,8 +31,6 @@ export interface CardStats {
   badges: string[];
   /** Membre de l'équipe SixSence (admin, staff ou arbitre). */
   team: boolean;
-  /** Arbitre de l'équipe ou admin (les admins arbitrent aussi) : carte Arbitre. */
-  referee: boolean;
   /** Inscriptions à des événements GTA 6 terminés. */
   gtaEvents: number;
 }
@@ -128,7 +126,6 @@ export const STATIC_CARDS: CardDef[] = [
   { key: 'beta', family: 'Communauté', name: 'Bêta-testeur', condition: 'A testé la bêta', rarity: 'rare', exclusive: true, eligible: (s) => s.badges.includes('beta') },
   { key: 'partenaire', family: 'Communauté', name: 'Partenaire', condition: 'Partenaire SixSence', rarity: 'rare', removable: true, eligible: (s) => s.badges.includes('partner') },
   { key: 'staff-6', family: 'Communauté', name: 'Staff', condition: "Membre de l'équipe", rarity: 'rare', removable: true, eligible: (s) => s.team },
-  { key: 'arbitre', family: 'Communauté', name: 'Arbitre', condition: "Membre de l'équipe", rarity: 'epique', removable: true, eligible: (s) => s.referee },
   { key: 'premiere-viree', family: 'GTA 6', name: 'Première virée', condition: '1 événement GTA 6', rarity: 'commune', ...count((s) => s.gtaEvents, 1) },
   { key: 'habitue', family: 'GTA 6', name: 'Habitué', condition: '5 événements GTA 6', rarity: 'rare', ...count((s) => s.gtaEvents, 5) },
 ];
