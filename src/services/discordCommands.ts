@@ -5,12 +5,13 @@ import { RANK_ROLES } from './community.js';
 import { discord, discordEnabled } from './discord.js';
 import { getQueueSummaries } from './queue.js';
 import { teamStatus } from './teamMatches.js';
+import { handleTicketInteraction, type TicketInteraction } from './tickets.js';
 
 /**
  * Commandes Discord du bot (« /profil », « /classement », « /equipe », « /coupe », « /file », « /match »,
  * « /site ») : Discord appelle POST /discord/interactions (adresse à déclarer dans le portail développeur,
  * champ « Interactions Endpoint URL ») ; chaque requête est signée (ed25519, DISCORD_PUBLIC_KEY).
- * Lecture seule : rien ne se modifie depuis Discord. Réponse différée (Discord exige une réponse en 3 s),
+ * Lecture seule : rien ne se modifie depuis Discord (sauf les tickets, boutons et fenêtres traités par services/tickets.ts). Réponse différée (Discord exige une réponse en 3 s),
  * puis message complété. Commandes enregistrées sur le serveur DISCORD_GUILD_ID au démarrage.
  */
 
@@ -106,8 +107,10 @@ type Reply = { content?: string; embeds?: unknown[]; components?: unknown[] };
  * Traite une interaction. Renvoie la réponse immédiate (PONG ou réponse différée) ; le contenu est
  * envoyé ensuite par le webhook de l'interaction.
  */
-export function handleInteraction(interaction: Interaction): { type: number; data?: { flags: number } } {
+export function handleInteraction(interaction: Interaction): { type: number; data?: unknown } {
   if (interaction.type === 1) return { type: 1 };
+  // Boutons et fenêtres des tickets (services/tickets.ts).
+  if (interaction.type === 3 || interaction.type === 5) return handleTicketInteraction(interaction as unknown as TicketInteraction) ?? { type: 4, data: { flags: EPHEMERAL, content: 'Action inconnue.' } };
   if (interaction.type !== 2 || !interaction.data) return { type: 4, data: { flags: EPHEMERAL } };
   const name = interaction.data.name;
   const option = (key: string) => interaction.data?.options?.find((o) => o.name === key)?.value?.trim() ?? '';
