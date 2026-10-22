@@ -56,7 +56,7 @@ const COMMANDS = [
     description: 'Fiche rapide d’une équipe de la Division',
     options: [{ type: 3, name: 'tag', description: 'Tag de l’équipe (ex. SIX)', required: true }],
   },
-  { name: 'coupe', description: 'Prochaines coupes Horus et Anubis' },
+  { name: 'coupe', description: 'Prochains trophées Horus et Anubis' },
   { name: 'file', description: 'Joueurs et équipes en recherche, matchs en cours' },
   { name: 'match', description: 'Ton match en cours (visible de toi seul)' },
   { name: 'site', description: 'Liens utiles de SixSence' },
@@ -298,7 +298,7 @@ async function cups(): Promise<Reply> {
     });
   }
   return {
-    embeds: [{ color: GOLD, title: 'Coupes SixSence', url: `${SITE}/cod/tournoi`, fields }],
+    embeds: [{ color: GOLD, title: 'Trophées SixSence', url: `${SITE}/cod/tournoi`, fields }],
     components: row(button('Coupe Horus', `${SITE}/cod/tournoi`), button('Coupe Anubis', `${SITE}/cod/tournoi?coupe=anubis`)),
   };
 }
@@ -343,6 +343,6 @@ async function myMatch(discordId: string): Promise<Reply> {
 function links(): Reply {
   return {
     embeds: [{ color: GOLD, title: 'SixSence', description: 'Compétition COD & Événements GTA', url: SITE }],
-    components: row(button('Site', SITE), button('Mon profil', `${SITE}/cod/profile`), button('Règlement', `${SITE}/reglement`), button('Coupes', `${SITE}/cod/tournoi`)),
+    components: row(button('Site', SITE), button('Mon profil', `${SITE}/cod/profile`), button('Règlement', `${SITE}/reglement`), button('Trophées', `${SITE}/cod/tournoi`)),
   };
 }
