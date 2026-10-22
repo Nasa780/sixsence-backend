@@ -25,7 +25,7 @@ export const RULES_EMBEDS = [
       '• Aucune insulte, provocation, discrimination ni harcèlement, en vocal comme à l’écrit.',
       '• Pas de contenu choquant, NSFW ou illégal.',
       '• Pas de spam, de mentions abusives ni de publicité sans l’accord du staff.',
-      '• Les débats restent courtois : on règle un conflit en message privé ou avec le staff, pas en public.',
+      '• Les débats restent courtois : on règle un conflit en privé ou par un ticket au staff, pas en public.',
     ].join('\n'),
   },
   {
@@ -48,14 +48,14 @@ export const RULES_EMBEDS = [
     title: '4 · Sanctions',
     description: [
       '• Selon la gravité : avertissement, mise en sourdine, expulsion ou bannissement.',
-      '• Les décisions du staff s’appliquent. Une contestation se fait calmement, en message privé à un membre du staff.',
+      '• Les décisions du staff s’appliquent. Une contestation se fait calmement, en ouvrant un ticket.',
     ].join('\n'),
   },
   {
     title: '5 · Staff et contact',
     description: [
       '• Les rôles **Staff 6** et **Arbitre 6** encadrent le serveur.',
-      '• Une question ou un problème ? Contacte un membre du staff en message privé.',
+      '• Une question ou un problème ? Ouvre un ticket : le staff te répond en privé.',
       '• Le règlement du classé sera publié au lancement de la saison.',
       '',
       '*Bon jeu à tous. ⚡*',
