@@ -972,14 +972,14 @@ async function giveWinnerRole(tournament: TournamentRow, roster: string[]): Prom
 }
 
 /**
- * Message de tournoi (inscriptions, check-in, tirage, annulation, résultats) : salon des annonces s'il est configuré,
+ * Message de tournoi (inscriptions, check-in, tirage, annulation, résultats) : salon des annonces COD, sinon des annonces,
  * sinon salon Division (coupes) ou COD. Sans mention. `illustrated` : une annonce illustrée (postAnnouncement) couvre
  * déjà ce moment dans le salon des annonces, le message texte n'est alors pas publié (pas de doublon).
  */
 async function announce(content: string, kind: Kind = 'saison', illustrated = false): Promise<void> {
-  const { announceChannelId, divisionChannelId, codChannelId, resultsChannelId } = config.discord;
-  if (illustrated && announceChannelId) return;
-  const channel = announceChannelId || (isCup(kind) && divisionChannelId) || codChannelId || resultsChannelId;
+  const { announceChannelId, codAnnounceChannelId, divisionChannelId, codChannelId, resultsChannelId } = config.discord;
+  if (illustrated && (codAnnounceChannelId || announceChannelId)) return;
+  const channel = codAnnounceChannelId || announceChannelId || (isCup(kind) && divisionChannelId) || codChannelId || resultsChannelId;
   if (!discordEnabled || !config.teams.discord || !channel) return;
   await discord(`/channels/${channel}/messages`, { method: 'POST', body: { content, flags: SUPPRESS_EMBEDS } }).catch((caught) =>
     console.warn('[tournoi] annonce impossible', (caught as Error).message),

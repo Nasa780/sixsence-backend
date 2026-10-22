@@ -2,9 +2,12 @@ import { config } from '../config.js';
 import { HttpError } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { discord, discordEnabled } from './discord.js';
+import { logToDiscord } from './siteLog.js';
 
 /**
- * Annonces illustrées du serveur Discord, dans le salon des annonces (DISCORD_ANNOUNCE_CHANNEL_ID) :
+ * Annonces illustrées du serveur Discord, chacune dans son salon (announceChannelFor) : annonces et nouveautés dans
+ * DISCORD_ANNOUNCE_CHANNEL_ID, coupes et saison dans DISCORD_COD_ANNOUNCE_CHANNEL_ID, événements GTA dans
+ * DISCORD_GTA_CHANNEL_ID (à défaut, le salon des annonces) :
  * encadré avec titre, texte, lien et grande image (`/api/og/annonce` du site), et mention du rôle de
  * notification choisi par les membres dans l'Intégration de Discord (questions d'accueil du serveur).
  *
@@ -42,6 +45,14 @@ const ONBOARDING_ROLES = [
 ];
 
 const STATE_KEY = 'discord_announce_off';
+
+/** Salon de chaque type d'annonce (à défaut : le salon des annonces). */
+export function announceChannelFor(type: AnnounceType): string {
+  const { announceChannelId, codAnnounceChannelId, gtaChannelId } = config.discord;
+  if (type === 'horus' || type === 'anubis' || type === 'saison') return codAnnounceChannelId || announceChannelId;
+  if (type === 'gta') return gtaChannelId || announceChannelId;
+  return announceChannelId;
+}
 const site = config.siteUrl;
 
 let rolesCache: { ids: Map<string, string>; at: number } | null = null;
@@ -102,9 +113,9 @@ export interface Announcement {
 
 /** Publie une annonce. Au mieux : une erreur Discord est journalisée, jamais remontée (sauf `strict`, pour l'admin). */
 export async function postAnnouncement(item: Announcement, strict = false): Promise<boolean> {
-  const channel = config.discord.announceChannelId;
+  const channel = announceChannelFor(item.type);
   try {
-    if (!discordEnabled || !channel) throw new HttpError(409, 'DISCORD_DISABLED', 'Le bot Discord ou le salon des annonces (DISCORD_ANNOUNCE_CHANNEL_ID) n’est pas configuré.');
+    if (!discordEnabled || !channel) throw new HttpError(409, 'DISCORD_DISABLED', 'Le bot Discord ou le salon de cette annonce n’est pas configuré.');
     if ((await disabledTypes()).includes(item.type)) {
       if (strict) throw new HttpError(409, 'ANNOUNCE_OFF', 'Ce type d’annonce est coupé dans les réglages.');
       return false;
@@ -189,11 +200,59 @@ export async function manualAnnouncement(body: unknown) {
   return { posted: true };
 }
 
+// --- Rôle « Membre » pour tous ---------------------------------------------------------------
+
+/**
+ * Donne le rôle « Membre » à tous les membres actuels du serveur (hors bots), en tâche de fond : les nouveaux
+ * le reçoivent par l'Intégration. Liste des membres : intention « Server Members Intent » à activer dans le
+ * portail développeur (Bot). Bilan dans le salon du journal.
+ */
+let givingMemberRole = false;
+export async function giveMemberRoleToAll(): Promise<{ started: boolean }> {
+  if (!discordEnabled) throw new HttpError(409, 'DISCORD_DISABLED', 'Le bot Discord n’est pas configuré.');
+  if (givingMemberRole) throw new HttpError(409, 'ALREADY_RUNNING', 'Distribution déjà en cours.');
+  const roleId = (await onboardingRoles(true)).get('Membre');
+  if (!roleId) throw new HttpError(502, 'DISCORD_ERROR', 'Rôle « Membre » introuvable.');
+  type Member = { user: { id: string; bot?: boolean }; roles: string[] };
+  let first: Member[];
+  try {
+    first = (await discord(`/guilds/${config.discord.guildId}/members?limit=1000`)) as Member[];
+  } catch (caught) {
+    throw new HttpError(502, 'DISCORD_ERROR', `Liste des membres refusée : active « Server Members Intent » dans le portail développeur, onglet Bot (${(caught as Error).message}).`);
+  }
+  givingMemberRole = true;
+  void (async () => {
+    let given = 0;
+    let failed = 0;
+    let page = first;
+    try {
+      while (page.length) {
+        for (const member of page) {
+          if (member.user.bot || member.roles.includes(roleId)) continue;
+          try {
+            await discord(`/guilds/${config.discord.guildId}/members/${member.user.id}/roles/${roleId}`, { method: 'PUT' });
+            given += 1;
+          } catch {
+            failed += 1;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        if (page.length < 1000) break;
+        page = (await discord(`/guilds/${config.discord.guildId}/members?limit=1000&after=${page[page.length - 1]!.user.id}`)) as Member[];
+      }
+    } finally {
+      givingMemberRole = false;
+      logToDiscord(`👥 Rôle **Membre** donné à **${given}** membre(s)${failed ? ` (${failed} échec(s) : rôle du bot à placer au-dessus de « Membre »)` : ''}.`);
+    }
+  })();
+  return { started: true };
+}
+
 // --- Fin de saison : rappel 3 jours avant ------------------------------------------------------
 
 /** Rappel « fin de saison dans 3 jours », une fois par saison (app_claim). Appelé toutes les 15 minutes. */
 export async function remindSeasonEnd(now = Date.now()): Promise<void> {
-  if (!discordEnabled || !config.discord.announceChannelId) return;
+  if (!discordEnabled || !announceChannelFor('saison')) return;
   const { data } = await supabase.from('seasons').select('id, name, ends_at').eq('is_active', true).maybeSingle();
   const season = data as { id: number; name: string; ends_at: string | null } | null;
   if (!season?.ends_at) return;

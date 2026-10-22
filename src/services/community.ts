@@ -310,14 +310,16 @@ export function announceMonthlyMvp(username: string, month: string): Promise<voi
   return announce(codChannelId, `⭐ **MVP du mois de ${label}** : bravo à **${username}**, le joueur le plus élu MVP ! ${site}/cod/leaderboard`);
 }
 
-export function announceSeasonClosed(archived: number, nextName: string): Promise<void> {
-  void postAnnouncement({
+/** Fin de saison : annonce illustrée (salon des annonces COD) ; message texte dans le salon COD si elle est coupée. */
+export async function announceSeasonClosed(archived: number, nextName: string): Promise<void> {
+  const posted = await postAnnouncement({
     type: 'saison',
     title: `${nextName} commence !`,
     subtitle: 'Nouvelle saison',
     text: `La saison précédente est terminée : ${archived} joueurs classés, le classement final est archivé et les récompenses sont distribuées. Les points repartent de zéro, ton XP et tes cartes restent. À toi de jouer !`,
     url: '/cod/leaderboard',
   });
+  if (posted) return;
   return announce(
     codChannelId,
     `🏆 **Fin de saison** : ${archived} joueurs classés, le classement final est archivé. **${nextName}** commence maintenant, les points repartent de zéro ! ${site}/cod/leaderboard`,
@@ -335,14 +337,15 @@ interface EventInfo {
 const eventDate = (iso: string) =>
   new Date(iso).toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
 
+/** Nouvel événement GTA : une seule annonce (illustrée, salon GTA, rôle 🔔 Événements GTA) ; message texte si elle est coupée. */
 export async function announceNewEvent(event: EventInfo): Promise<void> {
   if (event.status !== 'published') return;
-  await Promise.all([
+  const plain = () =>
     announce(
       gtaChannelId,
-      // Sans mention : l'annonce illustrée (salon des annonces) prévient déjà le rôle 🔔 Événements GTA.
       `🌴 **Nouvel événement GTA 6 : ${event.title}**\n📅 ${eventDate(event.starts_at)}${event.location ? ` · 📍 ${event.location}` : ''}\nInscriptions : ${site}/gta6/events/${event.id}`,
-    ),
+    );
+  await Promise.all([
     pushToGtaPlayers(event),
     postAnnouncement({
       type: 'gta',
@@ -353,7 +356,7 @@ export async function announceNewEvent(event: EventInfo): Promise<void> {
 
 Nouvel événement GTA 6 de la communauté : les inscriptions sont ouvertes sur le site.`,
       url: `/gta6/events/${event.id}`,
-    }),
+    }).then((posted) => (posted ? undefined : plain())),
   ]);
 }
 
