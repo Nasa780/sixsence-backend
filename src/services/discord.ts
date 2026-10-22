@@ -1,7 +1,7 @@
 import { config } from '../config.js';
 import { bus, type CodMatch } from '../events.js';
 import { supabase } from '../supabase.js';
-import { sendMatchFound, updateStarted } from './matchFoundDm.js';
+import { sendMatchFound, updateClosed, updateStarted } from './matchFoundDm.js';
 
 /**
  * Intégration Discord, par l'API REST (pas besoin de connexion permanente du bot) :
@@ -219,6 +219,8 @@ async function sweepOnce(): Promise<void> {
     }
 
     const recent = match.completed_at && Date.now() - new Date(match.completed_at).getTime() < 60 * 60 * 1000;
+    // Message privé « Match trouvé » : état final (terminé ou annulé), sans le bouton du vocal supprimé.
+    if (recent) await updateClosed(match).catch((caught) => console.warn('[discord] message de fin impossible', (caught as Error).message));
     // Match corrigé : l'ancien message de résultat est supprimé (remplacé ci-dessous si le match a un vainqueur).
     let resultMessage = match.discord_result_message ?? null;
     if (resultMessage && match.corrected_at && resultsChannelId) {

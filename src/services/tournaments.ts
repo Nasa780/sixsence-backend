@@ -609,7 +609,7 @@ async function registerPlayer(userId: string, tournament: TournamentRow) {
   return getTournament(tournament.id, userId);
 }
 
-/** Check-in d'un joueur inscrit (30 min avant le début). */
+/** Check-in d'un joueur inscrit (de 2 h à 15 min avant le début). */
 async function checkInPlayer(userId: string, id: string) {
   const tournament = await tournamentRow(id);
   if (tournament.status !== 'scheduled') throw new HttpError(409, 'TOURNAMENT_CLOSED', 'Le check-in est fermé.');
@@ -714,6 +714,15 @@ async function checkInReminders(): Promise<void> {
   }
 }
 
+/** Tirage effectué (Coupe Horus, tournoi de saison) : push et message privé aux joueurs engagés. Anubis : déjà prévenus par équipe. */
+async function notifyDraw(tournament: TournamentRow, userIds: string[], url: string): Promise<void> {
+  const players = [...new Set(userIds)];
+  if (players.length === 0) return;
+  const text = `Tirage effectué : ton tableau est en ligne, premiers matchs à ${hourOf(tournament)}. Rejoins ton équipe.`;
+  await pushToUsers(players, { title: `🏆 ${tournament.name}`, body: text, url, tag: `tournoi-${tournament.id}`, urgent: true });
+  if (discordEnabled && config.teams.discord) await dm(players, `🏆 **${tournament.name}** — ${text}\n${config.siteUrl}${url}`);
+}
+
 /** Tirage (15 min avant) : équipes sans check-in déclarées forfait (retirées du 1er tour) ; 1ers matchs à l'heure du début. */
 async function startTournament(tournament: TournamentRow): Promise<void> {
   if (tournament.kind === 'horus') return startCup(tournament);
@@ -733,6 +742,7 @@ async function startTournament(tournament: TournamentRow): Promise<void> {
       if (Object.keys(patch).length) unwrap(await supabase.from('tournament_bracket').update(patch).eq('id', entry.id));
     }
   }
+  await notifyDraw(tournament, participants.filter((p) => p.checked_in_at).flatMap((p) => p.match_roster ?? p.frozen_roster), `${PAGE}?coupe=saison`);
   await announce(`🏆 **${tournament.name}** : check-in terminé${absent.length ? `, ${absent.length} équipe(s) forfait` : ''}. Premiers matchs à ${hourOf(tournament)} !\n${config.siteUrl}${PAGE}`);
   await advanceTournament(tournament.id);
 }
@@ -770,6 +780,7 @@ async function startCup(tournament: TournamentRow): Promise<void> {
     unwrap(await supabase.from('tournament_teams').update({ seed: index + 1 }).eq('tournament_id', tournament.id).eq('team_id', teamId));
   }
   await drawBracket(tournament, drawn, size);
+  await notifyDraw(tournament, present.flatMap((p) => p.match_roster ?? p.frozen_roster), PAGE);
   await announce(`🏆 **${tournament.name}** : ${present.length} équipes, tableau tiré au sort ! Premiers matchs à ${hourOf(tournament)}.\n${config.siteUrl}${PAGE}`, tournament.kind);
   await advanceTournament(tournament.id);
 }

@@ -12,6 +12,8 @@ import { discord, discordIds } from './discord.js';
  *   ② prêt            vert, barre des joueurs prêts, bouton grisé
  *   ③ c'est parti     doré, barre pleine, « Rejoindre le vocal » + « Ouvrir le match »
  *   ④ annulé          gris, selon le cas : remis en tête de file, groupe libéré, ou pas accepté à temps
+ *   ⑤ fin             match terminé (résultat sur la feuille) ou annulé par l'équipe / abandonné ; le bouton du vocal
+ *                     (salon supprimé à la fin) disparaît
  */
 
 const GREEN = 0x34d399;
@@ -85,6 +87,21 @@ function abortedBody(kind: 'requeued' | 'released' | 'missing'): Body {
     content: '',
     embeds: [{ color: GREY, title: '⌛ MATCH ANNULÉ', description: text }],
     components: [{ type: 1, components: [linkButton(kind === 'requeued' ? 'Voir la file' : 'Relancer une recherche', `${site}/cod/ranked`)] }],
+  };
+}
+
+function closedBody(match: CodMatch): Body {
+  const done = match.status === 'completed';
+  return {
+    content: '',
+    embeds: [
+      {
+        color: done ? GOLD : GREY,
+        title: done ? '🏁 MATCH TERMINÉ' : '⛔ MATCH ANNULÉ',
+        description: done ? 'Le résultat et les points sont sur la feuille de match.' : 'Aucun point n’a été modifié.',
+      },
+    ],
+    components: [{ type: 1, components: [openButton(match.id), linkButton('Rejoindre la file', `${site}/cod/ranked?rejoindre=${encodeURIComponent(match.format ?? 'auto')}`)] }],
   };
 }
 
@@ -177,6 +194,14 @@ export async function updateStarted(match: CodMatch, voice: { teamA: string | nu
     for (const userId of ids) if (!(await edit(refs[userId], startedBody(match, voiceId)))) missed.push(userId);
   }
   return missed;
+}
+
+/** ⑤ Match terminé, ou annulé après le départ (équipe SixSence, abandon) : état final du message. */
+export async function updateClosed(match: CodMatch): Promise<void> {
+  if (match.status === 'cancelled' && match.cancel_reason === 'ready_check_failed') return;
+  stopCountdown(match.id);
+  const refs = await storedMessages(match.id);
+  await Promise.all([...match.team_a, ...match.team_b].map((userId) => edit(refs[userId], closedBody(match))));
 }
 
 /** ④ Vérification échouée : chacun voit ce qui lui arrive (remis en file, groupe libéré, ou absent). */
