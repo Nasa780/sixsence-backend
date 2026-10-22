@@ -10,8 +10,8 @@ import { discord, discordEnabled } from './discord.js';
  *
  *   annonce     annonce libre, publiée depuis l'admin
  *   nouveautes  dernière mise à jour du site, publiée depuis l'admin
- *   horus       Coupe Horus : inscriptions ouvertes, vainqueur
- *   anubis      Coupe Anubis : inscriptions ouvertes, vainqueurs
+ *   horus       Coupe Horus : inscriptions ouvertes, vainqueur (rôle 🔔 Annonces)
+ *   anubis      Coupe Anubis : inscriptions ouvertes, vainqueurs (rôle 🔔 Annonces)
  *   gta         nouvel événement GTA 6
  *   saison      fin de saison dans 3 jours, saison terminée
  *
@@ -27,8 +27,9 @@ export type AnnounceType = (typeof ANNOUNCE_TYPES)[number];
 const NOTIFY: Record<AnnounceType, { role: string; color: number; label: string }> = {
   annonce: { role: '🔔 Annonces', color: 0xe7c05a, label: 'Annonces' },
   nouveautes: { role: '🔔 Nouveautés', color: 0xe7c05a, label: 'Nouveautés du site' },
-  horus: { role: '🔔 Coupe Horus', color: 0xe5484d, label: 'Coupe Horus' },
-  anubis: { role: '🔔 Coupe Anubis', color: 0xe5484d, label: 'Coupe Anubis' },
+  // Coupes : même rôle que les annonces générales (pas de rôle par coupe dans l'Intégration).
+  horus: { role: '🔔 Annonces', color: 0xe5484d, label: 'Coupe Horus' },
+  anubis: { role: '🔔 Annonces', color: 0xe5484d, label: 'Coupe Anubis' },
   gta: { role: '🔔 Événements GTA', color: 0xff9a5c, label: 'Événements GTA 6' },
   saison: { role: '🔔 Fin de saison', color: 0x34d399, label: 'Fin de saison' },
 };
@@ -51,7 +52,7 @@ async function onboardingRoles(create = false): Promise<Map<string, string>> {
   const existing = (await discord(`/guilds/${config.discord.guildId}/roles`)) as { id: string; name: string }[];
   const ids = new Map<string, string>();
   const wanted = [
-    ...Object.values(NOTIFY).map((item) => ({ name: item.role, color: item.color, mentionable: true })),
+    ...[...new Map(Object.values(NOTIFY).map((item) => [item.role, { name: item.role, color: item.color, mentionable: true }])).values()],
     ...ONBOARDING_ROLES.map((item) => ({ ...item, mentionable: false })),
   ];
   for (const role of wanted) {
@@ -144,7 +145,7 @@ export async function announceSettings() {
   let roles: { name: string; exists: boolean }[] = [];
   if (discordEnabled) {
     const ids = await onboardingRoles().catch(() => new Map<string, string>());
-    roles = [...Object.values(NOTIFY).map((item) => item.role), ...ONBOARDING_ROLES.map((item) => item.name)].map((name) => ({ name, exists: ids.has(name) }));
+    roles = [...new Set([...Object.values(NOTIFY).map((item) => item.role), ...ONBOARDING_ROLES.map((item) => item.name)])].map((name) => ({ name, exists: ids.has(name) }));
   }
   return {
     configured,

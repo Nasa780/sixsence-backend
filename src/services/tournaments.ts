@@ -971,8 +971,15 @@ async function giveWinnerRole(tournament: TournamentRow, roster: string[]): Prom
   }
 }
 
-async function announce(content: string, kind: Kind = 'saison'): Promise<void> {
-  const channel = (isCup(kind) && config.discord.divisionChannelId) || config.discord.codChannelId || config.discord.resultsChannelId;
+/**
+ * Message de tournoi (inscriptions, check-in, tirage, annulation, résultats) : salon des annonces s'il est configuré,
+ * sinon salon Division (coupes) ou COD. Sans mention. `illustrated` : une annonce illustrée (postAnnouncement) couvre
+ * déjà ce moment dans le salon des annonces, le message texte n'est alors pas publié (pas de doublon).
+ */
+async function announce(content: string, kind: Kind = 'saison', illustrated = false): Promise<void> {
+  const { announceChannelId, divisionChannelId, codChannelId, resultsChannelId } = config.discord;
+  if (illustrated && announceChannelId) return;
+  const channel = announceChannelId || (isCup(kind) && divisionChannelId) || codChannelId || resultsChannelId;
   if (!discordEnabled || !config.teams.discord || !channel) return;
   await discord(`/channels/${channel}/messages`, { method: 'POST', body: { content, flags: SUPPRESS_EMBEDS } }).catch((caught) =>
     console.warn('[tournoi] annonce impossible', (caught as Error).message),
@@ -1033,6 +1040,7 @@ async function completeCup(tournament: TournamentRow, winner: string | null, fin
   await announce(
     `🏆 **${tournament.name}** terminée !\n🥇 ${label(winner)} (+${CUP_BONUS.or} pts)\n🥈 ${label(finalist)} (+${CUP_BONUS.argent} pts)${third ? `\n🥉 ${label(third)} (+${CUP_BONUS.bronze} pts)` : ''}\n${config.siteUrl}${PAGE}`,
     tournament.kind,
+    true,
   );
   if (config.teams.discord)
     void postAnnouncement({
@@ -1082,6 +1090,7 @@ async function rewardAnubis(tournament: TournamentRow, winner: string | null, fi
   await announce(
     `𓂀 **${tournament.name}** terminée !\n🥇 ${label(winner)} : ${await list(winner)}\n🥈 ${label(finalist)} : ${await list(finalist)}${third ? `\n🥉 ${label(third)} : ${await list(third)}` : ''}\n${config.siteUrl}${PAGE}?coupe=anubis`,
     tournament.kind,
+    true,
   );
   if (config.teams.discord)
     void postAnnouncement({
@@ -1232,6 +1241,7 @@ async function openCup(input: {
       ? `𓂀 **${input.name}** : inscriptions ouvertes ! Inscris-toi seul, les équipes de ${input.teamSize} sont tirées au sort (${input.size} équipes max), ${format}\n${config.siteUrl}${PAGE}?coupe=anubis`
       : `🏆 **${input.name}** : inscriptions ouvertes ! ${input.size} équipes max, ${format}\n${config.siteUrl}${PAGE}`,
     input.kind,
+    true,
   );
   if (config.teams.discord)
     void postAnnouncement({
