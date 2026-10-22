@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { bus, type CodMatch } from '../events.js';
 import { supabase } from '../supabase.js';
+import { sendMatchFound, updateStarted } from './matchFoundDm.js';
 
 /**
  * Intégration Discord, par l'API REST (pas besoin de connexion permanente du bot) :
@@ -115,14 +116,10 @@ export async function notifyStaff(content: string): Promise<void> {
   }
 }
 
-/** Match trouvé : prévenir chaque joueur qu'il a une minute pour accepter. */
+/** Match trouvé : message privé premium mis à jour en direct (services/matchFoundDm.ts). */
 export async function onMatchFound(match: CodMatch): Promise<void> {
   if (!discordEnabled) return;
-  await dm(
-    [...match.team_a, ...match.team_b],
-    `**Match trouvé sur SixSence** — ${match.map} · ${match.mode} (${match.team_size}v${match.team_size})\n` +
-      `Tu as ${config.cod.readySeconds} secondes pour accepter : ${matchUrl(match)}`,
-  );
+  await sendMatchFound(match);
 }
 
 /** Match démarré : crée les deux salons vocaux et envoie le lien à chaque équipe. */
@@ -160,11 +157,14 @@ export async function onMatchStart(match: CodMatch): Promise<void> {
     created.push(teamB.id);
     await supabase.from('cod_matches').update({ discord_channels: { teamA: teamA.id, teamB: teamB.id } }).eq('id', match.id);
     const link = (channelId: string) => `https://discord.com/channels/${guildId}/${channelId}`;
-    await dm(match.team_a, `**Le match démarre** — rejoins le vocal de l'Équipe 1 : ${link(teamA.id)}\nSalon de match : ${matchUrl(match)}`);
-    await dm(match.team_b, `**Le match démarre** — rejoins le vocal de l'Équipe 2 : ${link(teamB.id)}\nSalon de match : ${matchUrl(match)}`);
+    // Le message « Match trouvé » passe à « C'est parti » avec le bouton du vocal ; message privé classique à défaut.
+    const missed = new Set(await updateStarted(match, { teamA: teamA.id, teamB: teamB.id }));
+    await dm(match.team_a.filter((id) => missed.has(id)), `**Le match démarre** — rejoins le vocal de l'Équipe 1 : ${link(teamA.id)}\nSalon de match : ${matchUrl(match)}`);
+    await dm(match.team_b.filter((id) => missed.has(id)), `**Le match démarre** — rejoins le vocal de l'Équipe 2 : ${link(teamB.id)}\nSalon de match : ${matchUrl(match)}`);
   } catch (error) {
     console.warn('[discord] création des salons vocaux impossible', (error as Error).message);
     for (const channelId of created) await discord(`/channels/${channelId}`, { method: 'DELETE' }).catch(() => {});
+    await updateStarted(match, { teamA: null, teamB: null }).catch(() => []);
     await supabase.from('cod_matches').update({ discord_channels: {} }).eq('id', match.id);
   }
 }

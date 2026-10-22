@@ -7,7 +7,8 @@ import { notifyStaff } from '../services/discord.js';
 import { noticeResultDisputed, noticeResultReported } from '../services/matchNotices.js';
 import { ARBITRATION_REASONS, REPORT_REASONS, myArbitrations, reportPlayer, requestArbitration, usernameOf, voteMvp } from '../services/moderation.js';
 import { supabase } from '../supabase.js';
-import { addProof, confirmMatch, correctMatch, getMatch, postMessage, readyMatch, reportMatch, resolveMatch } from '../services/matches.js';
+import { addProof, confirmMatch, correctMatch, getMatch, postMessage, reportMatch, resolveMatch } from '../services/matches.js';
+import { acceptReady, acceptWithToken } from '../services/readyAccept.js';
 import { equipCard, markCardsSeen, myCards } from '../services/cards.js';
 import { createParty, getPartyOf, joinParty, kickMember, leaveParty, previewInvite, setPartyFormat } from '../services/parties.js';
 import { getQueueState, getQueueSummaries, joinQueue, leaveQueue, stayInQueue } from '../services/queue.js';
@@ -36,6 +37,7 @@ import { reliability, smurfCheck } from '../services/reliability.js';
  *   POST /cod/party/kick            retirer un membre (chef) { userId }
  *   POST /cod/party/format          changer de format (chef) { format }
  *   POST /cod/matches/:id/ready     accepter le match trouvé (vérification « Prêt ? », 1 min)
+ *   POST /cod/matches/:id/ready-token  accepter depuis le bouton de la notification { token } (jeton signé, sans session)
  *   POST /cod/matches/:id/proofs    enregistrer une capture déjà envoyée { path }
  *   POST /cod/matches/:id/report    déclarer le vainqueur   { winner: "A" | "B" }
  *   POST /cod/matches/:id/confirm   confirmer ou contester  { accept: boolean }
@@ -191,9 +193,14 @@ export function codRouter(hub: QueueHub): Router {
     '/matches/:id/ready',
     requireAuth,
     asyncHandler(async (req, res) => {
-      const match = await readyMatch(uuidParam(req, 'id'), currentUser(res).id);
-      bus.emit(match.status === 'in_progress' && match.started_at && Date.now() - new Date(match.started_at).getTime() < 5000 ? 'match:start' : 'match:ready', match);
-      res.json({ match });
+      res.json({ match: await acceptReady(uuidParam(req, 'id'), currentUser(res).id) });
+    }),
+  );
+  router.post(
+    '/matches/:id/ready-token',
+    asyncHandler(async (req, res) => {
+      const match = await acceptWithToken(uuidParam(req, 'id'), (req.body as { token?: unknown } | undefined)?.token);
+      res.json({ ok: true, ready: (match.ready_users ?? []).length, total: match.team_a.length + match.team_b.length });
     }),
   );
 

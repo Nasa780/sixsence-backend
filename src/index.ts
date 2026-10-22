@@ -16,6 +16,11 @@ import { pushRouter } from './routes/push.js';
 import { teamsRouter } from './routes/teams.js';
 import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
+import { readyToken } from './services/readyAccept.js';
+import { updateAborted, updateReady } from './services/matchFoundDm.js';
+
+/** Adresse publique de l'API (Render la fournit), pour les boutons des notifications. */
+const PUBLIC_API_URL = (process.env.RENDER_EXTERNAL_URL || 'https://sixsence-backend.onrender.com').replace(/\/$/, '');
 import { commandsEnabled, handleInteraction, registerCommands, validSignature } from './services/discordCommands.js';
 import { pointsPreview, sweepMatches } from './services/matches.js';
 import { checkTeamQueueTimeouts, sweepTeamMatches, tryCreateTeamMatches } from './services/teamMatches.js';
@@ -140,16 +145,21 @@ bus.on('match:found', async (match) => {
     });
   }
   void onMatchFound(match);
-  // Notification sur téléphone / ordinateur, même site fermé (appli installée).
-  void pushToUsers([...match.team_a, ...match.team_b], {
-    title: '⚡ Match trouvé !',
-    body: `${match.format ?? ''} · ${match.map} — accepte dans la minute.`,
-    url: `/cod/match/${match.id}`,
-    tag: `match-${match.id}`,
-    urgent: true,
-  });
+  // Notification sur téléphone / ordinateur, même site fermé (appli installée), avec un bouton « Accepter »
+  // (jeton signé propre à chaque joueur : la notification n'a pas sa session).
+  for (const userId of [...match.team_a, ...match.team_b]) {
+    void pushToUsers([userId], {
+      title: '⚡ Match trouvé !',
+      body: `${match.format ?? ''} · ${match.map} — accepte dans la minute.`,
+      url: `/cod/match/${match.id}`,
+      tag: `match-${match.id}`,
+      urgent: true,
+      ready: { url: `${PUBLIC_API_URL}/cod/matches/${match.id}/ready-token`, token: readyToken(match.id, userId, match.ready_deadline) },
+    });
+  }
 });
 bus.on('match:ready', (match) => {
+  if (discordEnabled) void updateReady(match);
   hub.sendToUsers([...match.team_a, ...match.team_b], {
     type: 'match:ready',
     matchId: match.id,
@@ -166,6 +176,7 @@ bus.on('match:start', (match) => {
 bus.on('match:closed', () => sweepDiscord());
 
 bus.on('match:aborted', async (failure) => {
+  if (discordEnabled) void updateAborted(failure);
   // Ceux qui avaient accepté sont remis en tête de file ; les absents sont sanctionnés.
   for (const userId of failure.accepted) {
     hub.sendToUser(userId, { type: 'match:aborted', matchId: failure.match_id, reason: 'requeued' });

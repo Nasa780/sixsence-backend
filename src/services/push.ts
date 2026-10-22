@@ -106,6 +106,8 @@ export interface PushMessage {
   tag?: string;
   /** Reste affichée jusqu'à ce que le joueur la touche (match trouvé). */
   urgent?: boolean;
+  /** Match trouvé : bouton « Accepter » de la notification (adresse de l'API et jeton signé de ce joueur). */
+  ready?: { url: string; token: string };
 }
 
 /** Envoie une notification à tous les appareils des joueurs donnés (au mieux, sans erreur). */
