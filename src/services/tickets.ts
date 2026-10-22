@@ -19,7 +19,7 @@ import { logToDiscord } from './siteLog.js';
 
 export const TICKET_MOTIFS = {
   contestation: { label: 'Contestation', emoji: '⚖️', style: 4, color: 0xe5484d, hint: 'Un résultat, une sanction ou une décision à contester.' },
-  question: { label: 'Question', emoji: '❓', style: 1, color: 0xd4af37, hint: 'Une question sur le site, le classé, la Division ou les coupes.' },
+  question: { label: 'Question', emoji: '❓', style: 1, color: 0xd4af37, hint: 'Une question sur le site, le classé, la Division ou les trophées.' },
   signalement: { label: 'Signalement', emoji: '🚩', style: 2, color: 0xf59e0b, hint: 'Un joueur, une triche ou un comportement à signaler.' },
   bug: { label: 'Bug', emoji: '🐞', style: 2, color: 0x60a5fa, hint: 'Un problème sur le site ou avec le bot.' },
 } as const;
