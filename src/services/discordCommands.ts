@@ -6,6 +6,7 @@ import { discord, discordEnabled } from './discord.js';
 import { getQueueSummaries } from './queue.js';
 import { teamStatus } from './teamMatches.js';
 import { handleTicketInteraction, type TicketInteraction } from './tickets.js';
+import { acceptReady, userIdFromDiscord } from './readyAccept.js';
 
 /**
  * Commandes Discord du bot (« /profil », « /classement », « /equipe », « /trophees », « /file », « /match »,
@@ -109,6 +110,8 @@ type Reply = { content?: string; embeds?: unknown[]; components?: unknown[] };
  */
 export function handleInteraction(interaction: Interaction): { type: number; data?: unknown } {
   if (interaction.type === 1) return { type: 1 };
+  // Bouton « Je suis prêt » du message privé « Match trouvé ».
+  if (interaction.type === 3 && /^ready:[0-9a-f-]{36}$/.test((interaction.data as { custom_id?: string } | undefined)?.custom_id ?? '')) return readyButton(interaction);
   // Boutons et fenêtres des tickets (services/tickets.ts).
   if (interaction.type === 3 || interaction.type === 5) return handleTicketInteraction(interaction as unknown as TicketInteraction) ?? { type: 4, data: { flags: EPHEMERAL, content: 'Action inconnue.' } };
   if (interaction.type !== 2 || !interaction.data) return { type: 4, data: { flags: EPHEMERAL } };
@@ -131,6 +134,45 @@ export function handleInteraction(interaction: Interaction): { type: number; dat
     }).catch((caught) => console.warn('[discord] réponse impossible', (caught as Error).message));
   })();
   return { type: 5, data: { flags: ephemeral ? EPHEMERAL : 0 } };
+}
+
+/**
+ * « Je suis prêt » depuis Discord : accepte le match pour le joueur lié à ce compte Discord, puis remplace
+ * le bouton par l'état (prêt, trop tard, introuvable) dans le même message.
+ */
+function readyButton(interaction: Interaction): { type: number } {
+  const matchId = ((interaction.data as { custom_id?: string } | undefined)?.custom_id ?? '').slice('ready:'.length);
+  const discordId = interaction.member?.user?.id ?? interaction.user?.id ?? '';
+  void (async () => {
+    let line: string;
+    let link: string | null = `${SITE}/cod/match/${matchId}`;
+    try {
+      const userId = await userIdFromDiscord(discordId);
+      if (!userId) {
+        line = '❌ Ce compte Discord n’est lié à aucun joueur SixSence.';
+        link = SITE;
+      } else {
+        const match = await acceptReady(matchId, userId);
+        const ready = (match.ready_users ?? []).length;
+        const total = match.team_a.length + match.team_b.length;
+        line = match.status === 'in_progress' ? '🎮 **Tout le monde est prêt : c’est parti !** Rejoins le vocal de ton équipe.' : `✅ **Tu es prêt** · ${ready}/${total} joueurs prêts`;
+      }
+    } catch (caught) {
+      const code = (caught as { code?: string }).code ?? '';
+      line = /EXPIRED|CLOSED|NOT_READY|STATUS|cancel/i.test(`${code} ${(caught as Error).message}`) ? '⌛ Trop tard : le délai est passé ou le match n’attend plus de réponse.' : `❌ ${(caught as Error).message}`;
+    }
+    await fetch(`https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: line,
+        allowed_mentions: { parse: [] },
+        components: link ? [{ type: 1, components: [{ type: 2, style: 5, label: 'Feuille de match', url: link }] }] : [],
+      }),
+    }).catch((caught) => console.warn('[discord] réponse « prêt » impossible', (caught as Error).message));
+  })();
+  // Mise à jour différée du message du bouton.
+  return { type: 6 };
 }
 
 async function answer(name: string, option: (key: string) => string, discordId: string): Promise<Reply> {

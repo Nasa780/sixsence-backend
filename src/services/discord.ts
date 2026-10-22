@@ -115,14 +115,37 @@ export async function notifyStaff(content: string): Promise<void> {
   }
 }
 
-/** Match trouvé : prévenir chaque joueur qu'il a une minute pour accepter. */
+/**
+ * Match trouvé : message privé à chaque joueur, avec le bouton « Je suis prêt » (accepte sans ouvrir le site,
+ * services/discordCommands.ts) et le lien de la feuille de match. Fin du délai affichée en direct par Discord.
+ */
 export async function onMatchFound(match: CodMatch): Promise<void> {
   if (!discordEnabled) return;
-  await dm(
-    [...match.team_a, ...match.team_b],
-    `**Match trouvé sur SixSence** — ${match.map} · ${match.mode} (${match.team_size}v${match.team_size})\n` +
-      `Tu as ${config.cod.readySeconds} secondes pour accepter : ${matchUrl(match)}`,
-  );
+  const ids = await discordIds([...match.team_a, ...match.team_b]);
+  const until = Math.floor(new Date(match.ready_deadline ?? Date.now() + config.cod.readySeconds * 1000).getTime() / 1000);
+  for (const discordId of ids.values()) {
+    try {
+      const channel = (await discord('/users/@me/channels', { method: 'POST', body: { recipient_id: discordId } })) as { id: string };
+      await discord(`/channels/${channel.id}/messages`, {
+        method: 'POST',
+        body: {
+          content: `⚡ **Match trouvé sur SixSence** — ${match.map} · ${match.mode} (${match.team_size}v${match.team_size})\nAccepte avant la fin du délai : <t:${until}:R>`,
+          flags: SUPPRESS_EMBEDS,
+          components: [
+            {
+              type: 1,
+              components: [
+                { type: 2, style: 3, label: 'Je suis prêt', emoji: { name: '✅' }, custom_id: `ready:${match.id}` },
+                { type: 2, style: 5, label: 'Feuille de match', url: matchUrl(match) },
+              ],
+            },
+          ],
+        },
+      });
+    } catch (error) {
+      console.warn('[discord] message « match trouvé » impossible', (error as Error).message);
+    }
+  }
 }
 
 /** Match démarré : crée les deux salons vocaux et envoie le lien à chaque équipe. */
