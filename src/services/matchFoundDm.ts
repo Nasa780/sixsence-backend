@@ -6,7 +6,7 @@ import { discord, discordIds } from './discord.js';
 /**
  * Message privé Discord « Match trouvé » : un seul message par joueur et par match, mis à jour à chaque étape
  * (identifiants gardés dans cod_matches.discord_dm, migration 0045). Infos de base seulement : mode, format, map,
- * temps restant réécrit toutes les 5 s (texte et anneau de la bannière) ; jamais les joueurs, les équipes ni les points. Images : /api/og/match du site.
+ * temps restant réécrit toutes les 5 s dans le texte (bannière fixe : une image changée clignote) ; jamais les joueurs, les équipes ni les points. Images : /api/og/match du site.
  *
  *   ① match trouvé    vert, bannière, « Je suis prêt » + « Ouvrir le match »
  *   ② prêt            vert, barre des joueurs prêts, bouton grisé
@@ -35,7 +35,7 @@ const bar = (ready: number, of: number, go = false) => `${site}/api/og/match?bar
 
 function foundBody(match: CodMatch): Body {
   const left = secondsLeft(match);
-  const banner = new URLSearchParams({ map: match.map, format: match.format ?? `${match.team_size}v${match.team_size}`, mode: match.mode, left: String(left) });
+  const banner = new URLSearchParams({ map: match.map, format: match.format ?? `${match.team_size}v${match.team_size}`, mode: match.mode, left: 'none' });
   return {
     content: '',
     embeds: [
@@ -109,7 +109,8 @@ async function edit(ref: string | undefined, body: Body): Promise<boolean> {
 
 // --- Décompte -----------------------------------------------------------------------------------
 // Le compte à rebours relatif de Discord (<t:…:R>) se met mal à jour : le bot réécrit lui-même le temps restant
-// (texte et anneau de la bannière) toutes les 5 s, tant que le match attend les joueurs (une seule instance).
+// dans le texte toutes les 5 s, tant que le match attend les joueurs (une seule instance). La bannière garde la même
+// adresse (sans décompte) : une image qui change à chaque modification clignote dans Discord.
 
 const countdowns = new Map<string, ReturnType<typeof setInterval>>();
 
