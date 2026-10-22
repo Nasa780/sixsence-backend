@@ -9,7 +9,7 @@ import { membershipOf } from './teams.js';
 
 /**
  * Défis directs (scrims) de la Division : un Leader défie une autre équipe pour un BO3, maintenant ou à une
- * heure fixée, en amical (sans points ni bilan) ou classé (points normaux). Les Leaders adverses acceptent
+ * heure fixée, en amical (sans points ni bilan) ou officiel (points de Division). Les Leaders adverses acceptent
  * (en choisissant leurs joueurs) ou refusent ; le match suit la feuille de match habituelle. Un défi sans
  * réponse expire après 24 h (ou à l'heure prévue) ; un défi accepté pour plus tard démarre à l'heure.
  * Table team_challenges et fonction team_match_create_direct (migration 0042).
@@ -92,7 +92,7 @@ export async function createChallenge(userId: string, body: unknown) {
   await notify(
     await leadersOf(toTeam),
     `⚔️ [${from?.tag}] ${from?.name} vous défie`,
-    `BO3 ${friendly ? 'amical (sans points)' : 'classé (points normaux)'} · ${scheduledAt ? fmtDate(scheduledAt) : 'dès que vous acceptez'}${message ? ` · « ${message} »` : ''}. Réponds depuis Mon équipe.`,
+    `BO3 ${friendly ? 'amical (sans points)' : 'officiel (points de Division)'} · ${scheduledAt ? fmtDate(scheduledAt) : 'dès que vous acceptez'}${message ? ` · « ${message} »` : ''}. Réponds depuis Mon équipe.`,
   );
   return myChallenges(userId);
 }
