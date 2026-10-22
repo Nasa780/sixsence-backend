@@ -90,7 +90,7 @@ export async function computeStats(userId: string): Promise<CardStats & { callin
     currentSeason: { id: active, peak: Math.max(p.peak_points ?? 0, p.points ?? 0) },
     badges: p.badges ?? [],
     team: role === 'admin' || role === 'staff' || role === 'arbitre',
-    referee: role === 'arbitre',
+    referee: role === 'arbitre' || role === 'admin',
     gtaEvents,
     calling_card: p.calling_card ?? DEFAULT_CARD,
   };
