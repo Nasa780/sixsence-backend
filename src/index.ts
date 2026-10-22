@@ -17,6 +17,7 @@ import { teamsRouter } from './routes/teams.js';
 import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { readyToken } from './services/readyAccept.js';
+import { updateAborted, updateReady } from './services/matchFoundDm.js';
 
 /** Adresse publique de l'API (Render la fournit), pour les boutons des notifications. */
 const PUBLIC_API_URL = (process.env.RENDER_EXTERNAL_URL || 'https://sixsence-backend.onrender.com').replace(/\/$/, '');
@@ -158,6 +159,7 @@ bus.on('match:found', async (match) => {
   }
 });
 bus.on('match:ready', (match) => {
+  if (discordEnabled) void updateReady(match);
   hub.sendToUsers([...match.team_a, ...match.team_b], {
     type: 'match:ready',
     matchId: match.id,
@@ -174,6 +176,7 @@ bus.on('match:start', (match) => {
 bus.on('match:closed', () => sweepDiscord());
 
 bus.on('match:aborted', async (failure) => {
+  if (discordEnabled) void updateAborted(failure);
   // Ceux qui avaient accepté sont remis en tête de file ; les absents sont sanctionnés.
   for (const userId of failure.accepted) {
     hub.sendToUser(userId, { type: 'match:aborted', matchId: failure.match_id, reason: 'requeued' });

@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { bus, type CodMatch } from '../events.js';
 import { supabase } from '../supabase.js';
+import { sendMatchFound, updateStarted } from './matchFoundDm.js';
 
 /**
  * Intégration Discord, par l'API REST (pas besoin de connexion permanente du bot) :
@@ -115,37 +116,10 @@ export async function notifyStaff(content: string): Promise<void> {
   }
 }
 
-/**
- * Match trouvé : message privé à chaque joueur, avec le bouton « Je suis prêt » (accepte sans ouvrir le site,
- * services/discordCommands.ts) et le lien de la feuille de match. Fin du délai affichée en direct par Discord.
- */
+/** Match trouvé : message privé premium mis à jour en direct (services/matchFoundDm.ts). */
 export async function onMatchFound(match: CodMatch): Promise<void> {
   if (!discordEnabled) return;
-  const ids = await discordIds([...match.team_a, ...match.team_b]);
-  const until = Math.floor(new Date(match.ready_deadline ?? Date.now() + config.cod.readySeconds * 1000).getTime() / 1000);
-  for (const discordId of ids.values()) {
-    try {
-      const channel = (await discord('/users/@me/channels', { method: 'POST', body: { recipient_id: discordId } })) as { id: string };
-      await discord(`/channels/${channel.id}/messages`, {
-        method: 'POST',
-        body: {
-          content: `⚡ **Match trouvé sur SixSence** — ${match.map} · ${match.mode} (${match.team_size}v${match.team_size})\nAccepte avant la fin du délai : <t:${until}:R>`,
-          flags: SUPPRESS_EMBEDS,
-          components: [
-            {
-              type: 1,
-              components: [
-                { type: 2, style: 3, label: 'Je suis prêt', emoji: { name: '✅' }, custom_id: `ready:${match.id}` },
-                { type: 2, style: 5, label: 'Feuille de match', url: matchUrl(match) },
-              ],
-            },
-          ],
-        },
-      });
-    } catch (error) {
-      console.warn('[discord] message « match trouvé » impossible', (error as Error).message);
-    }
-  }
+  await sendMatchFound(match);
 }
 
 /** Match démarré : crée les deux salons vocaux et envoie le lien à chaque équipe. */
@@ -183,11 +157,14 @@ export async function onMatchStart(match: CodMatch): Promise<void> {
     created.push(teamB.id);
     await supabase.from('cod_matches').update({ discord_channels: { teamA: teamA.id, teamB: teamB.id } }).eq('id', match.id);
     const link = (channelId: string) => `https://discord.com/channels/${guildId}/${channelId}`;
-    await dm(match.team_a, `**Le match démarre** — rejoins le vocal de l'Équipe 1 : ${link(teamA.id)}\nSalon de match : ${matchUrl(match)}`);
-    await dm(match.team_b, `**Le match démarre** — rejoins le vocal de l'Équipe 2 : ${link(teamB.id)}\nSalon de match : ${matchUrl(match)}`);
+    // Le message « Match trouvé » passe à « C'est parti » avec le bouton du vocal ; message privé classique à défaut.
+    const missed = new Set(await updateStarted(match, { teamA: teamA.id, teamB: teamB.id }));
+    await dm(match.team_a.filter((id) => missed.has(id)), `**Le match démarre** — rejoins le vocal de l'Équipe 1 : ${link(teamA.id)}\nSalon de match : ${matchUrl(match)}`);
+    await dm(match.team_b.filter((id) => missed.has(id)), `**Le match démarre** — rejoins le vocal de l'Équipe 2 : ${link(teamB.id)}\nSalon de match : ${matchUrl(match)}`);
   } catch (error) {
     console.warn('[discord] création des salons vocaux impossible', (error as Error).message);
     for (const channelId of created) await discord(`/channels/${channelId}`, { method: 'DELETE' }).catch(() => {});
+    await updateStarted(match, { teamA: null, teamB: null }).catch(() => []);
     await supabase.from('cod_matches').update({ discord_channels: {} }).eq('id', match.id);
   }
 }

@@ -137,37 +137,31 @@ export function handleInteraction(interaction: Interaction): { type: number; dat
 }
 
 /**
- * « Je suis prêt » depuis Discord : accepte le match pour le joueur lié à ce compte Discord, puis remplace
- * le bouton par l'état (prêt, trop tard, introuvable) dans le même message.
+ * « Je suis prêt » depuis Discord : accepte le match pour le joueur lié à ce compte Discord. En cas de succès,
+ * le message est mis à jour par services/matchFoundDm.ts (barre des joueurs prêts, puis « C'est parti ») ;
+ * sinon il affiche la raison (compte non lié, trop tard…).
  */
 function readyButton(interaction: Interaction): { type: number } {
   const matchId = ((interaction.data as { custom_id?: string } | undefined)?.custom_id ?? '').slice('ready:'.length);
   const discordId = interaction.member?.user?.id ?? interaction.user?.id ?? '';
   void (async () => {
-    let line: string;
-    let link: string | null = `${SITE}/cod/match/${matchId}`;
+    let problem: string | null = null;
     try {
       const userId = await userIdFromDiscord(discordId);
-      if (!userId) {
-        line = '❌ Ce compte Discord n’est lié à aucun joueur SixSence.';
-        link = SITE;
-      } else {
-        const match = await acceptReady(matchId, userId);
-        const ready = (match.ready_users ?? []).length;
-        const total = match.team_a.length + match.team_b.length;
-        line = match.status === 'in_progress' ? '🎮 **Tout le monde est prêt : c’est parti !** Rejoins le vocal de ton équipe.' : `✅ **Tu es prêt** · ${ready}/${total} joueurs prêts`;
-      }
+      if (!userId) problem = 'Ce compte Discord n’est lié à aucun joueur SixSence.';
+      else await acceptReady(matchId, userId);
     } catch (caught) {
-      const code = (caught as { code?: string }).code ?? '';
-      line = /EXPIRED|CLOSED|NOT_READY|STATUS|cancel/i.test(`${code} ${(caught as Error).message}`) ? '⌛ Trop tard : le délai est passé ou le match n’attend plus de réponse.' : `❌ ${(caught as Error).message}`;
+      problem = (caught as Error).message || 'Impossible d’accepter ce match.';
     }
+    if (!problem) return;
     await fetch(`https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        content: line,
+        content: '',
         allowed_mentions: { parse: [] },
-        components: link ? [{ type: 1, components: [{ type: 2, style: 5, label: 'Feuille de match', url: link }] }] : [],
+        embeds: [{ color: 0x6b7280, title: '⌛ MATCH NON ACCEPTÉ', description: problem }],
+        components: [{ type: 1, components: [{ type: 2, style: 5, label: 'Ouvrir le match', url: `${SITE}/cod/match/${matchId}` }] }],
       }),
     }).catch((caught) => console.warn('[discord] réponse « prêt » impossible', (caught as Error).message));
   })();
