@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
+import { postAnnouncement } from './announcements.js';
 import { SUPPRESS_EMBEDS, discord, discordEnabled, discordIds, notifyStaff } from './discord.js';
 import { pushToUsers } from './push.js';
 import { openMatchVoice } from './teamMatches.js';
@@ -982,6 +983,14 @@ async function completeCup(tournament: TournamentRow, winner: string | null, fin
     `🏆 **${tournament.name}** terminée !\n🥇 ${label(winner)} (+${CUP_BONUS.or} pts)\n🥈 ${label(finalist)} (+${CUP_BONUS.argent} pts)${third ? `\n🥉 ${label(third)} (+${CUP_BONUS.bronze} pts)` : ''}\n${config.siteUrl}${PAGE}`,
     tournament.kind,
   );
+  if (config.teams.discord)
+    void postAnnouncement({
+      type: 'horus',
+      title: `${tournament.name} : victoire de ${label(winner)}`,
+      subtitle: 'Résultats',
+      text: `🥇 **${label(winner)}** (+${CUP_BONUS.or} pts)\n🥈 ${label(finalist)} (+${CUP_BONUS.argent} pts)${third ? `\n🥉 ${label(third)} (+${CUP_BONUS.bronze} pts)` : ''}\n\nFélicitations aux vainqueurs ! Le tableau final et les trophées sont en ligne.`,
+      url: PAGE,
+    });
   const winnerEntry = participants.find((p) => p.team_id === winner);
   if (winnerEntry) await passCupRole('horus', winnerEntry.match_roster ?? winnerEntry.frozen_roster);
 }
@@ -1023,6 +1032,14 @@ async function rewardAnubis(tournament: TournamentRow, winner: string | null, fi
     `𓂀 **${tournament.name}** terminée !\n🥇 ${label(winner)} : ${await list(winner)}\n🥈 ${label(finalist)} : ${await list(finalist)}${third ? `\n🥉 ${label(third)} : ${await list(third)}` : ''}\n${config.siteUrl}${PAGE}?coupe=anubis`,
     tournament.kind,
   );
+  if (config.teams.discord)
+    void postAnnouncement({
+      type: 'anubis',
+      title: `${tournament.name} : victoire de ${label(winner)}`,
+      subtitle: 'Résultats',
+      text: `🥇 **${label(winner)}** : ${await list(winner)}\n🥈 ${label(finalist)} : ${await list(finalist)}${third ? `\n🥉 ${label(third)} : ${await list(third)}` : ''}\n\nLes médailles sont sur les profils des joueurs.`,
+      url: `${PAGE}?coupe=anubis`,
+    });
   await passCupRole('anubis', rosterOf(winner));
 }
 
@@ -1165,6 +1182,17 @@ async function openCup(input: {
       : `🏆 **${input.name}** : inscriptions ouvertes ! ${input.size} équipes max, ${format}\n${config.siteUrl}${PAGE}`,
     input.kind,
   );
+  if (config.teams.discord)
+    void postAnnouncement({
+      type: input.kind,
+      title: `${input.name} : inscriptions ouvertes`,
+      subtitle: date,
+      text:
+        input.kind === 'anubis'
+          ? `Inscris-toi **seul** : les équipes de ${input.teamSize} sont tirées au sort au début de la coupe (${input.size} équipes au plus).\n\n📅 **${date}**\n⚔️ ${format}\n🥇 Médailles or, argent et bronze sur ton profil.`
+          : `Inscris ton équipe : ${input.size} places.\n\n📅 **${date}**\n⚔️ ${format}\n🏆 Trophées or, argent et bronze et points de Division.`,
+      url: input.kind === 'anubis' ? `${PAGE}?coupe=anubis` : PAGE,
+    });
   return tournament;
 }
 

@@ -23,6 +23,7 @@ import { sweepTournaments } from './services/tournaments.js';
 import { sweepChallenges } from './services/challenges.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, syncTeamAndBadgeRoles, welcomeNewPlayers } from './services/community.js';
+import { remindSeasonEnd } from './services/announcements.js';
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
 import { calendarEvents, calendarIcs } from './services/calendar.js';
@@ -363,6 +364,7 @@ const cardsTimer = live ? setInterval(() => void syncAllCards().catch(() => {}),
 const weeklyTimer = live
   ? setInterval(() => {
       void postWeeklyTop();
+      void remindSeasonEnd();
       void remindStaff();
       void postDailyReport().catch((error) => console.warn('[journal]', (error as Error).message));
     }, 15 * 60_000)

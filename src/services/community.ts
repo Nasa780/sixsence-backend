@@ -7,6 +7,7 @@ import { pushToUsers } from './push.js';
 import { logToDiscord } from './siteLog.js';
 import { queueLevel, shouldAnnounce } from './announcePolicy.js';
 import type { QueueSummary } from './queue.js';
+import { postAnnouncement } from './announcements.js';
 
 /**
  * Vie du serveur Discord (tout est facultatif et « au mieux » : une erreur Discord est
@@ -306,6 +307,13 @@ export function announceMonthlyMvp(username: string, month: string): Promise<voi
 }
 
 export function announceSeasonClosed(archived: number, nextName: string): Promise<void> {
+  void postAnnouncement({
+    type: 'saison',
+    title: `${nextName} commence !`,
+    subtitle: 'Nouvelle saison',
+    text: `La saison précédente est terminée : ${archived} joueurs classés, le classement final est archivé et les récompenses sont distribuées. Les points repartent de zéro, ton XP et tes cartes restent. À toi de jouer !`,
+    url: '/cod/leaderboard',
+  });
   return announce(
     codChannelId,
     `🏆 **Fin de saison** : ${archived} joueurs classés, le classement final est archivé. **${nextName}** commence maintenant, les points repartent de zéro ! ${site}/cod/leaderboard`,
@@ -332,6 +340,16 @@ export async function announceNewEvent(event: EventInfo): Promise<void> {
       'GTA',
     ),
     pushToGtaPlayers(event),
+    postAnnouncement({
+      type: 'gta',
+      title: event.title,
+      subtitle: eventDate(event.starts_at),
+      text: `📅 **${eventDate(event.starts_at)}**${event.location ? `
+📍 ${event.location}` : ''}
+
+Nouvel événement GTA 6 de la communauté : les inscriptions sont ouvertes sur le site.`,
+      url: `/gta6/events/${event.id}`,
+    }),
   ]);
 }
 
