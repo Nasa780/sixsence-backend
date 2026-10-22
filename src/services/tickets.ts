@@ -6,7 +6,7 @@ import { logToDiscord } from './siteLog.js';
 
 /**
  * Tickets Discord : un panneau (salon DISCORD_TICKETS_CHANNEL_ID, publié depuis l'admin) avec un bouton
- * par motif ; le membre décrit sa demande dans une fenêtre, le bot crée un salon privé « ticket-0042-pseudo »
+ * par motif (« Autre » : motif écrit par le membre) ; le membre décrit sa demande dans une fenêtre, le bot crée un salon privé « ticket-0042-pseudo »
  * (catégorie DISCORD_TICKETS_CATEGORY_ID facultative) visible du membre, de « Staff 6 » et, pour une
  * contestation, d'« Arbitre 6 ». Un ticket ouvert par membre (table privée discord_tickets, migration 0043).
  *
@@ -22,6 +22,7 @@ export const TICKET_MOTIFS = {
   question: { label: 'Question', emoji: '❓', style: 1, color: 0xd4af37, hint: 'Une question sur le site, le classé, la Division ou les trophées.' },
   signalement: { label: 'Signalement', emoji: '🚩', style: 2, color: 0xf59e0b, hint: 'Un joueur, une triche ou un comportement à signaler.' },
   bug: { label: 'Bug', emoji: '🐞', style: 2, color: 0x60a5fa, hint: 'Un problème sur le site ou avec le bot.' },
+  autre: { label: 'Autre', emoji: '✏️', style: 2, color: 0x94a3b8, hint: 'Autre chose : écris ton motif.' },
 } as const;
 export type TicketMotif = keyof typeof TICKET_MOTIFS;
 const isMotif = (value: string): value is TicketMotif => value in TICKET_MOTIFS;
@@ -146,6 +147,7 @@ export function handleTicketInteraction(interaction: TicketInteraction): { type:
       ...(motif === 'contestation'
         ? [{ type: 4, custom_id: 'match', label: 'Match concerné (lien ou numéro, facultatif)', style: 1, required: false, max_length: 200 }]
         : []),
+      ...(motif === 'autre' ? [{ type: 4, custom_id: 'reason', label: 'Motif', style: 1, required: true, min_length: 3, max_length: 60, placeholder: 'Ex. : partenariat, recrutement staff…' }] : []),
       { type: 4, custom_id: 'subject', label: 'Explique ta demande', style: 2, required: true, min_length: 10, max_length: 1000, placeholder: spec.hint },
     ];
     return {
@@ -184,6 +186,8 @@ async function openTicket(interaction: TicketInteraction, motif: TicketMotif): P
   const name = user.global_name || user.username || 'membre';
   const subject = fieldValue(interaction, 'subject').slice(0, 1000);
   const match = fieldValue(interaction, 'match').slice(0, 200);
+  // « Autre » : motif écrit par le membre (titre du ticket).
+  const reason = motif === 'autre' ? fieldValue(interaction, 'reason').replace(/\s+/g, ' ').slice(0, 60) : '';
 
   // Un ticket ouvert à la fois (salon disparu entre-temps : le ticket est considéré comme fermé).
   const { data: existing } = await supabase.from('discord_tickets').select('id, channel_id').eq('discord_id', user.id).eq('status', 'open').maybeSingle();
@@ -198,12 +202,13 @@ async function openTicket(interaction: TicketInteraction, motif: TicketMotif): P
   const site = linked as { id: string; username: string } | null;
   const { data: inserted, error } = await supabase
     .from('discord_tickets')
-    .insert({ discord_id: user.id, user_id: site?.id ?? null, username: name, motif, subject: match ? `${subject}\n\nMatch : ${match}` : subject })
+    .insert({ discord_id: user.id, user_id: site?.id ?? null, username: name, motif, subject: [reason ? `Motif : ${reason}` : '', subject, match ? `Match : ${match}` : ''].filter(Boolean).join('\n\n') })
     .select('*')
     .single();
   if (error || !inserted) return error?.code === '23505' ? 'Tu as déjà un ticket ouvert.' : 'Impossible d’ouvrir le ticket pour le moment.';
   const ticket = inserted as TicketRow;
   const spec = TICKET_MOTIFS[motif];
+  const label = reason || spec.label;
 
   try {
     const roles = await teamRoles();
@@ -220,7 +225,7 @@ async function openTicket(interaction: TicketInteraction, motif: TicketMotif): P
         name: `ticket-${String(ticket.id).padStart(4, '0')}-${slug(name)}`,
         type: 0,
         parent_id: config.discord.ticketsCategoryId || undefined,
-        topic: `${spec.emoji} ${spec.label} · ticket ${number(ticket.id)} de ${name}`,
+        topic: `${spec.emoji} ${label} · ticket ${number(ticket.id)} de ${name}`,
         permission_overwrites: overwrites,
       },
     })) as { id: string };
@@ -234,7 +239,7 @@ async function openTicket(interaction: TicketInteraction, motif: TicketMotif): P
         allowed_mentions: { users: [user.id], roles: pings },
         embeds: [
           {
-            title: `${spec.emoji} Ticket ${number(ticket.id)} · ${spec.label}`,
+            title: `${spec.emoji} Ticket ${number(ticket.id)} · ${label}`,
             description: subject,
             color: spec.color,
             fields: [
@@ -248,7 +253,7 @@ async function openTicket(interaction: TicketInteraction, motif: TicketMotif): P
         components: [{ type: 1, components: [{ type: 2, style: 2, label: 'Fermer le ticket', emoji: { name: '🔒' }, custom_id: 'ticket:close' }] }],
       },
     });
-    logToDiscord(`🎫 **Ticket ${number(ticket.id)}** (${spec.label}) ouvert par **${name}** : <#${channel.id}>`);
+    logToDiscord(`🎫 **Ticket ${number(ticket.id)}** (${label}) ouvert par **${name}** : <#${channel.id}>`);
     return `✅ Ton ticket ${number(ticket.id)} est ouvert : <#${channel.id}>. L’équipe te répond là-bas.`;
   } catch (caught) {
     await supabase.from('discord_tickets').update({ status: 'closed', closed_at: new Date().toISOString(), closed_by: 'échec de création' }).eq('id', ticket.id);
