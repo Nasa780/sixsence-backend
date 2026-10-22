@@ -6,7 +6,7 @@ import { discord, discordIds } from './discord.js';
 /**
  * Message privé Discord « Match trouvé » : un seul message par joueur et par match, mis à jour à chaque étape
  * (identifiants gardés dans cod_matches.discord_dm, migration 0045). Infos de base seulement : mode, format, map,
- * fin du délai ; jamais les joueurs, les équipes ni les points. Images : /api/og/match du site.
+ * heure exacte de fin du délai (<t:…:T>, le compte à rebours relatif de Discord se met mal à jour) ; jamais les joueurs, les équipes ni les points. Images : /api/og/match du site.
  *
  *   ① match trouvé    vert, bannière, « Je suis prêt » + « Ouvrir le match »
  *   ② prêt            vert, barre des joueurs prêts, bouton grisé
@@ -37,7 +37,7 @@ function foundBody(match: CodMatch): Body {
       {
         color: GREEN,
         title: '⚡ MATCH TROUVÉ',
-        description: `**Classé ${match.format ?? `${match.team_size}v${match.team_size}`}** · ${match.mode}\n⏳ Accepte avant la fin : <t:${deadlineOf(match)}:R>`,
+        description: `**Classé ${match.format ?? `${match.team_size}v${match.team_size}`}** · ${match.mode}\n⏳ Accepte avant **<t:${deadlineOf(match)}:T>**`,
         image: { url: `${site}/api/og/match?${banner.toString()}` },
       },
     ],
@@ -49,7 +49,7 @@ function readyBody(match: CodMatch): Body {
   const ready = (match.ready_users ?? []).length;
   return {
     content: '',
-    embeds: [{ color: GREEN, title: '✅ TU ES PRÊT', description: `En attente des autres joueurs · fin <t:${deadlineOf(match)}:R>`, image: { url: bar(ready, total(match)) } }],
+    embeds: [{ color: GREEN, title: '✅ TU ES PRÊT', description: `En attente des autres joueurs · fin à **<t:${deadlineOf(match)}:T>**`, image: { url: bar(ready, total(match)) } }],
     components: [{ type: 1, components: [{ type: 2, style: 3, label: 'Prêt', emoji: { name: '✔️' }, custom_id: `ready:${match.id}`, disabled: true }, openButton(match.id)] }],
   };
 }
