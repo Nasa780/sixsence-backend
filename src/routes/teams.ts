@@ -24,6 +24,8 @@ import {
   teamStatus,
 } from '../services/teamMatches.js';
 import { TEAM_REPORT_REASONS } from '../services/teamPolicy.js';
+import { answerChallenge, cancelChallenge, createChallenge, myChallenges } from '../services/challenges.js';
+import { leagueState } from '../services/leagues.js';
 import { checkIn, currentTournament, getTournament, registerTeam, setSquadRoster, unregisterTeam } from '../services/tournaments.js';
 import {
   answerInvite,
@@ -111,6 +113,12 @@ export function teamsRouter(): Router {
 
   router.get('/', asyncHandler(async (_req, res) => void res.json({ teams: await listTeams() })));
   router.get('/status', asyncHandler(async (_req, res) => void res.json(await teamStatus())));
+  router.get('/leagues', asyncHandler(async (_req, res) => void res.json(await leagueState())));
+  // Défis directs (scrims) : lancer, répondre, annuler ; défis de mon équipe.
+  router.get('/me/challenges', requireAuth, asyncHandler(async (_req, res) => void res.json(await myChallenges(currentUser(res).id))));
+  router.post('/challenges', requireAuth, asyncHandler(async (req, res) => void res.status(201).json(await createChallenge(currentUser(res).id, req.body))));
+  router.post('/challenges/:challengeId/answer', requireAuth, asyncHandler(async (req, res) => void res.json(await answerChallenge(currentUser(res).id, uuidParam(req, 'challengeId'), req.body))));
+  router.delete('/challenges/:challengeId', requireAuth, asyncHandler(async (req, res) => void res.json(await cancelChallenge(currentUser(res).id, uuidParam(req, 'challengeId')))));
   router.get('/report-reasons', (_req, res) => void res.json(TEAM_REPORT_REASONS));
   router.get('/me', requireAuth, asyncHandler(async (_req, res) => void res.json(await myTeamState(currentUser(res).id))));
   router.post('/me/leave', requireAuth, asyncHandler(async (_req, res) => void res.json(await leaveTeam(currentUser(res).id))));

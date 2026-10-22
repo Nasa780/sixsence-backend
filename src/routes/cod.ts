@@ -14,6 +14,7 @@ import { getQueueState, getQueueSummaries, joinQueue, leaveQueue, stayInQueue } 
 import { getSiteStats } from '../services/stats.js';
 import type { QueueHub } from '../ws/hub.js';
 import { onlineVisitors } from '../services/presence.js';
+import { reliability, smurfCheck } from '../services/reliability.js';
 
 /**
  * Endpoints du classé COD.
@@ -44,6 +45,10 @@ import { onlineVisitors } from '../services/presence.js';
  */
 export function codRouter(hub: QueueHub): Router {
   const router = Router();
+
+  // Score de fiabilité (public) et contrôle anti-smurf (niveau du compte lu sur une capture).
+  router.get('/players/:id/reliability', asyncHandler(async (req, res) => void res.json(await reliability(uuidParam(req, 'id')))));
+  router.post('/smurf-check', requireAuth, asyncHandler(async (req, res) => void res.json(await smurfCheck(currentUser(res).id, req.body))));
 
   // --- Public ----------------------------------------------------------------
 
