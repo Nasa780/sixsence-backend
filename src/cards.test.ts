@@ -16,14 +16,15 @@ const base: CardStats = {
   currentSeason: { id: 1, peak: 0 },
   badges: [],
   team: false,
+  referee: false,
   gtaEvents: 0,
 };
 const stats = (patch: Partial<CardStats>): CardStats => ({ ...base, ...patch });
 
 describe('cartes de visite', () => {
-  it('catalogue : 26 cartes permanentes (case MVP du mois comprise) + 3 par saison = 29', () => {
-    assert.equal(STATIC_CARDS.length, 26);
-    assert.equal(STATIC_CARDS.length + seasonCards(1).length, 29);
+  it('catalogue : 27 cartes permanentes (case MVP du mois comprise) + 3 par saison = 30', () => {
+    assert.equal(STATIC_CARDS.length, 27);
+    assert.equal(STATIC_CARDS.length + seasonCards(1).length, 30);
     assert.ok(STATIC_CARDS.some((card) => card.key === MVP_MONTH_CARD));
     assert.equal(new Set(STATIC_CARDS.map((card) => card.key)).size, STATIC_CARDS.length);
   });
