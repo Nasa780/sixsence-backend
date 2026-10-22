@@ -28,6 +28,7 @@ import {
 } from '../services/tournaments.js';
 import { adminDisbandTeam, adminTeamReports, adminTeams, closeTeamReport, moderateTeam } from '../services/teams.js';
 import { supabase } from '../supabase.js';
+import { activateLeagues, prepareLeagueMoves } from '../services/leagues.js';
 
 /**
  * Administration. Droits selon le rôle (voir guard ci-dessous) :
@@ -72,7 +73,8 @@ import { supabase } from '../supabase.js';
  *   POST   /admin/players/:id/sanctions    { type, reason, minutes?, points?, reportId? } sanctionner
  *   POST   /admin/sanctions/:id/lift       { reason? } lever une sanction
  *   POST   /admin/players/:id/unban        lever une exclusion de la file
- *   POST   /admin/season/close             { nextName } clôturer la saison
+ *   POST   /admin/season/close             { nextName } clôturer la saison (ligues : montées et descentes)
+ *   POST   /admin/leagues/activate         première répartition des équipes en ligues (16 équipes au moins)
  *   POST   /admin/season/end-date          { endsAt | null } date de fin prévue de la saison active
  *   POST   /admin/discord/rules            publier ou mettre à jour le règlement du serveur (bot, DISCORD_RULES_CHANNEL_ID)
  *   POST   /admin/discord/sync-roles       remettre à jour les rôles Discord (rangs, équipe, badges, MVP du mois, rôles des équipes)
@@ -275,12 +277,16 @@ export function adminRouter(): Router {
     forgetSeasons();
     res.json({ season });
   }));
+  router.post('/leagues/activate', asyncHandler(async (_req, res) => void res.json(await activateLeagues())));
   router.post('/season/close', asyncHandler(async (req, res) => {
     const nextName = (req.body as { nextName?: unknown } | undefined)?.nextName;
     const closing = unwrap(await supabase.from('seasons').select('id').eq('is_active', true).maybeSingle()) as { id: number } | null;
+    // Ligues : montées et descentes calculées sur le classement avant sa remise à zéro.
+    const applyLeagues = await prepareLeagueMoves();
     const archived = unwrap(await supabase.rpc('cod_close_season', { p_next_name: typeof nextName === 'string' ? nextName : '' })) as number;
     // Équipes : classement final archivé, points remis à 1 000.
     if (closing) unwrap(await supabase.rpc('team_close_season', { p_season: closing.id }));
+    if (closing) await applyLeagues(closing.id).catch((caught: Error) => console.error('[ligues] fin de saison impossible', caught.message));
     void announceSeasonClosed(archived, String(nextName).trim());
     // Points remis à zéro : les rangs Discord suivent ; cartes de la saison attribuées.
     void syncAllRankRoles();

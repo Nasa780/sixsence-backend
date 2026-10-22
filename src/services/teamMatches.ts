@@ -43,6 +43,7 @@ export interface TeamMatch {
   completed_at: string | null;
   /** Match de tournoi (pas de points en jeu), tour du tableau, format (3, ou 5 en finale). */
   tournament_id: string | null;
+  friendly: boolean;
   round: number | null;
   best_of: number;
   /** Correction après validation (0029). */
@@ -176,31 +177,19 @@ export async function forfeitBlockedUntil(teamId: string): Promise<string | null
   return until.getTime() > Date.now() ? until.toISOString() : null;
 }
 
-/** Le Leader inscrit son équipe avec les joueurs du match qu'il choisit (TEAM_MATCH_PLAYERS joueurs de l'équipe). */
-export async function joinTeamQueue(userId: string, body: unknown) {
-  const member = await membershipOf(userId);
-  if (!member) throw new HttpError(409, 'NOT_IN_TEAM', 'Tu ne fais partie d’aucune équipe.');
-  if (!(member.role === 'leader' || member.isOwner)) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader peut lancer une recherche.');
-  const teamId = member.team_id;
+/**
+ * Joueurs d'un match d'équipe (file ou défi) : TEAM_MATCH_PLAYERS joueurs différents de l'équipe, sans
+ * exclusion, avec identifiant Activision, hors file et match classés. Renvoie la liste validée.
+ */
+export async function checkMatchRoster(teamId: string, input: unknown): Promise<string[]> {
   const size = config.teams.rosterSize;
-  const blocked = await forfeitBlockedUntil(teamId);
-  if (blocked) {
-    const at = new Date(blocked).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', hour: '2-digit', minute: '2-digit' });
-    throw new HttpError(403, 'TEAM_FORFEIT_BLOCKED', `Trop de forfaits ces ${config.teams.forfeitDays} derniers jours : recherche bloquée jusqu’à ${at}.`);
-  }
-
-  const roster = (body as { roster?: unknown } | undefined)?.roster;
+  const roster = input;
   if (!Array.isArray(roster) || roster.length !== size || new Set(roster).size !== size || !roster.every((id) => typeof id === 'string')) {
     throw new HttpError(400, 'INVALID_ROSTER', `Choisis ${size} joueur${size > 1 ? 's' : ''} différent${size > 1 ? 's' : ''} pour le match.`);
   }
   const members = (unwrap(await supabase.from('team_members').select('user_id').eq('team_id', teamId)) ?? []) as { user_id: string }[];
   const ids = new Set(members.map((row) => row.user_id));
   if (!roster.every((id) => ids.has(id))) throw new HttpError(400, 'INVALID_ROSTER', 'Les joueurs du match doivent faire partie de l’équipe.');
-
-  const state = await teamPlayState(userId);
-  if (state.activeMatchId) throw new HttpError(409, 'ALREADY_IN_MATCH', 'Ton équipe a déjà un match en cours.');
-  const { teamBusyInTournament } = await import('./tournaments.js');
-  if (await teamBusyInTournament(teamId)) throw new HttpError(409, 'TEAM_IN_TOURNAMENT', 'Ton équipe est inscrite au tournoi en cours : pas de match ordinaire d’ici la fin de son parcours.');
 
   // Chaque joueur du match : pas d'exclusion, pas de match classé en cours, pas en file classée.
   const [profiles, users, rankedQueue] = await Promise.all([
@@ -219,6 +208,29 @@ export async function joinTeamQueue(userId: string, body: unknown) {
     const active = unwrap(await supabase.rpc('cod_active_match_id', { p_user: id }));
     if (active) throw new HttpError(409, 'MEMBER_IN_MATCH', `${name.get(id) ?? 'Un joueur du match'} a un match classé en cours.`);
   }
+
+  return roster as string[];
+}
+
+/** Le Leader inscrit son équipe avec les joueurs du match qu'il choisit (TEAM_MATCH_PLAYERS joueurs de l'équipe). */
+export async function joinTeamQueue(userId: string, body: unknown) {
+  const member = await membershipOf(userId);
+  if (!member) throw new HttpError(409, 'NOT_IN_TEAM', 'Tu ne fais partie d’aucune équipe.');
+  if (!(member.role === 'leader' || member.isOwner)) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader peut lancer une recherche.');
+  const teamId = member.team_id;
+  const size = config.teams.rosterSize;
+  const blocked = await forfeitBlockedUntil(teamId);
+  if (blocked) {
+    const at = new Date(blocked).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', hour: '2-digit', minute: '2-digit' });
+    throw new HttpError(403, 'TEAM_FORFEIT_BLOCKED', `Trop de forfaits ces ${config.teams.forfeitDays} derniers jours : recherche bloquée jusqu’à ${at}.`);
+  }
+
+  const roster = await checkMatchRoster(teamId, (body as { roster?: unknown } | undefined)?.roster);
+
+  const state = await teamPlayState(userId);
+  if (state.activeMatchId) throw new HttpError(409, 'ALREADY_IN_MATCH', 'Ton équipe a déjà un match en cours.');
+  const { teamBusyInTournament } = await import('./tournaments.js');
+  if (await teamBusyInTournament(teamId)) throw new HttpError(409, 'TEAM_IN_TOURNAMENT', 'Ton équipe est inscrite au tournoi en cours : pas de match ordinaire d’ici la fin de son parcours.');
 
   const now = new Date().toISOString();
   unwrap(await supabase.from('team_queue').upsert({ team_id: teamId, roster, queued_by: userId, joined_at: now, confirmed_at: now, warned_at: null }));
@@ -292,7 +304,7 @@ export async function tryCreateTeamMatches(): Promise<void> {
   }
 }
 
-async function onTeamMatchCreated(match: TeamMatch): Promise<void> {
+export async function onTeamMatchCreated(match: TeamMatch): Promise<void> {
   const teams = await teamsById([match.team_a, match.team_b]);
   const a = teams.get(match.team_a)!;
   const b = teams.get(match.team_b)!;
@@ -391,7 +403,7 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
       canPickMap3: Boolean(side) && match.status === 'in_progress' && state.phase === 'decider' && match.maps.length === match.best_of - 1 && match.map3_picker === mySide,
       canResolve: referee && OPEN.includes(match.status),
       canProve: isPlayer && proofWindowOpen(match),
-      canCorrect: referee && match.status === 'completed' && !match.tournament_id && withinWindow(match.completed_at, correctionWindowHours(await roleOf(viewerId))),
+      canCorrect: referee && match.status === 'completed' && !match.tournament_id && !match.friendly && withinWindow(match.completed_at, correctionWindowHours(await roleOf(viewerId))),
     };
     // Captures : visibles des joueurs du match et des arbitres seulement (liens signés d'une heure).
     if (isPlayer || referee) proofs = await proofsOf(match.id, players);
@@ -431,6 +443,7 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
         : [],
     bestOf: match.best_of,
     tournament: match.tournament_id ? await tournamentLabel(match.tournament_id, match.round, match.id) : null,
+    friendly: match.friendly ?? false,
     confirmMinutes: config.cod.confirmMinutes,
     proofs,
     messages,
@@ -850,6 +863,7 @@ async function tournamentLabel(tournamentId: string, round: number | null, match
 export async function correctTeamMatch(staffId: string, matchId: string, body: unknown) {
   if (!(await isReferee(staffId))) throw new HttpError(403, 'FORBIDDEN', 'Réservé à l’équipe SixSence.');
   const match = await matchRow(matchId);
+  if (match.friendly) throw new HttpError(409, 'FRIENDLY_MATCH', 'Un match amical ne se corrige pas : il ne compte pas au classement.');
   const input = (body ?? {}) as { scores?: unknown; reason?: unknown };
   const reason = typeof input.reason === 'string' ? input.reason : '';
   let winner: Side | null = null;
@@ -882,12 +896,12 @@ export async function teamMatchHistory(teamId: string) {
   const rows = (unwrap(
     await supabase
       .from('team_matches')
-      .select('id, team_a, team_b, status, scores, winner, points_changes, created_at, completed_at, forfeit, tournament_id')
+      .select('id, team_a, team_b, status, scores, winner, points_changes, created_at, completed_at, forfeit, tournament_id, friendly')
       .or(`team_a.eq.${teamId},team_b.eq.${teamId}`)
       .in('status', ['completed', ...OPEN])
       .order('created_at', { ascending: false })
       .limit(10),
-  ) ?? []) as Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'status' | 'scores' | 'winner' | 'points_changes' | 'created_at' | 'completed_at' | 'forfeit' | 'tournament_id'>[];
+  ) ?? []) as Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'status' | 'scores' | 'winner' | 'points_changes' | 'created_at' | 'completed_at' | 'forfeit' | 'tournament_id' | 'friendly'>[];
   const teams = await teamsById([...new Set(rows.flatMap((row) => [row.team_a, row.team_b]))]);
   return rows.map((row) => {
     const side: Side = row.team_a === teamId ? 'A' : 'B';
@@ -903,6 +917,7 @@ export async function teamMatchHistory(teamId: string) {
       points: row.points_changes?.[side] ?? null,
       forfeit: row.forfeit,
       tournament: Boolean(row.tournament_id),
+      friendly: Boolean(row.friendly),
       date: row.completed_at ?? row.created_at,
     };
   });
@@ -913,12 +928,12 @@ export async function playerTeamMatches(userId: string) {
   const rows = (unwrap(
     await supabase
       .from('team_matches')
-      .select('id, team_a, team_b, roster_a, roster_b, status, scores, winner, points_changes, created_at, completed_at, forfeit, tournament_id')
+      .select('id, team_a, team_b, roster_a, roster_b, status, scores, winner, points_changes, created_at, completed_at, forfeit, tournament_id, friendly')
       .or(`roster_a.cs.{${userId}},roster_b.cs.{${userId}}`)
       .in('status', ['completed', ...OPEN])
       .order('created_at', { ascending: false })
       .limit(30),
-  ) ?? []) as (Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'roster_a' | 'roster_b' | 'status' | 'scores' | 'winner' | 'points_changes' | 'created_at' | 'completed_at' | 'forfeit' | 'tournament_id'>)[];
+  ) ?? []) as (Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'roster_a' | 'roster_b' | 'status' | 'scores' | 'winner' | 'points_changes' | 'created_at' | 'completed_at' | 'forfeit' | 'tournament_id' | 'friendly'>)[];
   const teams = await teamsById([...new Set(rows.flatMap((row) => [row.team_a, row.team_b]))]);
   const card = (id: string) => {
     const team = teams.get(id);
@@ -938,6 +953,7 @@ export async function playerTeamMatches(userId: string) {
       won,
       forfeit: row.forfeit,
       tournament: Boolean(row.tournament_id),
+      friendly: Boolean(row.friendly),
       teamPoints: row.points_changes?.[side] ?? null,
       xp: won === null ? null : won ? 500 : 150,
       date: row.completed_at ?? row.created_at,

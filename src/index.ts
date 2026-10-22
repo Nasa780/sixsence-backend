@@ -20,6 +20,7 @@ import { commandsEnabled, handleInteraction, registerCommands, validSignature } 
 import { pointsPreview, sweepMatches } from './services/matches.js';
 import { checkTeamQueueTimeouts, sweepTeamMatches, tryCreateTeamMatches } from './services/teamMatches.js';
 import { sweepTournaments } from './services/tournaments.js';
+import { sweepChallenges } from './services/challenges.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, syncTeamAndBadgeRoles, welcomeNewPlayers } from './services/community.js';
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
@@ -315,6 +316,7 @@ const teamTimer = setInterval(() => {
   if (!config.teams.enabled) return; // Division en pause (TEAM_MODE)
   void tryCreateTeamMatches();
   void sweepTeamMatches();
+  void sweepChallenges();
   void sweepTournaments();
 }, 60_000);
 // Division : durée maximale de recherche (« Toujours là ? »), contrôlée toutes les 20 secondes.
