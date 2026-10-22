@@ -178,6 +178,9 @@ export const config = {
     logsChannelId: process.env.DISCORD_LOGS_CHANNEL_ID?.trim() || '',
     /** Salon des annonces illustrées (coupes, événements GTA, fin de saison, nouveautés ; facultatif). */
     announceChannelId: process.env.DISCORD_ANNOUNCE_CHANNEL_ID?.trim() || '',
+    /** Salon du panneau des tickets (publié depuis l'admin) et catégorie des salons de tickets (facultatifs). */
+    ticketsChannelId: process.env.DISCORD_TICKETS_CHANNEL_ID?.trim() || '',
+    ticketsCategoryId: process.env.DISCORD_TICKETS_CATEGORY_ID?.trim() || '',
     /** Salon du règlement du serveur (publié par le bot depuis l'admin). */
     rulesChannelId: process.env.DISCORD_RULES_CHANNEL_ID?.trim() || '1561121381578444890',
   },
