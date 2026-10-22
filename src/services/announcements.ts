@@ -66,6 +66,12 @@ async function onboardingRoles(create = false): Promise<Map<string, string>> {
   return ids;
 }
 
+/** Identifiant du rôle 🔔 d'un type (pour un rappel dans un autre salon), s'il existe. */
+export async function notifyRoleId(type: AnnounceType): Promise<string | undefined> {
+  if (!discordEnabled) return undefined;
+  return (await onboardingRoles().catch(() => new Map<string, string>())).get(NOTIFY[type].role);
+}
+
 async function disabledTypes(): Promise<AnnounceType[]> {
   const { data } = await supabase.from('app_state').select('value').eq('key', STATE_KEY).maybeSingle();
   try {

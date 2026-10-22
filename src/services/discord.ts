@@ -31,7 +31,7 @@ export async function discord(path: string, init: { method?: string; body?: unkn
   const res = await fetch(`${API}${path}`, {
     method: init.method ?? 'GET',
     headers: { Authorization: `Bot ${botToken}`, 'Content-Type': 'application/json' },
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    body: init.body === undefined ? undefined : JSON.stringify(withoutStrayMentions(path, init.body)),
   });
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
@@ -45,6 +45,35 @@ export async function discord(path: string, init: { method?: string; body?: unkn
     throw new Error(`Discord ${init.method ?? 'GET'} ${path} : ${res.status} ${message}`);
   }
   return data;
+}
+
+/**
+ * Règle des mentions : un message du bot ne notifie personne sauf s'il le demande explicitement
+ * (allowed_mentions). Seules les annonces illustrées (rôles 🔔 choisis par les membres, services/announcements.ts)
+ * et l'ouverture d'un ticket (membre et équipe) mentionnent quelqu'un ; tout autre message, même s'il contient
+ * « @everyone » ou un pseudo, ne fait sonner aucun téléphone.
+ */
+function withoutStrayMentions(path: string, body: unknown): unknown {
+  if (!/^\/channels\/\d+\/messages(\/\d+)?$/.test(path) || !body || typeof body !== 'object' || 'allowed_mentions' in body) return body;
+  return { ...(body as Record<string, unknown>), allowed_mentions: { parse: [] } };
+}
+
+/** Droits d'un joueur dans le vocal de son match : voir, se connecter, parler, vidéo, détection de la voix. */
+const VOICE_MEMBER = ((1n << 10n) | (1n << 20n) | (1n << 21n) | (1n << 9n) | (1n << 25n)).toString();
+
+/**
+ * Droits d'un salon vocal de match : ceux de la catégorie (repris tels quels), plus un accès nominatif pour
+ * chaque joueur du match. Un joueur entre donc dans son vocal même sans rôle (« Player COD » n'arrive qu'après
+ * son premier match classé, un nouveau venu n'a encore aucun rôle).
+ */
+export async function matchVoiceOverwrites(userIds: string[]): Promise<{ id: string; type: number; allow: string; deny: string }[]> {
+  const players = [...(await discordIds(userIds)).values()];
+  let inherited: { id: string; type: number; allow: string; deny: string }[] = [];
+  if (matchCategoryId) {
+    const category = (await discord(`/channels/${matchCategoryId}`).catch(() => null)) as { permission_overwrites?: typeof inherited } | null;
+    inherited = category?.permission_overwrites ?? [];
+  }
+  return [...inherited.filter((overwrite) => !players.includes(overwrite.id)), ...players.map((id) => ({ id, type: 1, allow: VOICE_MEMBER, deny: '0' }))];
 }
 
 /** Identifiants Discord des joueurs (colonne users.discord_id, remplie à la connexion). */
@@ -110,7 +139,7 @@ export async function onMatchStart(match: CodMatch): Promise<void> {
   if (!claimed || claimed.length === 0) return;
 
   const shortId = match.id.slice(0, 4).toUpperCase();
-  const create = (team: string) =>
+  const create = async (team: string, players: string[]) =>
     discord(`/guilds/${guildId}/channels`, {
       method: 'POST',
       body: {
@@ -118,15 +147,16 @@ export async function onMatchStart(match: CodMatch): Promise<void> {
         type: 2, // salon vocal
         user_limit: match.team_size + 1,
         ...(matchCategoryId ? { parent_id: matchCategoryId } : {}),
+        permission_overwrites: await matchVoiceOverwrites(players),
       },
     }) as Promise<{ id: string }>;
 
   // L'un après l'autre (moins de risque de limite de débit) ; en cas d'échec, aucun salon orphelin.
   const created: string[] = [];
   try {
-    const teamA = await create('Équipe 1');
+    const teamA = await create('Équipe 1', match.team_a);
     created.push(teamA.id);
-    const teamB = await create('Équipe 2');
+    const teamB = await create('Équipe 2', match.team_b);
     created.push(teamB.id);
     await supabase.from('cod_matches').update({ discord_channels: { teamA: teamA.id, teamB: teamB.id } }).eq('id', match.id);
     const link = (channelId: string) => `https://discord.com/channels/${guildId}/${channelId}`;

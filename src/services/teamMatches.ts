@@ -2,7 +2,7 @@ import { isReferee, roleOf } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
-import { discord, discordEnabled, dm, notifyStaff } from './discord.js';
+import { discord, discordEnabled, dm, matchVoiceOverwrites, notifyStaff } from './discord.js';
 import { correctionWindowHours, withinWindow } from './correctionPolicy.js';
 import { pushToUsers } from './push.js';
 import { deciderPicker, declarationError, isCompleteSeries, pickMaps, seriesState, type MapScore, type Side } from './teamMatchPolicy.js';
@@ -336,7 +336,14 @@ export async function openMatchVoice(match: Pick<TeamMatch, 'id' | 'team_a' | 't
     for (const [key, team] of [['teamA', a], ['teamB', b]] as const) {
       const channel = (await discord(`/guilds/${guildId}/channels`, {
         method: 'POST',
-        body: { name: `[${a.tag}] vs [${b.tag}] · ${team.tag}`, type: 2, user_limit: audience[key].length + 1, ...(matchCategoryId ? { parent_id: matchCategoryId } : {}) },
+        body: {
+          name: `[${a.tag}] vs [${b.tag}] · ${team.tag}`,
+          type: 2,
+          user_limit: audience[key].length + 1,
+          ...(matchCategoryId ? { parent_id: matchCategoryId } : {}),
+          // Accès nominatif des joueurs (et remplaçants) : pas besoin d'un rôle pour entrer.
+          permission_overwrites: await matchVoiceOverwrites(audience[key]),
+        },
       })) as { id: string };
       created[key] = channel.id;
     }
