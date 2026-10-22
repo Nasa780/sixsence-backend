@@ -7,7 +7,7 @@ import { pushToUsers } from './push.js';
 import { logToDiscord } from './siteLog.js';
 import { queueLevel, shouldAnnounce } from './announcePolicy.js';
 import type { QueueSummary } from './queue.js';
-import { postAnnouncement } from './announcements.js';
+import { notifyRoleId, postAnnouncement, type AnnounceType } from './announcements.js';
 
 /**
  * Vie du serveur Discord (tout est facultatif et « au mieux » : une erreur Discord est
@@ -21,11 +21,11 @@ import { postAnnouncement } from './announcements.js';
  *     - « Staff 6 » / « Arbitre 6 » selon le rôle sur le site (message privé de bienvenue) ;
  *     - badges : « Fondateur 6 », « Bêta-testeur », « Partenaire », et « MVP du mois » (dernier MVP).
  *     Ces rôles ne sont ajoutés ou retirés que lors d'un changement fait sur le site.
- *   Annonces
- *     - salon COD : file qui se remplit (avec mention @Player COD), promotions (dès Platine),
+ *   Annonces (mentions : rôles 🔔 seulement, voir announce)
+ *     - salon COD : file qui se remplit (sans mention), promotions (dès Platine),
  *       top de la semaine (lundi 10 h), MVP du mois, fin de saison ;
  *     - message privé de bienvenue aux nouveaux inscrits ;
- *     - salon GTA : nouvel événement, événement annulé, rappel 1 h avant (avec mention @Player GTA) ;
+ *     - salon GTA : nouvel événement, événement annulé (sans mention), rappel 1 h avant (mention 🔔 Événements GTA) ;
  *     - message privé aux inscrits 1 h avant un événement GTA.
  */
 
@@ -264,10 +264,14 @@ export async function onMonthlyMvp(userId: string, month: string): Promise<void>
 
 // --- Annonces ---------------------------------------------------------------------------
 
-async function announce(channelId: string, content: string, mentionRole?: 'COD' | 'GTA'): Promise<void> {
+/**
+ * Message dans un salon du serveur. Mention éventuelle : un rôle 🔔 (choisi par les membres dans l'Intégration),
+ * jamais un rôle de jeu ou de rang ; un même événement ne mentionne qu'une fois par étape (annonce, puis rappel).
+ */
+async function announce(channelId: string, content: string, mention?: AnnounceType): Promise<void> {
   if (!discordEnabled || !channelId) return;
   try {
-    const roleId = mentionRole ? (await managedRoles()).get(mentionRole) : undefined;
+    const roleId = mention ? await notifyRoleId(mention) : undefined;
     await discord(`/channels/${channelId}/messages`, {
       method: 'POST',
       body: {
@@ -336,8 +340,8 @@ export async function announceNewEvent(event: EventInfo): Promise<void> {
   await Promise.all([
     announce(
       gtaChannelId,
+      // Sans mention : l'annonce illustrée (salon des annonces) prévient déjà le rôle 🔔 Événements GTA.
       `🌴 **Nouvel événement GTA 6 : ${event.title}**\n📅 ${eventDate(event.starts_at)}${event.location ? ` · 📍 ${event.location}` : ''}\nInscriptions : ${site}/gta6/events/${event.id}`,
-      'GTA',
     ),
     pushToGtaPlayers(event),
     postAnnouncement({
@@ -416,7 +420,7 @@ export async function sendEventReminders(): Promise<void> {
       userIds,
       `⏰ **${event.title}** commence dans ${minutes} min (${eventDate(event.starts_at)})${event.location ? ` · 📍 ${event.location}` : ''}.\nTu es inscrit : ${site}/gta6/events/${event.id}`,
     );
-    await announce(gtaChannelId, `⏰ **${event.title}** commence dans ${minutes} min ! ${userIds.length} inscrit(s). ${site}/gta6/events/${event.id}`, 'GTA');
+    await announce(gtaChannelId, `⏰ **${event.title}** commence dans ${minutes} min ! ${userIds.length} inscrit(s). ${site}/gta6/events/${event.id}`, 'gta');
   }
 }
 
