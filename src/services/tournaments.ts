@@ -2,7 +2,7 @@ import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { postAnnouncement } from './announcements.js';
-import { SUPPRESS_EMBEDS, discord, discordEnabled, discordIds, notifyStaff } from './discord.js';
+import { SUPPRESS_EMBEDS, discord, discordEnabled, discordIds, dm, notifyStaff } from './discord.js';
 import { pushToUsers } from './push.js';
 import { openMatchVoice } from './teamMatches.js';
 import { pickMaps } from './teamMatchPolicy.js';
@@ -10,7 +10,11 @@ import { membershipOf } from './teams.js';
 import {
   ANUBIS_TEAMS,
   ANUBIS_TEAM_SIZES,
+  BUSY_MINUTES,
   CHECKIN_MINUTES,
+  CHECKIN_REMINDERS,
+  CHECKIN_TEXT,
+  REVEAL_MINUTES,
   CUP_BONUS,
   CUP_MIN_TEAMS,
   CUP_SIZES,
@@ -166,7 +170,7 @@ function parseCreate(body: unknown): { name: string; startsAt: Date; size: numbe
   if (!(TOURNAMENT_SIZES as readonly number[]).includes(size)) throw new HttpError(400, 'INVALID_TOURNAMENT', 'Nombre de places : 8, 16 ou 32.');
   const startsAt = new Date(typeof input.startsAt === 'string' ? input.startsAt : '');
   if (Number.isNaN(startsAt.getTime())) throw new HttpError(400, 'INVALID_TOURNAMENT', 'Date de début invalide.');
-  if (startsAt.getTime() < Date.now() + CHECKIN_MINUTES * 60_000) throw new HttpError(400, 'INVALID_TOURNAMENT', `Le tournoi doit commencer dans plus de ${CHECKIN_MINUTES} min (check-in).`);
+  if (startsAt.getTime() < Date.now() + (REVEAL_MINUTES + 5) * 60_000) throw new HttpError(400, 'INVALID_TOURNAMENT', `Le tournoi doit commencer dans plus de ${REVEAL_MINUTES + 5} min.`);
   return { name, startsAt, size };
 }
 
@@ -217,11 +221,11 @@ export async function createTournament(adminId: string, body: unknown) {
   const date = startsAt.toLocaleString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   await pushToUsers(members.map((member) => member.user_id), {
     title: `🏆 Ton équipe est qualifiée : ${name}`,
-    body: `Début ${date}. Check-in d’un Leader ${CHECKIN_MINUTES} min avant.`,
+    body: `Début ${date}. Check-in d’un Leader de 2 h à 15 min avant.`,
     url: PAGE,
     tag: `tournoi-${tournament.id}`,
   });
-  await announce(`🏆 **${name}** — ${qualified.length} équipes qualifiées, début ${date} (check-in ${CHECKIN_MINUTES} min avant).\n${config.siteUrl}${PAGE}`);
+  await announce(`🏆 **${name}** — ${qualified.length} équipes qualifiées, début ${date} (${CHECKIN_TEXT}).\n${config.siteUrl}${PAGE}`);
   return getTournament(tournament.id, null);
 }
 
@@ -384,6 +388,7 @@ export async function getTournament(id: string, viewerId: string | null) {
     status: tournament.status,
     startsAt: tournament.starts_at,
     checkInOpensAt: new Date(new Date(tournament.starts_at).getTime() - CHECKIN_MINUTES * 60_000).toISOString(),
+    checkInClosesAt: new Date(revealTime(tournament)).toISOString(),
     completedAt: tournament.completed_at,
     winner: card(tournament.winner_team),
     finalist: card(tournament.finalist_team),
@@ -505,9 +510,11 @@ async function namesOf(ids: string[]) {
   return rows.map((row) => ({ id: row.id, username: row.username, avatarUrl: row.avatar_url }));
 }
 
+/** Fin du check-in et tirage dévoilé (15 min avant le début). */
+const revealTime = (tournament: Pick<TournamentRow, 'starts_at'>) => new Date(tournament.starts_at).getTime() - REVEAL_MINUTES * 60_000;
 const checkInOpen = (tournament: TournamentRow) => {
   const start = new Date(tournament.starts_at).getTime();
-  return Date.now() >= start - CHECKIN_MINUTES * 60_000 && Date.now() < start;
+  return Date.now() >= start - CHECKIN_MINUTES * 60_000 && Date.now() < revealTime(tournament);
 };
 
 // --- Check-in -----------------------------------------------------------------------------
@@ -517,7 +524,7 @@ export async function checkIn(userId: string, id: string, body: unknown) {
   const tournament = await tournamentRow(id);
   if (tournament.kind === 'anubis') return checkInPlayer(userId, id);
   if (tournament.status !== 'scheduled') throw new HttpError(409, 'TOURNAMENT_CLOSED', 'Le check-in est fermé.');
-  if (!checkInOpen(tournament)) throw new HttpError(409, 'CHECKIN_CLOSED', `Le check-in ouvre ${CHECKIN_MINUTES} min avant le début du tournoi.`);
+  if (!checkInOpen(tournament)) throw new HttpError(409, 'CHECKIN_CLOSED', 'Le check-in est ouvert de 2 h à 15 min avant le début du tournoi.');
   const member = await membershipOf(userId);
   if (!member || !(member.role === 'leader' || member.isOwner)) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader peut faire le check-in.');
   const participant = (await participantsOf(id)).find((p) => p.team_id === member.team_id);
@@ -549,7 +556,7 @@ export async function registerTeam(userId: string, id: string) {
   const tournament = await tournamentRow(id);
   if (tournament.kind === 'anubis') return registerPlayer(userId, tournament);
   if (tournament.kind !== 'horus') throw new HttpError(409, 'NOT_A_CUP', 'Ce tournoi se joue sur qualification.');
-  if (tournament.status !== 'scheduled' || Date.now() >= new Date(tournament.starts_at).getTime()) throw new HttpError(409, 'REGISTRATION_CLOSED', 'Les inscriptions sont fermées.');
+  if (tournament.status !== 'scheduled' || Date.now() >= revealTime(tournament)) throw new HttpError(409, 'REGISTRATION_CLOSED', 'Les inscriptions sont fermées.');
   const member = await membershipOf(userId);
   if (!member || !(member.role === 'leader' || member.isOwner)) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader peut inscrire l’équipe.');
   const participants = await participantsOf(id);
@@ -569,12 +576,12 @@ export async function registerTeam(userId: string, id: string) {
 export async function unregisterTeam(userId: string, id: string) {
   const tournament = await tournamentRow(id);
   if (tournament.kind === 'anubis') {
-    if (tournament.status !== 'scheduled' || Date.now() >= new Date(tournament.starts_at).getTime()) throw new HttpError(409, 'REGISTRATION_CLOSED', 'La coupe a commencé.');
+    if (tournament.status !== 'scheduled' || Date.now() >= revealTime(tournament)) throw new HttpError(409, 'REGISTRATION_CLOSED', 'La coupe a commencé.');
     unwrap(await supabase.from('cup_players').delete().eq('tournament_id', id).eq('user_id', userId));
     return getTournament(id, userId);
   }
   if (tournament.kind !== 'horus') throw new HttpError(409, 'NOT_A_CUP', 'Ce tournoi se joue sur qualification.');
-  if (tournament.status !== 'scheduled' || Date.now() >= new Date(tournament.starts_at).getTime()) throw new HttpError(409, 'REGISTRATION_CLOSED', 'La coupe a commencé.');
+  if (tournament.status !== 'scheduled' || Date.now() >= revealTime(tournament)) throw new HttpError(409, 'REGISTRATION_CLOSED', 'La coupe a commencé.');
   const member = await membershipOf(userId);
   if (!member || !(member.role === 'leader' || member.isOwner)) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader peut désinscrire l’équipe.');
   unwrap(await supabase.from('tournament_teams').delete().eq('tournament_id', id).eq('team_id', member.team_id));
@@ -584,7 +591,7 @@ export async function unregisterTeam(userId: string, id: string) {
 // --- Coupe Anubis : inscription individuelle ------------------------------------------------------
 
 async function registerPlayer(userId: string, tournament: TournamentRow) {
-  if (tournament.status !== 'scheduled' || Date.now() >= new Date(tournament.starts_at).getTime()) throw new HttpError(409, 'REGISTRATION_CLOSED', 'Les inscriptions sont fermées.');
+  if (tournament.status !== 'scheduled' || Date.now() >= revealTime(tournament)) throw new HttpError(409, 'REGISTRATION_CLOSED', 'Les inscriptions sont fermées.');
   const profile = unwrap(await supabase.from('cod_profiles').select('activision_id, banned_until').eq('user_id', userId).maybeSingle()) as {
     activision_id: string | null;
     banned_until: string | null;
@@ -606,7 +613,7 @@ async function registerPlayer(userId: string, tournament: TournamentRow) {
 async function checkInPlayer(userId: string, id: string) {
   const tournament = await tournamentRow(id);
   if (tournament.status !== 'scheduled') throw new HttpError(409, 'TOURNAMENT_CLOSED', 'Le check-in est fermé.');
-  if (!checkInOpen(tournament)) throw new HttpError(409, 'CHECKIN_CLOSED', `Le check-in ouvre ${CHECKIN_MINUTES} min avant le début de la coupe.`);
+  if (!checkInOpen(tournament)) throw new HttpError(409, 'CHECKIN_CLOSED', 'Le check-in est ouvert de 2 h à 15 min avant le début de la coupe.');
   const row = unwrap(
     await supabase.from('cup_players').update({ checked_in_at: new Date().toISOString() }).eq('tournament_id', id).eq('user_id', userId).is('checked_in_at', null).select('user_id').maybeSingle(),
   );
@@ -638,9 +645,9 @@ export async function teamBusyInTournament(teamId: string): Promise<boolean> {
   for (const row of rows) {
     if (row.forfeit) continue;
     const tournament = unwrap(await supabase.from('tournaments').select('status, starts_at').eq('id', row.tournament_id).single()) as { status: string; starts_at: string };
-    // Dès l'ouverture du check-in, l'équipe se réserve pour le tournoi.
+    // 1 h avant le début, l'équipe se réserve pour le tournoi (un match ordinaire n'empiéterait pas dessus).
     if (tournament.status === 'scheduled') {
-      if (Date.now() >= new Date(tournament.starts_at).getTime() - CHECKIN_MINUTES * 60_000) return true;
+      if (Date.now() >= new Date(tournament.starts_at).getTime() - BUSY_MINUTES * 60_000) return true;
       continue;
     }
     if (tournament.status !== 'running') continue;
@@ -653,10 +660,11 @@ export async function teamBusyInTournament(teamId: string): Promise<boolean> {
 
 // --- Déroulé ---------------------------------------------------------------------------------
 
-/** Tâche toutes les minutes : départ des tournois à l'heure, puis avancement des tableaux. */
+/** Tâche toutes les minutes : rappels du check-in, tirage 15 min avant le début, puis avancement des tableaux. */
 export async function sweepTournaments(): Promise<void> {
   try {
-    const due = (unwrap(await supabase.from('tournaments').select('*').eq('status', 'scheduled').lte('starts_at', new Date().toISOString())) ?? []) as TournamentRow[];
+    await checkInReminders();
+    const due = (unwrap(await supabase.from('tournaments').select('*').eq('status', 'scheduled').lte('starts_at', new Date(Date.now() + REVEAL_MINUTES * 60_000).toISOString())) ?? []) as TournamentRow[];
     for (const tournament of due) await startTournament(tournament);
     const running = (unwrap(await supabase.from('tournaments').select('id').eq('status', 'running')) ?? []) as { id: string }[];
     for (const row of running) await advanceTournament(row.id);
@@ -666,7 +674,47 @@ export async function sweepTournaments(): Promise<void> {
   }
 }
 
-/** Début : équipes sans check-in déclarées forfait (retirées du 1er tour), puis 1ers matchs. */
+const hourOf = (tournament: Pick<TournamentRow, 'starts_at'>) =>
+  new Date(tournament.starts_at).toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' });
+
+/**
+ * Rappels du check-in (push et message privé) : à l'ouverture (2 h avant) à tous les inscrits, avec une annonce
+ * Discord ; puis 1 h et 30 min avant, seulement à ceux qui ne l'ont pas fait. Une fois par étape (app_claim).
+ */
+async function checkInReminders(): Promise<void> {
+  const now = Date.now();
+  const soon = (unwrap(
+    await supabase.from('tournaments').select('*').eq('status', 'scheduled').gt('starts_at', new Date(now + REVEAL_MINUTES * 60_000).toISOString()).lte('starts_at', new Date(now + CHECKIN_MINUTES * 60_000).toISOString()),
+  ) ?? []) as TournamentRow[];
+  for (const tournament of soon) {
+    const left = (new Date(tournament.starts_at).getTime() - now) / 60_000;
+    const stage = CHECKIN_REMINDERS.filter((minutes) => left <= minutes).at(-1);
+    const step = stage === undefined ? 'open' : String(stage);
+    const { data: claimed } = await supabase.rpc('app_claim', { p_key: `checkin_${tournament.id}`, p_value: step });
+    if (!claimed) continue;
+    const closes = new Date(revealTime(tournament)).toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' });
+    const url = tournament.kind === 'anubis' ? `${PAGE}?coupe=anubis` : tournament.kind === 'saison' ? `${PAGE}?coupe=saison` : PAGE;
+    // Joueurs à prévenir : Anubis, chaque inscrit ; équipes, tout l'effectif (le check-in est fait par un Leader).
+    let targets: string[];
+    if (tournament.kind === 'anubis') {
+      const players = (unwrap(await supabase.from('cup_players').select('user_id, checked_in_at').eq('tournament_id', tournament.id)) ?? []) as { user_id: string; checked_in_at: string | null }[];
+      targets = players.filter((p) => step === 'open' || !p.checked_in_at).map((p) => p.user_id);
+    } else {
+      const teams = (await participantsOf(tournament.id)).filter((p) => step === 'open' || !p.checked_in_at);
+      targets = [...new Set((await Promise.all(teams.map((p) => (tournament.kind === 'horus' ? teamMemberIds(p.team_id) : Promise.resolve(p.frozen_roster))))).flat())];
+    }
+    if (targets.length === 0) continue;
+    const first = step === 'open';
+    const text = first
+      ? `Le check-in de ${tournament.name} est ouvert jusqu’à ${closes}. ${tournament.kind === 'anubis' ? 'Confirme ta présence' : 'Un Leader confirme l’équipe et choisit les joueurs'} : sans check-in, pas de place.`
+      : `Dernier rappel : le check-in de ${tournament.name} ferme à ${closes}. ${tournament.kind === 'anubis' ? 'Confirme ta présence' : 'Un Leader doit valider l’équipe'} pour jouer.`;
+    await pushToUsers(targets, { title: first ? '✅ Check-in ouvert' : '⏰ Check-in : plus que quelques minutes', body: text, url, tag: `checkin-${tournament.id}`, urgent: !first });
+    if (discordEnabled && config.teams.discord) await dm(targets, `${first ? '✅' : '⏰'} ${text}\n${config.siteUrl}${url}`);
+    if (first) await announce(`✅ **${tournament.name}** : check-in ouvert jusqu’à ${closes}, tirage à ${closes} et premiers matchs à ${hourOf(tournament)}.\n${config.siteUrl}${url}`, tournament.kind);
+  }
+}
+
+/** Tirage (15 min avant) : équipes sans check-in déclarées forfait (retirées du 1er tour) ; 1ers matchs à l'heure du début. */
 async function startTournament(tournament: TournamentRow): Promise<void> {
   if (tournament.kind === 'horus') return startCup(tournament);
   if (tournament.kind === 'anubis') return startAnubis(tournament);
@@ -685,7 +733,7 @@ async function startTournament(tournament: TournamentRow): Promise<void> {
       if (Object.keys(patch).length) unwrap(await supabase.from('tournament_bracket').update(patch).eq('id', entry.id));
     }
   }
-  await announce(`🏆 **${tournament.name}** commence !${absent.length ? ` ${absent.length} équipe(s) forfait (pas de check-in).` : ''}\n${config.siteUrl}${PAGE}`);
+  await announce(`🏆 **${tournament.name}** : check-in terminé${absent.length ? `, ${absent.length} équipe(s) forfait` : ''}. Premiers matchs à ${hourOf(tournament)} !\n${config.siteUrl}${PAGE}`);
   await advanceTournament(tournament.id);
 }
 
@@ -722,7 +770,7 @@ async function startCup(tournament: TournamentRow): Promise<void> {
     unwrap(await supabase.from('tournament_teams').update({ seed: index + 1 }).eq('tournament_id', tournament.id).eq('team_id', teamId));
   }
   await drawBracket(tournament, drawn, size);
-  await announce(`🏆 **${tournament.name}** commence : ${present.length} équipes, tableau tiré au sort !\n${config.siteUrl}${PAGE}`, tournament.kind);
+  await announce(`🏆 **${tournament.name}** : ${present.length} équipes, tableau tiré au sort ! Premiers matchs à ${hourOf(tournament)}.\n${config.siteUrl}${PAGE}`, tournament.kind);
   await advanceTournament(tournament.id);
 }
 
@@ -790,7 +838,7 @@ async function startAnubis(tournament: TournamentRow): Promise<void> {
     unwrap(await supabase.from('cup_players').update({ team_id: team.id }).eq('tournament_id', tournament.id).in('user_id', [...squad.starters, ...squad.subs]));
     await pushToUsers([...squad.starters, ...squad.subs], {
       title: `𓂀 ${tournament.name} : tu joues avec ${base.name} [${base.tag}]`,
-      body: `Capitaine : ${info.get(squad.captain)?.username ?? 'tiré au sort'}. Le tableau est en ligne.`,
+      body: `Capitaine : ${info.get(squad.captain)?.username ?? 'tiré au sort'}. Rejoins ton équipe : premiers matchs à ${hourOf(tournament)}.`,
       url: `${PAGE}?coupe=anubis`,
       tag: `tournoi-${tournament.id}`,
       urgent: true,
@@ -800,7 +848,7 @@ async function startAnubis(tournament: TournamentRow): Promise<void> {
   const placed = formed.reduce((total, squad) => total + squad.starters.length + squad.subs.length, 0);
   const benched = present.length - placed;
   await announce(
-    `𓂀 **${tournament.name}** commence : ${formed.length} équipes de ${teamSize} tirées au sort parmi ${present.length} joueurs${benched > 0 ? ` (${benched} sans place)` : ''} !\n${config.siteUrl}${PAGE}?coupe=anubis`,
+    `𓂀 **${tournament.name}** : ${formed.length} équipes de ${teamSize} tirées au sort parmi ${present.length} joueurs${benched > 0 ? ` (${benched} sans place)` : ''} ! Premiers matchs à ${hourOf(tournament)}.\n${config.siteUrl}${PAGE}?coupe=anubis`,
     tournament.kind,
   );
   await advanceTournament(tournament.id);
@@ -843,6 +891,9 @@ export async function advanceTournament(id: string): Promise<void> {
       unwrap(await supabase.from('tournament_bracket').update({ team_a: entry.teamA, team_b: entry.teamB, winner: entry.winner, status: entry.status }).eq('id', row.id));
     }
   }
+
+  // Tirage dévoilé 15 min avant : aucun match avant l'heure du début.
+  if (Date.now() < new Date(tournament.starts_at).getTime()) return;
 
   // Rencontres prêtes : match créé (maps tirées au sort, format de la rencontre).
   for (const entry of readyEntries(advanced)) {
@@ -1100,12 +1151,12 @@ export function parisInstant(day: string, time: string): Date {
   return new Date(guess.getTime() - parisOffset(guess) * 60_000);
 }
 
-/** Prochaine date du rendez-vous (jour de la semaine, heure de Paris), au moins 35 min plus tard. */
+/** Prochaine date du rendez-vous (jour de la semaine, heure de Paris), au moins 20 min plus tard (avant le tirage). */
 export function nextOccurrence(weekday: number, time: string, now = Date.now()): { day: string; startsAt: Date } {
   for (let k = 0; k <= 7; k += 1) {
     const day = new Date(now + k * 86_400_000).toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' });
     const startsAt = parisInstant(day, time);
-    if (new Date(`${day}T12:00:00Z`).getUTCDay() === weekday && startsAt.getTime() > now + (CHECKIN_MINUTES + 5) * 60_000) return { day, startsAt };
+    if (new Date(`${day}T12:00:00Z`).getUTCDay() === weekday && startsAt.getTime() > now + (REVEAL_MINUTES + 5) * 60_000) return { day, startsAt };
   }
   const day = new Date(now + 7 * 86_400_000).toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' });
   return { day, startsAt: parisInstant(day, time) };
@@ -1175,7 +1226,7 @@ async function openCup(input: {
       .single(),
   ) as TournamentRow;
   const date = input.startsAt.toLocaleString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-  const format = `${input.bracket === 'double' ? 'double élimination' : 'élimination directe'}, BO${input.bestOf} (finale BO${input.finalBestOf}), ${date}. Check-in ${CHECKIN_MINUTES} min avant.`;
+  const format = `${input.bracket === 'double' ? 'double élimination' : 'élimination directe'}, BO${input.bestOf} (finale BO${input.finalBestOf}), ${date}. Check-in de 2 h à 15 min avant.`;
   await announce(
     input.kind === 'anubis'
       ? `𓂀 **${input.name}** : inscriptions ouvertes ! Inscris-toi seul, les équipes de ${input.teamSize} sont tirées au sort (${input.size} équipes max), ${format}\n${config.siteUrl}${PAGE}?coupe=anubis`
@@ -1334,7 +1385,7 @@ export async function createCup(adminId: string, body: unknown) {
   const input = parseCupInput(body);
   const startsAt = new Date(typeof (body as { startsAt?: unknown })?.startsAt === 'string' ? (body as { startsAt: string }).startsAt : '');
   if (Number.isNaN(startsAt.getTime())) throw new HttpError(400, 'INVALID_CUP', 'Date de début invalide.');
-  if (startsAt.getTime() < Date.now() + (CHECKIN_MINUTES + 5) * 60_000) throw new HttpError(400, 'INVALID_CUP', `La coupe doit commencer dans plus de ${CHECKIN_MINUTES + 5} min.`);
+  if (startsAt.getTime() < Date.now() + (REVEAL_MINUTES + 5) * 60_000) throw new HttpError(400, 'INVALID_CUP', `La coupe doit commencer dans plus de ${REVEAL_MINUTES + 5} min.`);
   await openCup({ ...input, startsAt, scheduleId: null, adminId });
   return cupAdmin();
 }
