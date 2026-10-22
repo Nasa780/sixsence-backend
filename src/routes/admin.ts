@@ -11,6 +11,7 @@ import { announceEventCancelled, announceNewEvent, announceSeasonClosed, onBadge
 import { applySanction, liftSanction, listSanctions } from '../services/sanctions.js';
 import { forgetSeasons, syncAllCards, syncCards } from '../services/cards.js';
 import { publishRules } from '../services/discordRules.js';
+import { announceSettings, createOnboardingRoles, manualAnnouncement, setDisabledTypes } from '../services/announcements.js';
 import { syncTeamRole } from '../services/teamDiscord.js';
 import { listTeamDisputes } from '../services/teamMatches.js';
 import {
@@ -77,6 +78,10 @@ import { activateLeagues, prepareLeagueMoves } from '../services/leagues.js';
  *   POST   /admin/leagues/activate         première répartition des équipes en ligues (16 équipes au moins)
  *   POST   /admin/season/end-date          { endsAt | null } date de fin prévue de la saison active
  *   POST   /admin/discord/rules            publier ou mettre à jour le règlement du serveur (bot, DISCORD_RULES_CHANNEL_ID)
+ *   GET    /admin/discord/announce         annonces illustrées : salon configuré, types coupés, rôles d'Intégration
+ *   POST   /admin/discord/announce         publier une annonce libre ou les nouveautés { type, title, text, url }
+ *   POST   /admin/discord/announce/settings  types d'annonces coupés { disabled: [...] }
+ *   POST   /admin/discord/onboarding-roles créer les rôles d'Intégration qui manquent (notifications, plateformes, Membre)
  *   POST   /admin/discord/sync-roles       remettre à jour les rôles Discord (rangs, équipe, badges, MVP du mois, rôles des équipes)
  */
 const guard: RequestHandler = (req, res, next) => requireRoles(...rolesFor(req.method, req.path))(req, res, next);
@@ -298,6 +303,18 @@ export function adminRouter(): Router {
   // --- Discord -------------------------------------------------------------------
   router.post('/discord/rules', asyncHandler(async (_req, res) => {
     res.json(await publishRules());
+  }));
+  router.get('/discord/announce', asyncHandler(async (_req, res) => {
+    res.json(await announceSettings());
+  }));
+  router.post('/discord/announce', asyncHandler(async (req, res) => {
+    res.json(await manualAnnouncement(req.body));
+  }));
+  router.post('/discord/announce/settings', asyncHandler(async (req, res) => {
+    res.json(await setDisabledTypes(req.body));
+  }));
+  router.post('/discord/onboarding-roles', asyncHandler(async (_req, res) => {
+    res.json(await createOnboardingRoles());
   }));
   router.post('/discord/sync-roles', asyncHandler(async (_req, res) => {
     const ranks = await syncAllRankRoles();

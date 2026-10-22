@@ -176,6 +176,8 @@ export const config = {
     divisionChannelId: process.env.DISCORD_DIVISION_CHANNEL_ID?.trim() || '',
     /** Salon privé du journal : inscrits, équipes créées, bilan quotidien (facultatif, sinon le salon de l'équipe). */
     logsChannelId: process.env.DISCORD_LOGS_CHANNEL_ID?.trim() || '',
+    /** Salon des annonces illustrées (coupes, événements GTA, fin de saison, nouveautés ; facultatif). */
+    announceChannelId: process.env.DISCORD_ANNOUNCE_CHANNEL_ID?.trim() || '',
     /** Salon du règlement du serveur (publié par le bot depuis l'admin). */
     rulesChannelId: process.env.DISCORD_RULES_CHANNEL_ID?.trim() || '1561121381578444890',
   },
