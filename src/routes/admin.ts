@@ -12,7 +12,7 @@ import { applySanction, liftSanction, listSanctions } from '../services/sanction
 import { forgetSeasons, syncAllCards, syncCards } from '../services/cards.js';
 import { publishRules } from '../services/discordRules.js';
 import { publishTicketPanel } from '../services/tickets.js';
-import { announceSettings, createOnboardingRoles, manualAnnouncement, setDisabledTypes } from '../services/announcements.js';
+import { announceSettings, createOnboardingRoles, giveMemberRoleToAll, manualAnnouncement, setDisabledTypes } from '../services/announcements.js';
 import { syncTeamRole } from '../services/teamDiscord.js';
 import { listTeamDisputes } from '../services/teamMatches.js';
 import {
@@ -82,6 +82,7 @@ import { activateLeagues, prepareLeagueMoves } from '../services/leagues.js';
  *   GET    /admin/discord/announce         annonces illustrées : salon configuré, types coupés, rôles d'Intégration
  *   POST   /admin/discord/announce         publier une annonce libre ou les nouveautés { type, title, text, url }
  *   POST   /admin/discord/announce/settings  types d'annonces coupés { disabled: [...] }
+ *   POST   /admin/discord/member-role      donner le rôle « Membre » à tous les membres actuels du serveur (tâche de fond)
  *   POST   /admin/discord/onboarding-roles créer les rôles d'Intégration qui manquent (notifications, plateformes, Membre)
  *   POST   /admin/discord/tickets-panel    publier ou mettre à jour le panneau des tickets (DISCORD_TICKETS_CHANNEL_ID)
  *   POST   /admin/discord/sync-roles       remettre à jour les rôles Discord (rangs, équipe, badges, MVP du mois, rôles des équipes)
@@ -314,6 +315,9 @@ export function adminRouter(): Router {
   }));
   router.post('/discord/announce/settings', asyncHandler(async (req, res) => {
     res.json(await setDisabledTypes(req.body));
+  }));
+  router.post('/discord/member-role', asyncHandler(async (_req, res) => {
+    res.json(await giveMemberRoleToAll());
   }));
   router.post('/discord/onboarding-roles', asyncHandler(async (_req, res) => {
     res.json(await createOnboardingRoles());
