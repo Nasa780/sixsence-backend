@@ -18,7 +18,17 @@ export const CUP_MIN_TEAMS = 4;
 /** Points de Division gagnés en Coupe Horus. */
 export const CUP_BONUS = { or: 150, argent: 100, bronze: 75, participation: 50 } as const;
 export const QUALIFY_MATCHES = 25;
-export const CHECKIN_MINUTES = 30;
+/**
+ * Check-in : ouvert 2 h avant le début, fermé 15 min avant ; à la fermeture, tirage dévoilé (tableau,
+ * équipes Anubis, salons vocaux) et premiers matchs lancés à l'heure du début.
+ */
+export const CHECKIN_MINUTES = 120;
+export const REVEAL_MINUTES = 15;
+/** Rappels aux inscrits sans check-in, en minutes avant le début (en plus de l'ouverture). */
+export const CHECKIN_REMINDERS = [60, 30] as const;
+/** Une équipe engagée ne lance plus de match ordinaire à partir d'1 h avant le début. */
+export const BUSY_MINUTES = 60;
+export const CHECKIN_TEXT = 'check-in de 2 h à 15 min avant le début';
 
 export const roundsFor = (size: number) => Math.log2(size);
 
