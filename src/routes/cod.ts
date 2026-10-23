@@ -16,6 +16,7 @@ import { getSiteStats } from '../services/stats.js';
 import type { QueueHub } from '../ws/hub.js';
 import { onlineVisitors } from '../services/presence.js';
 import { reliability, smurfCheck } from '../services/reliability.js';
+import { mapsOverview } from '../services/maps.js';
 
 /**
  * Endpoints du classé COD.
@@ -36,6 +37,7 @@ import { reliability, smurfCheck } from '../services/reliability.js';
  *   POST /cod/party/leave           quitter son groupe
  *   POST /cod/party/kick            retirer un membre (chef) { userId }
  *   POST /cod/party/format          changer de format (chef) { format }
+ *   GET  /cod/maps                  maps de MW4 et map pool de chaque mode (Classé, Division, Tournoi)
  *   POST /cod/matches/:id/ready     accepter le match trouvé (vérification « Prêt ? », 1 min)
  *   POST /cod/matches/:id/ready-token  accepter depuis le bouton de la notification { token } (jeton signé, sans session)
  *   POST /cod/matches/:id/proofs    enregistrer une capture déjà envoyée { path }
@@ -188,6 +190,8 @@ export function codRouter(hub: QueueHub): Router {
       res.json({ party: await setPartyFormat(currentUser(res).id, format) });
     }),
   );
+
+  router.get('/maps', asyncHandler(async (_req, res) => void res.json(await mapsOverview())));
 
   router.post(
     '/matches/:id/ready',

@@ -7,6 +7,7 @@ import { correctionWindowHours, withinWindow } from './correctionPolicy.js';
 import { pushToUsers } from './push.js';
 import { deciderPicker, declarationError, isCompleteSeries, pickMaps, seriesState, type MapScore, type Side } from './teamMatchPolicy.js';
 import { membershipOf } from './teams.js';
+import { mapPool } from './maps.js';
 
 /**
  * Matchs d'équipe (Division, étape 2) : file des équipes, BO3, déclaration et
@@ -290,7 +291,7 @@ export async function tryCreateTeamMatches(): Promise<void> {
   for (let i = 0; i < 10; i += 1) {
     const { data, error } = await supabase.rpc('team_match_create', {
       // Toutes les maps tirées au sort dès la création (la 3e n'est jouée qu'à 1-1).
-      p_maps: pickMaps(config.cod.maps, 3),
+      p_maps: pickMaps(await mapPool('division'), 3),
       p_mode: config.cod.modes[0],
       p_rematch_minutes: config.teams.rematchMinutes,
     });
@@ -446,7 +447,7 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
     completedAt: match.completed_at,
     mapPool:
       match.status === 'in_progress' && match.maps.length === match.best_of - 1 && match.scores.length === match.best_of - 1
-        ? config.cod.maps.filter((map) => !match.maps.some((m) => m.map === map))
+        ? (await mapPool(match.tournament_id ? 'tournoi' : 'division')).filter((map) => !match.maps.some((m) => m.map === map))
         : [],
     bestOf: match.best_of,
     tournament: match.tournament_id ? await tournamentLabel(match.tournament_id, match.round, match.id) : null,
@@ -717,7 +718,7 @@ export async function reportTeamScores(userId: string, matchId: string, body: un
   const maps =
     match.maps.length >= declaredCount
       ? match.maps
-      : [...match.maps, ...pickMaps(config.cod.maps, declaredCount - match.maps.length, match.maps.map((m) => m.map)).map((map) => ({ map, pick: 'random' as const }))];
+      : [...match.maps, ...pickMaps(await mapPool(match.tournament_id ? 'tournoi' : 'division'), declaredCount - match.maps.length, match.maps.map((m) => m.map)).map((map) => ({ map, pick: 'random' as const }))];
 
   const now = new Date().toISOString();
   const updated = unwrap(
@@ -795,7 +796,7 @@ export async function pickTeamMap3(userId: string, matchId: string, body: unknow
     throw new HttpError(409, 'MAP3_CLOSED', 'La map décisive n’est pas à choisir maintenant.');
   }
   const map = (body as { map?: unknown } | undefined)?.map;
-  if (typeof map !== 'string' || !config.cod.maps.includes(map) || match.maps.some((m) => m.map === map)) throw new HttpError(400, 'INVALID_MAP', 'Map invalide ou déjà jouée.');
+  if (typeof map !== 'string' || !(await mapPool(match.tournament_id ? 'tournoi' : 'division')).includes(map) || match.maps.some((m) => m.map === map)) throw new HttpError(400, 'INVALID_MAP', 'Map invalide ou déjà jouée.');
   const updated = unwrap(
     await supabase
       .from('team_matches')
