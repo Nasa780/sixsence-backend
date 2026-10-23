@@ -15,6 +15,7 @@ export const MAP_CATALOG = [
   { id: 'coal', name: 'Coal' },
   { id: 'lithium', name: 'Lithium' },
   { id: 'lotus', name: 'Lotus' },
+  { id: 'mumbai', name: 'Mumbai' },
   { id: 'munition', name: 'Munition' },
   { id: 'nautical', name: 'Nautical' },
   { id: 'reactor-u92', name: 'Reactor U92' },
