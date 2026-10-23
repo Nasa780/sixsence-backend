@@ -47,6 +47,15 @@ import { mapsOverview } from '../services/maps.js';
  *   POST /cod/matches/:id/resolve   arbitrage (admin, staff, arbitre) { winner: "A" | "B" | null }
  *   POST /cod/matches/:id/correct   correction d'un match terminé (48 h, admin sans limite) { action: "swap" | "cancel", reason }
  */
+/** Arbitre, staff ou admin qui joue ce match : il ne peut ni le trancher ni le corriger (pas d'arbitrage de son propre match). */
+async function refuseOwnMatch(matchId: string, userId: string): Promise<void> {
+  const { data } = await supabase.from('cod_matches').select('team_a, team_b').eq('id', matchId).maybeSingle();
+  const match = data as { team_a: string[]; team_b: string[] } | null;
+  if (match && [...match.team_a, ...match.team_b].includes(userId)) {
+    throw new HttpError(403, 'OWN_MATCH', 'Tu joues ce match : déclare le résultat comme les autres joueurs, un autre arbitre tranchera en cas de litige.');
+  }
+}
+
 export function codRouter(hub: QueueHub): Router {
   const router = Router();
 
@@ -272,6 +281,9 @@ export function codRouter(hub: QueueHub): Router {
       if (winner !== 'A' && winner !== 'B' && winner !== null) {
         throw new HttpError(400, 'INVALID_WINNER', 'Vainqueur invalide.');
       }
+      // Un membre de l'équipe SixSence qui joue ce match ne le tranche pas : il déclare le résultat comme les autres
+      // joueurs (double validation). L'annulation reste possible.
+      if (winner !== null) await refuseOwnMatch(uuidParam(req, 'id'), currentUser(res).id);
       res.json({ match: await resolveMatch(uuidParam(req, 'id'), winner) });
     }),
   );
@@ -285,6 +297,7 @@ export function codRouter(hub: QueueHub): Router {
       if (body.action !== 'swap' && body.action !== 'cancel') throw new HttpError(400, 'INVALID_ACTION', 'Correction inconnue.');
       if (typeof body.reason !== 'string' || body.reason.trim().length < 3) throw new HttpError(400, 'INVALID_REASON', 'Indique un motif.');
       const staff = currentUser(res);
+      await refuseOwnMatch(uuidParam(req, 'id'), staff.id);
       res.json({ match: await correctMatch(uuidParam(req, 'id'), staff.id, await roleOf(staff.id), body.action, body.reason) });
     }),
   );
