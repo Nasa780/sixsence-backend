@@ -6,6 +6,7 @@ import { pushToUsers } from './push.js';
 import { pickMaps } from './teamMatchPolicy.js';
 import { checkMatchRoster, onTeamMatchCreated, type TeamMatch } from './teamMatches.js';
 import { membershipOf } from './teams.js';
+import { mapPool } from './maps.js';
 
 /**
  * Défis directs (scrims) de la Division : un Leader défie une autre équipe pour un BO3, maintenant ou à une
@@ -154,7 +155,7 @@ async function startChallenge(challenge: ChallengeRow): Promise<void> {
       p_team_b: challenge.to_team,
       p_roster_a: rosterA,
       p_roster_b: rosterB,
-      p_maps: pickMaps(config.cod.maps, 3),
+      p_maps: pickMaps(await mapPool('division'), 3),
       p_mode: config.cod.modes[0],
       p_friendly: challenge.friendly,
       p_challenge: challenge.id,

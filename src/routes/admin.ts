@@ -11,6 +11,7 @@ import { announceEventCancelled, announceNewEvent, announceSeasonClosed, onBadge
 import { applySanction, liftSanction, listSanctions } from '../services/sanctions.js';
 import { forgetSeasons, syncAllCards, syncCards } from '../services/cards.js';
 import { publishRules } from '../services/discordRules.js';
+import { setMapPools } from '../services/maps.js';
 import { publishTicketPanel } from '../services/tickets.js';
 import { announceSettings, createOnboardingRoles, giveMemberRoleToAll, manualAnnouncement, setDisabledTypes } from '../services/announcements.js';
 import { syncTeamRole } from '../services/teamDiscord.js';
@@ -85,6 +86,7 @@ import { activateLeagues, prepareLeagueMoves } from '../services/leagues.js';
  *   POST   /admin/discord/member-role      donner le rôle « Membre » à tous les membres actuels du serveur (tâche de fond)
  *   POST   /admin/discord/onboarding-roles créer les rôles d'Intégration qui manquent (notifications, plateformes, Membre)
  *   POST   /admin/discord/tickets-panel    publier ou mettre à jour le panneau des tickets (DISCORD_TICKETS_CHANNEL_ID)
+ *   POST   /admin/maps                     map pool de chaque mode { classe: [...], division: [...], tournoi: [...] }
  *   POST   /admin/discord/sync-roles       remettre à jour les rôles Discord (rangs, équipe, badges, MVP du mois, rôles des équipes)
  */
 const guard: RequestHandler = (req, res, next) => requireRoles(...rolesFor(req.method, req.path))(req, res, next);
@@ -324,6 +326,9 @@ export function adminRouter(): Router {
   }));
   router.post('/discord/tickets-panel', asyncHandler(async (_req, res) => {
     res.json(await publishTicketPanel());
+  }));
+  router.post('/maps', asyncHandler(async (req, res) => {
+    res.json(await setMapPools(req.body));
   }));
   router.post('/discord/sync-roles', asyncHandler(async (_req, res) => {
     const ranks = await syncAllRankRoles();

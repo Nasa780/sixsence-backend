@@ -6,6 +6,7 @@ import { supabase } from '../supabase.js';
 import { findMatch, membersOf, randomSplit, type QueueGroup } from './matchmaker.js';
 import { getPartyOf, type Party } from './parties.js';
 import { expiresAt, queueTimeouts, type TimeoutRules } from './queuePolicy.js';
+import { mapPool } from './maps.js';
 
 /** Durée maximale de recherche (voir queuePolicy.ts). */
 const TIMEOUT_RULES: TimeoutRules = {
@@ -282,7 +283,7 @@ export async function runMatchmaking(format: QueueFormat): Promise<void> {
         p_team_size: format.teamSize,
         p_team_a: teamA,
         p_team_b: teamB,
-        p_maps: config.cod.maps,
+        p_maps: await mapPool('classe'),
         p_modes: config.cod.modes,
         p_ready_seconds: config.cod.readySeconds,
       }),

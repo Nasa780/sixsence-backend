@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { postAnnouncement } from './announcements.js';
+import { mapPool } from './maps.js';
 import { SUPPRESS_EMBEDS, discord, discordEnabled, discordIds, dm, notifyStaff } from './discord.js';
 import { pushToUsers } from './push.js';
 import { openMatchVoice } from './teamMatches.js';
@@ -910,7 +911,7 @@ export async function advanceTournament(id: string): Promise<void> {
   for (const entry of readyEntries(advanced)) {
     const row = rows.find((r) => r.round === entry.round && r.slot === entry.slot)!;
     const bestOf = double ? bestOfDouble(entry.round, formatOf(tournament)) : bestOfFor(entry.round, rounds, formatOf(tournament), entry.slot);
-    const { data, error } = await supabase.rpc('tournament_create_match', { p_entry: row.id, p_maps: pickMaps(config.cod.maps, bestOf), p_mode: config.cod.modes[0], p_best_of: bestOf });
+    const { data, error } = await supabase.rpc('tournament_create_match', { p_entry: row.id, p_maps: pickMaps(await mapPool('tournoi'), bestOf), p_mode: config.cod.modes[0], p_best_of: bestOf });
     if (error) {
       console.error('[tournoi] création du match impossible', error.message);
       continue;
