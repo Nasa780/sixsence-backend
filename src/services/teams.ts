@@ -41,6 +41,8 @@ interface TeamRow {
   /** Trophées de tournoi (vainqueur, finaliste), migration 0028. */
   trophies: { tournamentId: string; name: string; season: number | null; place: 'winner' | 'finalist'; date: string }[];
   league: 'elite' | 'ligue1' | 'ligue2' | null;
+  recruiting: boolean;
+  recruiting_note: string | null;
 }
 
 interface MemberRow {
@@ -49,9 +51,10 @@ interface MemberRow {
   role: 'leader' | 'player';
   starter: boolean;
   joined_at: string;
+  motto: string | null;
 }
 
-const TEAM_COLUMNS = 'id, name, tag, description, color, logo_url, banner_url, socials, owner_id, points, wins, losses, created_at, disbanded_at, trophies, league';
+const TEAM_COLUMNS = 'id, name, tag, description, color, logo_url, banner_url, socials, owner_id, points, wins, losses, created_at, disbanded_at, trophies, league, recruiting, recruiting_note';
 const teamUrl = (id: string) => `/cod/equipes/${id}`;
 
 function badInput(error: unknown): never {
@@ -117,6 +120,8 @@ function publicTeam(team: TeamRow) {
     disbanded: Boolean(team.disbanded_at),
     trophies: team.trophies ?? [],
     league: team.league ?? null,
+    recruiting: team.recruiting ?? true,
+    recruitingNote: team.recruiting_note ?? null,
   };
 }
 
@@ -127,11 +132,30 @@ async function teamRow(teamId: string): Promise<TeamRow> {
 }
 
 async function membersOf(teamId: string): Promise<MemberRow[]> {
-  return (unwrap(await supabase.from('team_members').select('user_id, team_id, role, starter, joined_at').eq('team_id', teamId).order('joined_at')) ??
+  return (unwrap(await supabase.from('team_members').select('user_id, team_id, role, starter, joined_at, motto').eq('team_id', teamId).order('joined_at')) ??
     []) as MemberRow[];
 }
 
-/** Fiche publique d'une équipe : effectif (titulaires d'abord), place au classement. */
+/**
+ * Force d'une équipe : niveau moyen de ses joueurs en Classé (points), et sa place parmi les équipes actives
+ * (hors équipes temporaires de coupe). Null tant que l'équipe n'a aucun joueur.
+ */
+async function teamStrength(teamId: string): Promise<{ value: number; position: number; total: number } | null> {
+  const teams = (unwrap(await supabase.from('teams').select('id').is('disbanded_at', null).is('cup_tournament', null)) ?? []) as { id: string }[];
+  const members = (unwrap(await supabase.from('team_members').select('team_id, user_id').in('team_id', teams.map((t) => t.id))) ?? []) as { team_id: string; user_id: string }[];
+  const profiles = (unwrap(await supabase.from('cod_profiles').select('user_id, points').in('user_id', members.map((m) => m.user_id))) ?? []) as { user_id: string; points: number }[];
+  const points = new Map(profiles.map((p) => [p.user_id, p.points]));
+  const averages = new Map<string, number>();
+  for (const team of teams) {
+    const ids = members.filter((m) => m.team_id === team.id).map((m) => m.user_id);
+    if (ids.length) averages.set(team.id, Math.round(ids.reduce((sum, id) => sum + (points.get(id) ?? 0), 0) / ids.length));
+  }
+  const value = averages.get(teamId);
+  if (value === undefined) return null;
+  return { value, position: [...averages.values()].filter((v) => v > value).length + 1, total: averages.size };
+}
+
+/** Fiche publique d'une équipe : effectif (titulaires d'abord), place au classement, force, recrutement, devises. */
 export async function getTeam(teamId: string) {
   const team = await teamRow(teamId);
   const members = await membersOf(teamId);
@@ -149,6 +173,7 @@ export async function getTeam(teamId: string) {
   return {
     ...publicTeam(team),
     position,
+    strength: team.disbanded_at ? null : await teamStrength(teamId),
     members: members
       .map((member) => ({
         id: member.user_id,
@@ -159,6 +184,7 @@ export async function getTeam(teamId: string) {
         crown: member.user_id === team.owner_id,
         starter: member.starter,
         joinedAt: member.joined_at,
+        motto: member.motto ?? null,
       }))
       .sort((a, b) => Number(b.starter) - Number(a.starter) || Number(b.crown) - Number(a.crown) || (a.role === b.role ? 0 : a.role === 'leader' ? -1 : 1)),
   };
@@ -472,6 +498,7 @@ export async function requestToJoin(userId: string, teamId: string) {
 
   const pending = await existingPending(teamId, userId);
   if (pending?.kind === 'invite') return answerInvite(userId, pending.id, { accept: true });
+  if (!team.recruiting) throw new HttpError(409, 'RECRUITING_CLOSED', 'Cette équipe ne recrute pas en ce moment.');
   if (pending) throw new HttpError(409, 'ALREADY_REQUESTED', 'Ta candidature est déjà envoyée.');
   if ((await pendingCount(teamId)) >= TEAM_LIMITS.maxPendingInvites) throw new HttpError(409, 'TOO_MANY_INVITES', 'Cette équipe a trop de candidatures en attente.');
 
@@ -555,11 +582,18 @@ async function targetIn(teamId: string, targetId: string): Promise<TeamActor> {
   return target;
 }
 
-/** Titulaire / remplaçant (Leader) ; Leader / Joueur (couronne). */
+/** Titulaire / remplaçant (Leader) ; Leader / Joueur (couronne) ; devise du joueur (Leader, 40 caractères). */
 export async function updateMember(userId: string, teamId: string, targetId: string, body: unknown) {
   const actor = await actorIn(teamId, userId);
   const target = await targetIn(teamId, targetId);
-  const input = (body ?? {}) as { role?: unknown; starter?: unknown };
+  const input = (body ?? {}) as { role?: unknown; starter?: unknown; motto?: unknown };
+  if (input.motto !== undefined) {
+    if (!canDo(actor, 'edit')) forbid('Seul un Leader choisit les devises.');
+    if (input.motto !== null && typeof input.motto !== 'string') throw new HttpError(400, 'INVALID_MOTTO', 'Devise invalide.');
+    const motto = typeof input.motto === 'string' ? input.motto.normalize('NFC').replace(/\s+/g, ' ').trim() : '';
+    if (motto.length > 40 || /[<>]/.test(motto)) throw new HttpError(400, 'INVALID_MOTTO', 'La devise fait 40 caractères au plus, sans < ni >.');
+    unwrap(await supabase.from('team_members').update({ motto: motto || null }).eq('team_id', teamId).eq('user_id', targetId));
+  }
   if (input.role !== undefined) {
     if (input.role !== 'leader' && input.role !== 'player') throw new HttpError(400, 'INVALID_ROLE', 'Rôle inconnu.');
     if (!canDo(actor, 'setRole', target)) forbid('Seul le Leader à la couronne nomme les Leaders.');

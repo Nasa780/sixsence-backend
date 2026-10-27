@@ -15,6 +15,7 @@ import { getQueueState, getQueueSummaries, joinQueue, leaveQueue, stayInQueue } 
 import { getSiteStats } from '../services/stats.js';
 import type { QueueHub } from '../ws/hub.js';
 import { onlineVisitors } from '../services/presence.js';
+import { playerInsights } from '../services/insights.js';
 import { reliability, smurfCheck } from '../services/reliability.js';
 import { mapsOverview } from '../services/maps.js';
 
@@ -61,6 +62,8 @@ export function codRouter(hub: QueueHub): Router {
 
   // Score de fiabilité (public) et contrôle anti-smurf (niveau du compte lu sur une capture).
   router.get('/players/:id/reliability', asyncHandler(async (req, res) => void res.json(await reliability(uuidParam(req, 'id')))));
+  // Analyse du profil : places sur le site, ratio 30 j, adversaires, coéquipiers, activité, équipes ; face à face si connecté.
+  router.get('/players/:id/insights', optionalAuth, asyncHandler(async (req, res) => void res.json(await playerInsights(uuidParam(req, 'id'), viewerOf(res)?.id ?? null))));
   router.post('/smurf-check', requireAuth, asyncHandler(async (req, res) => void res.json(await smurfCheck(currentUser(res).id, req.body))));
 
   // --- Public ----------------------------------------------------------------
