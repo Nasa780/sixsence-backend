@@ -411,7 +411,7 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
       canPickMap3: Boolean(side) && match.status === 'in_progress' && state.phase === 'decider' && match.maps.length === match.best_of - 1 && match.map3_picker === mySide,
       canResolve: referee && !isPlayer && OPEN.includes(match.status),
       canProve: isPlayer && proofWindowOpen(match),
-      canCorrect: referee && !isPlayer && match.status === 'completed' && !match.tournament_id && !match.friendly && withinWindow(match.completed_at, correctionWindowHours(await roleOf(viewerId))),
+      canCorrect: referee && !isPlayer && match.status === 'completed' && !match.friendly && withinWindow(match.completed_at, correctionWindowHours(await roleOf(viewerId))),
     };
     // Captures : visibles des joueurs du match et des arbitres seulement (liens signés d'une heure).
     if (isPlayer || referee) proofs = await proofsOf(match.id, players);
@@ -868,7 +868,8 @@ async function tournamentLabel(tournamentId: string, round: number | null, match
 /**
  * Correction d'un match terminé (mauvaise déclaration…) : nouveaux scores de toute la série (le
  * vainqueur peut changer) ou annulation (scores null). Arbitre et staff : 48 h ; admin : sans limite.
- * Pas pour les matchs de tournoi (l'admin désigne le vainqueur depuis l'onglet Tournoi).
+ * Match de tournoi : scores corrigibles, pas d'annulation ; vainqueur changé seulement si la suite du tableau n'a pas
+ * commencé pour ces deux équipes (tournaments.ts), puis le tableau est refait.
  */
 export async function correctTeamMatch(staffId: string, matchId: string, body: unknown) {
   if (!(await isReferee(staffId))) throw new HttpError(403, 'FORBIDDEN', 'Réservé à l’équipe SixSence.');
@@ -882,6 +883,8 @@ export async function correctTeamMatch(staffId: string, matchId: string, body: u
     if (!isCompleteSeries(input.scores, match.best_of)) throw new HttpError(400, 'INVALID_SCORES', 'Scores invalides : la série doit se terminer sur la dernière map saisie.');
     winner = seriesState(input.scores, match.best_of).winner;
   }
+  const { assertTournamentCorrectable, applyTournamentCorrection } = await import('./tournaments.js');
+  await assertTournamentCorrectable(match, winner);
   unwrap(
     await supabase.rpc('team_match_correct', {
       p_match: matchId,
@@ -892,9 +895,14 @@ export async function correctTeamMatch(staffId: string, matchId: string, body: u
       p_max_hours: correctionWindowHours(await roleOf(staffId)),
     }),
   );
+  if (winner) await applyTournamentCorrection(match, winner);
   await pushToUsers([...match.roster_a, ...match.roster_b], {
-    title: 'Résultat du match de Division corrigé',
-    body: input.scores === null ? 'Le match a été annulé par l’équipe SixSence : points rendus.' : 'L’équipe SixSence a corrigé les scores : points recalculés.',
+    title: match.tournament_id ? 'Résultat du match de tournoi corrigé' : 'Résultat du match de Division corrigé',
+    body: match.tournament_id
+      ? 'L’équipe SixSence a corrigé les scores du match : le tableau est à jour.'
+      : input.scores === null
+        ? 'Le match a été annulé par l’équipe SixSence : points rendus.'
+        : 'L’équipe SixSence a corrigé les scores : points recalculés.',
     url: matchUrl(matchId),
     tag: `team-match-${matchId}`,
   });
