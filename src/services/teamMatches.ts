@@ -129,13 +129,16 @@ export async function teamPlayState(userId: string) {
   const member = await membershipOf(userId);
   const queueCount = await supabase.from('team_queue').select('team_id', { count: 'exact', head: true });
   const base = { rosterSize: config.teams.rosterSize, teamsSearching: queueCount.count ?? 0 };
-  if (!member) return { ...base, queued: null, activeMatchId: null, expiredAt: null, blockedUntil: null };
+  if (!member) return { ...base, queued: null, scheduled: null, activeMatchId: null, expiredAt: null, blockedUntil: null };
   const [queued, active, team] = await Promise.all([
     supabase.from('team_queue').select('roster, joined_at, confirmed_at, warned_at').eq('team_id', member.team_id).maybeSingle(),
     supabase.from('team_matches').select('id').in('status', OPEN).or(`team_a.eq.${member.team_id},team_b.eq.${member.team_id}`).limit(1).maybeSingle(),
     supabase.from('teams').select('queue_expired_at').eq('id', member.team_id).maybeSingle(),
   ]);
   const blockedUntil = await forfeitBlockedUntil(member.team_id);
+  // Match programmé de l'équipe (chargé à la demande : teamSchedules dépend de ce fichier).
+  const { scheduleOf } = await import('./teamSchedules.js');
+  const scheduled = await scheduleOf(member.team_id);
   const q = queued.data as { roster: string[]; joined_at: string; confirmed_at: string; warned_at: string | null } | null;
   const expired = (team.data as { queue_expired_at: string | null } | null)?.queue_expired_at ?? null;
   return {
@@ -150,6 +153,7 @@ export async function teamPlayState(userId: string) {
           expiresAt: minutesAfter(q.confirmed_at, config.cod.queueMaxMinutes).toISOString() }
       : null,
     activeMatchId: (active.data as { id: string } | null)?.id ?? null,
+    scheduled,
     blockedUntil,
     // Recherche arrêtée faute de confirmation dans les 15 dernières minutes (alerte sur le site).
     expiredAt: expired && Date.now() - new Date(expired).getTime() < 15 * 60_000 ? expired : null,

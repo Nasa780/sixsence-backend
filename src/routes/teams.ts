@@ -24,6 +24,7 @@ import {
   teamStatus,
 } from '../services/teamMatches.js';
 import { TEAM_REPORT_REASONS } from '../services/teamPolicy.js';
+import { cancelTeamSchedule, scheduleSlots, scheduleTeamMatch } from '../services/teamSchedules.js';
 import { answerChallenge, cancelChallenge, createChallenge, myChallenges } from '../services/challenges.js';
 import { leagueState } from '../services/leagues.js';
 import { checkIn, currentTournament, getTournament, registerTeam, setSquadRoster, unregisterTeam } from '../services/tournaments.js';
@@ -127,6 +128,10 @@ export function teamsRouter(): Router {
   // --- Matchs d'équipe (BO3) ----------------------------------------------------
   router.get('/me/play', requireAuth, asyncHandler(async (_req, res) => void res.json(await teamPlayState(currentUser(res).id))));
   router.post('/me/queue', requireAuth, asyncHandler(async (req, res) => void res.json(await joinTeamQueue(currentUser(res).id, req.body))));
+  // Match programmé : créneaux pris (anonymes), programmer / annuler (Leaders).
+  router.get('/schedule/slots', asyncHandler(async (_req, res) => void res.json(await scheduleSlots())));
+  router.post('/me/schedule', requireAuth, asyncHandler(async (req, res) => void res.json(await scheduleTeamMatch(currentUser(res).id, req.body))));
+  router.delete('/me/schedule', requireAuth, asyncHandler(async (_req, res) => void res.json(await cancelTeamSchedule(currentUser(res).id))));
   router.post('/me/queue/stay', requireAuth, asyncHandler(async (_req, res) => void res.json(await stayInTeamQueue(currentUser(res).id))));
   router.get('/players/:userId/matches', asyncHandler(async (req, res) => void res.json({ matches: await playerTeamMatches(uuidParam(req, 'userId')) })));
   router.post('/matches/:matchId/messages', requireAuth, asyncHandler(async (req, res) => void res.json(await postTeamMessage(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));

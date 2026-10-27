@@ -26,6 +26,7 @@ import { pointsPreview, sweepMatches } from './services/matches.js';
 import { checkTeamQueueTimeouts, sweepTeamMatches, tryCreateTeamMatches } from './services/teamMatches.js';
 import { sweepTournaments } from './services/tournaments.js';
 import { sweepChallenges } from './services/challenges.js';
+import { sweepTeamSchedules } from './services/teamSchedules.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, syncTeamAndBadgeRoles, welcomeNewPlayers } from './services/community.js';
 import { remindSeasonEnd } from './services/announcements.js';
@@ -331,9 +332,12 @@ const teamTimer = setInterval(() => {
   void sweepChallenges();
   void sweepTournaments();
 }, 60_000);
-// Division : durée maximale de recherche (« Toujours là ? »), contrôlée toutes les 20 secondes.
+// Division : durée maximale de recherche (« Toujours là ? ») et matchs programmés, contrôlés toutes les 20 secondes.
 const teamQueueTimer = setInterval(() => {
-  if (config.teams.enabled) void checkTeamQueueTimeouts();
+  if (!config.teams.enabled) return;
+  void checkTeamQueueTimeouts();
+  // Matchs programmés : rappel 30 min avant, entrée dans la file 5 min avant.
+  void sweepTeamSchedules();
 }, 20_000);
 // Vérifications « Prêt ? » expirées : contrôlées toutes les 3 secondes.
 const readyTimer = live ? setInterval(() => void expireReadyChecks(), 3_000) : undefined;
