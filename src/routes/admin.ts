@@ -20,11 +20,13 @@ import {
   cancelTournament,
   createCup,
   createSchedule,
+  createPlayIn,
   createTournament,
   cupAdmin,
   deleteSchedule,
   forceEntryWinner,
   listTournaments,
+  playInOverview,
   previewQualified,
   setCupsAuto,
   updateSchedule,
@@ -56,6 +58,8 @@ import { activateLeagues, prepareLeagueMoves } from '../services/leagues.js';
  *   GET    /admin/tournaments              derniers tournois (admin)
  *   GET    /admin/tournaments/preview?size= qualifiés si le tournoi était créé maintenant
  *   POST   /admin/tournaments              { name, startsAt, size } créer le tournoi (qualifiés et effectifs figés)
+ *   GET    /admin/playin?size=             play-in de la saison (ou affiches d'après le classement actuel)
+ *   POST   /admin/playin                   { startsAt, size } créer le play-in (7e et 8e du circuit contre 2 équipes de Division)
  *   DELETE /admin/tournaments/:id          annuler le tournoi
  *   POST   /admin/tournaments/:id/entries/:entryId/winner { side } désigner le vainqueur d'une rencontre
  *   GET    /admin/cups                      Coupe Horus : interrupteur, rendez-vous, dernières coupes (admin)
@@ -156,6 +160,12 @@ export function adminRouter(): Router {
   }));
   router.post('/tournaments', asyncHandler(async (req, res) => {
     res.status(201).json(await createTournament(currentUser(res).id, req.body));
+  }));
+  router.get('/playin', asyncHandler(async (req, res) => {
+    res.json({ playIn: await playInOverview(Number(req.query.size) || 8) });
+  }));
+  router.post('/playin', asyncHandler(async (req, res) => {
+    res.status(201).json({ playIn: await createPlayIn(currentUser(res).id, req.body) });
   }));
   router.delete('/tournaments/:id', asyncHandler(async (req, res) => {
     res.json(await cancelTournament(uuidParam(req, 'id')));

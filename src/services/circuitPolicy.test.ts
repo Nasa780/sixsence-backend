@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CIRCUIT_POINTS, circuitStandings, finalQualified } from './circuitPolicy.js';
+import { CIRCUIT_POINTS, circuitStandings, finalQualified, finalWithPlayIn, playInPairs } from './circuitPolicy.js';
 
 test('points de circuit : podium et équipes présentes', () => {
   const standings = circuitStandings([
@@ -53,4 +53,31 @@ test('équipe du circuit dissoute : ignorée', () => {
     result.map((r) => r.teamId),
     ['c1', 'd1'],
   );
+});
+
+test('play-in : 7e et 8e du circuit contre les 2 meilleures de la Division', () => {
+  const circuit = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9'];
+  const division = [{ id: 'c2' }, { id: 'd1' }, { id: 'c8' }, { id: 'd2' }, { id: 'd3' }];
+  const result = playInPairs(circuit, division, 8, new Set([...circuit, 'd1', 'd2', 'd3']));
+  assert.deepEqual(result?.direct, ['c1', 'c2', 'c3', 'c4', 'c5', 'c6']);
+  assert.deepEqual(result?.pairs, [
+    ['c7', 'd2'],
+    ['c8', 'd1'],
+  ]);
+});
+
+test('play-in impossible sans 8 équipes au circuit ou 2 en Division', () => {
+  const seven = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7'];
+  assert.equal(playInPairs(seven, [{ id: 'd1' }, { id: 'd2' }], 8, new Set([...seven, 'd1', 'd2'])), null);
+  const eight = [...seven, 'c8'];
+  assert.equal(playInPairs(eight, [{ id: 'c1' }, { id: 'd1' }], 8, new Set([...eight, 'd1'])), null);
+});
+
+test('grande finale après le play-in : directs puis vainqueurs, sans doublon', () => {
+  const result = finalWithPlayIn(['c1', 'c2', 'gone'], ['d2', null, 'c1'], new Set(['c1', 'c2', 'd2']));
+  assert.deepEqual(result, [
+    { teamId: 'c1', via: 'circuit' },
+    { teamId: 'c2', via: 'circuit' },
+    { teamId: 'd2', via: 'playin' },
+  ]);
 });

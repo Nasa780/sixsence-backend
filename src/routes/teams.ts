@@ -99,7 +99,7 @@ import {
  *   GET    /teams/tournaments/:id              un tournoi
  *   POST   /teams/tournaments/:id/checkin      check-in d'un joueur de l'équipe (2 h à 15 min avant) { roster: [ids parmi l'effectif figé] }
  *   POST   /teams/tournaments/:id/register     Coupe Horus : inscrire son équipe (Leader) ; DELETE : la désinscrire
- *   GET    /teams/tournament?kind=horus        Coupe Horus prévue ou en cours (sinon la dernière terminée) ; kind=anubis : Coupe Anubis
+ *   GET    /teams/tournament?kind=horus        Coupe Horus prévue ou en cours (sinon la dernière terminée) ; kind=anubis : Coupe Anubis ; kind=playin : play-in
  *   POST   /teams/tournaments/:id/register     Coupe Anubis : le joueur s'inscrit seul (DELETE : se désinscrit) ; checkin : check-in du joueur
  *   POST   /teams/tournaments/:id/squad        Coupe Anubis : le capitaine choisit les titulaires { roster }
  *   POST   /teams/matches/:matchId/correct     correction d'un match terminé (arbitre 48 h, admin sans limite) { scores | null, reason }
@@ -155,7 +155,7 @@ export function teamsRouter(): Router {
   router.get(
     '/tournament',
     optionalAuth,
-    asyncHandler(async (req, res) => void res.json({ tournament: await currentTournament(viewerOf(res)?.id ?? null, req.query.kind === 'horus' || req.query.kind === 'anubis' ? req.query.kind : 'saison') })),
+    asyncHandler(async (req, res) => void res.json({ tournament: await currentTournament(viewerOf(res)?.id ?? null, req.query.kind === 'horus' || req.query.kind === 'anubis' || req.query.kind === 'playin' ? req.query.kind : 'saison') })),
   );
   router.get('/tournaments/:tournamentId', optionalAuth, asyncHandler(async (req, res) => void res.json(await getTournament(uuidParam(req, 'tournamentId'), viewerOf(res)?.id ?? null))));
   router.post('/tournaments/:tournamentId/checkin', requireAuth, asyncHandler(async (req, res) => void res.json(await checkIn(currentUser(res).id, uuidParam(req, 'tournamentId'), req.body))));

@@ -854,13 +854,15 @@ async function afterClose(match: TeamMatch): Promise<void> {
 
 /** Nom du tournoi et du tour d'un match (petite finale, tableaux de la double élimination compris). */
 async function tournamentLabel(tournamentId: string, round: number | null, matchId: string) {
-  const row = unwrap(await supabase.from('tournaments').select('id, name, size, bracket').eq('id', tournamentId).maybeSingle()) as {
+  const row = unwrap(await supabase.from('tournaments').select('id, kind, name, size, bracket').eq('id', tournamentId).maybeSingle()) as {
     id: string;
+    kind: string;
     name: string;
     size: number;
     bracket: 'single' | 'double';
   } | null;
   if (!row) return null;
+  if (row.kind === 'playin') return { id: row.id, name: row.name, round: round ? 'Play-in' : null };
   const { isThirdPlace, roundName, roundNameDouble, roundsFor } = await import('./tournamentPolicy.js');
   if (!round) return { id: row.id, name: row.name, round: null };
   if (row.bracket === 'double') return { id: row.id, name: row.name, round: roundNameDouble(round, row.size) };
@@ -915,16 +917,21 @@ export async function correctTeamMatch(staffId: string, matchId: string, body: u
 
 // --- Historique d'une équipe ----------------------------------------------------------------
 
+/** Manches de chaque map jouée, du point de vue d'une équipe (historiques). */
+function mapScoresOf(row: Pick<TeamMatch, 'scores' | 'maps'>, side: Side) {
+  return (row.scores ?? []).map(([a, b], index) => ({ map: row.maps?.[index]?.map ?? null, for: side === 'A' ? a : b, against: side === 'A' ? b : a }));
+}
+
 export async function teamMatchHistory(teamId: string) {
   const rows = (unwrap(
     await supabase
       .from('team_matches')
-      .select('id, team_a, team_b, status, scores, winner, points_changes, created_at, completed_at, forfeit, tournament_id, friendly')
+      .select('id, team_a, team_b, status, scores, maps, winner, points_changes, created_at, completed_at, forfeit, tournament_id, friendly')
       .or(`team_a.eq.${teamId},team_b.eq.${teamId}`)
       .in('status', ['completed', ...OPEN])
       .order('created_at', { ascending: false })
       .limit(10),
-  ) ?? []) as Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'status' | 'scores' | 'winner' | 'points_changes' | 'created_at' | 'completed_at' | 'forfeit' | 'tournament_id' | 'friendly'>[];
+  ) ?? []) as Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'status' | 'scores' | 'maps' | 'winner' | 'points_changes' | 'created_at' | 'completed_at' | 'forfeit' | 'tournament_id' | 'friendly'>[];
   const teams = await teamsById([...new Set(rows.flatMap((row) => [row.team_a, row.team_b]))]);
   return rows.map((row) => {
     const side: Side = row.team_a === teamId ? 'A' : 'B';
@@ -936,6 +943,7 @@ export async function teamMatchHistory(teamId: string) {
       opponent: opponent ? { id: opponent.id, name: opponent.name, tag: opponent.tag, color: opponent.color, logoUrl: opponent.logo_url } : null,
       mapsFor: side === 'A' ? state.mapsA : state.mapsB,
       mapsAgainst: side === 'A' ? state.mapsB : state.mapsA,
+      mapScores: mapScoresOf(row, side),
       won: row.winner ? row.winner === side : null,
       points: row.points_changes?.[side] ?? null,
       forfeit: row.forfeit,
@@ -951,12 +959,12 @@ export async function playerTeamMatches(userId: string) {
   const rows = (unwrap(
     await supabase
       .from('team_matches')
-      .select('id, team_a, team_b, roster_a, roster_b, status, scores, winner, points_changes, created_at, completed_at, forfeit, tournament_id, friendly')
+      .select('id, team_a, team_b, roster_a, roster_b, status, scores, maps, winner, points_changes, created_at, completed_at, forfeit, tournament_id, friendly')
       .or(`roster_a.cs.{${userId}},roster_b.cs.{${userId}}`)
       .in('status', ['completed', ...OPEN])
       .order('created_at', { ascending: false })
       .limit(30),
-  ) ?? []) as (Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'roster_a' | 'roster_b' | 'status' | 'scores' | 'winner' | 'points_changes' | 'created_at' | 'completed_at' | 'forfeit' | 'tournament_id' | 'friendly'>)[];
+  ) ?? []) as (Pick<TeamMatch, 'id' | 'team_a' | 'team_b' | 'roster_a' | 'roster_b' | 'status' | 'scores' | 'maps' | 'winner' | 'points_changes' | 'created_at' | 'completed_at' | 'forfeit' | 'tournament_id' | 'friendly'>)[];
   const teams = await teamsById([...new Set(rows.flatMap((row) => [row.team_a, row.team_b]))]);
   const card = (id: string) => {
     const team = teams.get(id);
@@ -973,6 +981,7 @@ export async function playerTeamMatches(userId: string) {
       opponent: card(side === 'A' ? row.team_b : row.team_a),
       mapsFor: side === 'A' ? state.mapsA : state.mapsB,
       mapsAgainst: side === 'A' ? state.mapsB : state.mapsA,
+      mapScores: mapScoresOf(row, side),
       won,
       forfeit: row.forfeit,
       tournament: Boolean(row.tournament_id),

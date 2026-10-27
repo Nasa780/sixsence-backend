@@ -45,11 +45,15 @@ export async function calendarEvents(fromInput: unknown, toInput: unknown): Prom
   const events: CalendarEvent[] = [];
 
   // Coupes et tournois déjà créés.
-  type Cup = { id: string; kind: 'saison' | 'horus' | 'anubis'; name: string; size: number; team_size: number | null; status: string; starts_at: string; schedule_id: string | null; best_of: number; final_best_of: number };
+  type Cup = { id: string; kind: 'saison' | 'horus' | 'anubis' | 'playin'; name: string; size: number; team_size: number | null; status: string; starts_at: string; schedule_id: string | null; best_of: number; final_best_of: number };
   const cups = ((tournaments.data ?? []) as Cup[]).filter((cup) => cup.status !== 'cancelled');
   for (const cup of cups) {
     const anubis = cup.kind === 'anubis';
     let registered: number | null = null;
+    if (cup.kind === 'playin') {
+      events.push({ id: `t-${cup.id}`, kind: 'coupe', title: cup.name, subtitle: 'Play-in · 2 places pour la grande finale · BO3', startsAt: cup.starts_at, endsAt: null, href: '/cod/tournoi?coupe=playin', cup: null });
+      continue;
+    }
     if (cup.status === 'scheduled' || cup.kind === 'saison') {
       const { count } = await supabase.from(anubis ? 'cup_players' : 'tournament_teams').select('tournament_id', { count: 'exact', head: true }).eq('tournament_id', cup.id);
       registered = count ?? 0;

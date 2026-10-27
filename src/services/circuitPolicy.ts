@@ -64,3 +64,26 @@ export function finalQualified<T extends { id: string }>(circuit: string[], divi
   const fromDivision = division.filter((team) => !taken.has(team.id)).slice(0, size - fromCircuit.length);
   return [...fromCircuit.map((teamId) => ({ teamId, via: 'circuit' as const })), ...fromDivision.map((team) => ({ teamId: team.id, via: 'division' as const }))];
 }
+
+/**
+ * Play-in (veille de la grande finale) : les 2 dernières places du circuit (`size - 1` et `size`) affrontent les 2
+ * meilleures équipes de la Division pas encore qualifiées : dernière place du circuit contre la meilleure de la
+ * Division, avant-dernière contre la 2e. Null s'il manque une équipe (places directes, finalQualified).
+ */
+export function playInPairs<T extends { id: string }>(circuit: string[], division: T[], size: number, activeIds: Set<string>): { direct: string[]; pairs: [string, string][] } | null {
+  const active = circuit.filter((id) => activeIds.has(id));
+  const direct = active.slice(0, Math.max(0, size - DIVISION_SPOTS));
+  const challengers = active.slice(direct.length, size);
+  if (direct.length !== size - DIVISION_SPOTS || challengers.length !== DIVISION_SPOTS) return null;
+  const taken = new Set([...direct, ...challengers]);
+  const fromDivision = division.filter((team) => !taken.has(team.id)).slice(0, DIVISION_SPOTS).map((team) => team.id);
+  if (fromDivision.length !== DIVISION_SPOTS) return null;
+  return { direct, pairs: [[challengers[0]!, fromDivision[1]!], [challengers[1]!, fromDivision[0]!]] };
+}
+
+/** Qualifiés de la grande finale après un play-in : places directes du circuit puis les vainqueurs du play-in. */
+export function finalWithPlayIn(direct: string[], winners: (string | null)[], activeIds: Set<string>): { teamId: string; via: 'circuit' | 'playin' }[] {
+  const seen = new Set<string>();
+  const keep = (id: string | null): id is string => Boolean(id && activeIds.has(id) && !seen.has(id) && seen.add(id));
+  return [...direct.filter(keep).map((teamId) => ({ teamId, via: 'circuit' as const })), ...winners.filter(keep).map((teamId) => ({ teamId, via: 'playin' as const }))];
+}

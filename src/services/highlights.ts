@@ -51,7 +51,7 @@ export async function highlights() {
     supabase.from('cod_matches').select('id, team_a, team_b, winner, map, format, team_size, points_changes, completed_at').eq('status', 'completed').order('completed_at', { ascending: false }).limit(12),
     supabase.from('team_matches').select('id, team_a, team_b, winner, scores, tournament_id, completed_at').eq('status', 'completed').order('completed_at', { ascending: false }).limit(10),
     supabase.from('teams').select('id, name, tag, color, logo_url, created_at').is('cup_tournament', null).order('created_at', { ascending: false }).limit(6),
-    supabase.from('tournaments').select('id, kind, name, winner_team, completed_at').eq('status', 'completed').order('completed_at', { ascending: false }).limit(6),
+    supabase.from('tournaments').select('id, kind, name, winner_team, completed_at').eq('status', 'completed').neq('kind', 'playin').order('completed_at', { ascending: false }).limit(6),
     supabase.from('users').select('id, username, avatar_url, created_at').order('created_at', { ascending: false }).limit(6),
   ]);
 
@@ -168,7 +168,7 @@ async function rightNow(weekMatches: CodMatch[], known: Map<string, User>) {
     supabase.from('teams').select('id, name, tag, color, logo_url, points, wins, losses').is('disbanded_at', null).is('cup_tournament', null).order('points', { ascending: false }).limit(20),
     supabase.from('cod_profiles').select('user_id, win_streak').gte('win_streak', 3).order('win_streak', { ascending: false }).limit(1),
     supabase.from('team_matches').select('team_a, team_b, roster_a, roster_b, completed_at, tournament_id').eq('status', 'completed').gte('completed_at', since).limit(1000),
-    supabase.from('tournaments').select('id, kind, name, size, team_size, best_of, starts_at').eq('status', 'scheduled').gt('starts_at', new Date().toISOString()).order('starts_at').limit(1),
+    supabase.from('tournaments').select('id, kind, name, size, team_size, best_of, starts_at').eq('status', 'scheduled').neq('kind', 'playin').gt('starts_at', new Date().toISOString()).order('starts_at').limit(1),
   ]);
   const teamWeek = (weekTeam.data ?? []) as { team_a: string; team_b: string; roster_a: string[]; roster_b: string[]; completed_at: string; tournament_id: string | null }[];
 
@@ -231,7 +231,7 @@ export async function hallOfFame() {
     supabase.from('seasons').select('id, name, starts_at, ends_at, is_active').order('id', { ascending: false }),
     supabase.from('season_results').select('season_id, user_id, position, username, points, wins, losses').lte('position', 3),
     supabase.from('team_season_results').select('season_id, team_id, position, name, tag, points, wins, losses').lte('position', 3),
-    supabase.from('tournaments').select('id, kind, name, winner_team, finalist_team, third_team, completed_at, season_id').eq('status', 'completed').order('completed_at', { ascending: false }).limit(60),
+    supabase.from('tournaments').select('id, kind, name, winner_team, finalist_team, third_team, completed_at, season_id').eq('status', 'completed').neq('kind', 'playin').order('completed_at', { ascending: false }).limit(60),
     supabase.from('cup_medals').select('tournament_id, user_id, place, team_name').eq('place', 'or'),
     supabase.from('cod_monthly_mvp').select('month, user_id, votes').order('month', { ascending: false }).limit(24),
     supabase.from('cod_profiles').select('user_id, best_streak, peak_points, xp, wins').limit(10000),
