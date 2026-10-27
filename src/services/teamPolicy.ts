@@ -28,6 +28,8 @@ export interface TeamInput {
   description?: string | null;
   color?: string;
   socials?: Record<string, string>;
+  recruiting?: boolean;
+  recruiting_note?: string | null;
 }
 
 const clean = (value: string) => value.normalize('NFC').replace(/\s+/g, ' ').trim();
@@ -72,6 +74,16 @@ export function parseTeamInput(body: unknown, { create = false } = {}): TeamInpu
       socials[key] = value;
     }
     out.socials = socials;
+  }
+  if (input.recruiting !== undefined) {
+    if (typeof input.recruiting !== 'boolean') throw new TeamInputError('Recrutement : valeur invalide.');
+    out.recruiting = input.recruiting;
+  }
+  if (input.recruitingNote !== undefined) {
+    if (input.recruitingNote !== null && typeof input.recruitingNote !== 'string') throw new TeamInputError('Message de recrutement invalide.');
+    const note = typeof input.recruitingNote === 'string' ? clean(input.recruitingNote) : '';
+    if (note.length > 120) throw new TeamInputError('Le message de recrutement fait 120 caractères au plus.');
+    out.recruiting_note = note || null;
   }
   return out;
 }
