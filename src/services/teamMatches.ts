@@ -854,13 +854,15 @@ async function afterClose(match: TeamMatch): Promise<void> {
 
 /** Nom du tournoi et du tour d'un match (petite finale, tableaux de la double élimination compris). */
 async function tournamentLabel(tournamentId: string, round: number | null, matchId: string) {
-  const row = unwrap(await supabase.from('tournaments').select('id, name, size, bracket').eq('id', tournamentId).maybeSingle()) as {
+  const row = unwrap(await supabase.from('tournaments').select('id, kind, name, size, bracket').eq('id', tournamentId).maybeSingle()) as {
     id: string;
+    kind: string;
     name: string;
     size: number;
     bracket: 'single' | 'double';
   } | null;
   if (!row) return null;
+  if (row.kind === 'playin') return { id: row.id, name: row.name, round: round ? 'Play-in' : null };
   const { isThirdPlace, roundName, roundNameDouble, roundsFor } = await import('./tournamentPolicy.js');
   if (!round) return { id: row.id, name: row.name, round: null };
   if (row.bracket === 'double') return { id: row.id, name: row.name, round: roundNameDouble(round, row.size) };

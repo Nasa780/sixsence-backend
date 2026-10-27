@@ -3,7 +3,7 @@ import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { postAnnouncement } from './announcements.js';
 import { circuitOrder } from './circuit.js';
-import { finalQualified } from './circuitPolicy.js';
+import { CIRCUIT_POINTS, finalQualified, finalWithPlayIn, playInPairs } from './circuitPolicy.js';
 import { mapPool } from './maps.js';
 import { SUPPRESS_EMBEDS, discord, discordEnabled, discordIds, dm, notifyStaff } from './discord.js';
 import { pushToUsers } from './push.js';
@@ -66,11 +66,20 @@ import {
  * répartis, capitaine = le mieux classé (formTeams). Équipes temporaires (teams.cup_tournament, créées
  * dissoutes : jamais au classement). Même tableau et même déroulé que la Coupe Horus ; récompenses :
  * médailles or / argent / bronze pour les joueurs (cup_medals) et rôle « Vainqueur — Coupe Anubis » ; pas de points.
+ *
+ * Play-in (kind 'playin', migration 0049) : veille de la grande finale, créé par un admin ; 7e et 8e du circuit
+ * contre les 2 meilleures équipes de la Division (playInPairs), 2 rencontres BO3 en un seul tour, même check-in et
+ * effectifs figés que le tournoi de saison ; les 2 vainqueurs (winner_team, finalist_team) prennent les dernières
+ * places de la grande finale (finalists). Pas de trophée ni de points.
  */
 
-type Kind = 'saison' | 'horus' | 'anubis';
+type Kind = 'saison' | 'horus' | 'anubis' | 'playin';
 /** Coupes à inscription libre (Horus : équipes, Anubis : joueurs). */
-const isCup = (kind: Kind) => kind !== 'saison';
+const isCup = (kind: Kind) => kind === 'horus' || kind === 'anubis';
+/** Un seul tour pour le play-in (2 rencontres indépendantes). */
+const roundsOf = (tournament: Pick<TournamentRow, 'kind' | 'size'>) => (tournament.kind === 'playin' ? 1 : roundsFor(tournament.size));
+/** Page d'un tournoi sur le site. */
+const pageOf = (kind: Kind) => (kind === 'anubis' ? `${PAGE}?coupe=anubis` : kind === 'saison' ? `${PAGE}?coupe=saison` : kind === 'playin' ? '/cod/circuit' : PAGE);
 
 interface TournamentRow {
   id: string;
@@ -174,7 +183,142 @@ async function finalists(size: number) {
   const circuit = await circuitOrder();
   if (circuit.length === 0) return division.slice(0, size).map((team) => ({ ...team, via: 'division' as const }));
   const byId = new Map(teams.map((team) => [team.id, team]));
-  return finalQualified(circuit, division, size, new Set(byId.keys())).map((q) => ({ ...byId.get(q.teamId)!, via: q.via }));
+  const active = new Set(byId.keys());
+  // Play-in joué cette saison : places directes du circuit, puis ses 2 vainqueurs ; place encore libre = Division.
+  const playIn = await seasonPlayIn('completed');
+  const pairs = playIn ? playInPairs(circuit, division, size, active) : null;
+  if (playIn && pairs) {
+    const qualified: { teamId: string; via: 'circuit' | 'playin' | 'division' }[] = finalWithPlayIn(pairs.direct, [playIn.winner_team, playIn.finalist_team], active);
+    const taken = new Set(qualified.map((q) => q.teamId));
+    for (const team of division) if (qualified.length < size && !taken.has(team.id)) qualified.push({ teamId: team.id, via: 'division' });
+    return qualified.map((q) => ({ ...byId.get(q.teamId)!, via: q.via }));
+  }
+  return finalQualified(circuit, division, size, active).map((q) => ({ ...byId.get(q.teamId)!, via: q.via }));
+}
+
+/** Dernier play-in de la saison active (statut voulu, sinon prévu, en cours ou terminé). */
+async function seasonPlayIn(status?: TournamentRow['status']) {
+  const season = unwrap(await supabase.from('seasons').select('id').eq('is_active', true).maybeSingle()) as { id: number } | null;
+  if (!season) return null;
+  let query = supabase.from('tournaments').select('*').eq('kind', 'playin').eq('season_id', season.id);
+  query = status ? query.eq('status', status) : query.in('status', ['scheduled', 'running', 'completed']);
+  return unwrap(await query.order('created_at', { ascending: false }).limit(1).maybeSingle()) as TournamentRow | null;
+}
+
+/**
+ * Affiches du play-in (page Circuit, aperçu de l'admin) : celles du play-in de la saison s'il existe (avec les
+ * résultats), sinon celles que donnerait le classement actuel pour une grande finale de `size` places.
+ */
+export async function playInOverview(size = 8) {
+  const teams = await rankedTeams();
+  const byId = new Map(teams.map((team) => [team.id, team]));
+  const card = (id: string | null) => {
+    const team = id ? byId.get(id) : undefined;
+    return team ? { id: team.id, name: team.name, tag: team.tag, color: team.color, logoUrl: team.logo_url } : null;
+  };
+  const playIn = await seasonPlayIn();
+  if (playIn) {
+    const [rows, participants] = await Promise.all([entriesOf(playIn.id), participantsOf(playIn.id)]);
+    const via = (id: string | null) => (id && participants.find((p) => p.team_id === id)?.seed) ?? null;
+    return {
+      id: playIn.id,
+      name: playIn.name,
+      status: playIn.status,
+      startsAt: playIn.starts_at,
+      projected: false,
+      pairs: rows
+        .filter((row) => row.round === 1)
+        .sort((a, b) => a.slot - b.slot)
+        .map((row) => ({ a: card(row.team_a), b: card(row.team_b), seedA: via(row.team_a), seedB: via(row.team_b), winner: row.winner, status: row.status, matchId: row.match_id })),
+    };
+  }
+  const pairs = playInPairs(await circuitOrder(), qualifiedTeams(teams, teams.length), size, new Set(byId.keys()));
+  if (!pairs) return null;
+  return {
+    id: null,
+    name: null,
+    status: 'projected',
+    startsAt: null,
+    projected: true,
+    pairs: pairs.pairs.map(([a, b], index) => ({ a: card(a), b: card(b), seedA: size - 1 + index, seedB: null, winner: null, status: 'pending', matchId: null })),
+  };
+}
+
+/** Crée le play-in de la saison : 2 rencontres BO3 (effectifs figés, check-in comme le tournoi de saison). */
+export async function createPlayIn(adminId: string, body: unknown) {
+  if (!config.teams.enabled) throw new HttpError(403, 'TEAM_MODE_PAUSED', 'La Division est en pause.');
+  const input = (body ?? {}) as { startsAt?: unknown; size?: unknown };
+  const size = (TOURNAMENT_SIZES as readonly number[]).includes(Number(input.size)) ? Number(input.size) : 8;
+  const startsAt = new Date(typeof input.startsAt === 'string' ? input.startsAt : '');
+  if (Number.isNaN(startsAt.getTime())) throw new HttpError(400, 'INVALID_TOURNAMENT', 'Date de début invalide.');
+  if (startsAt.getTime() < Date.now() + (REVEAL_MINUTES + 5) * 60_000) throw new HttpError(400, 'INVALID_TOURNAMENT', `Le play-in doit commencer dans plus de ${REVEAL_MINUTES + 5} min.`);
+  if (await seasonPlayIn()) throw new HttpError(409, 'TOURNAMENT_EXISTS', 'Le play-in de la saison est déjà prévu ou joué.');
+  const season = unwrap(await supabase.from('seasons').select('id, name').eq('is_active', true).maybeSingle()) as { id: number; name: string | null } | null;
+  if (!season) throw new HttpError(409, 'NO_SEASON', 'Aucune saison active.');
+  const teams = await rankedTeams();
+  const pairs = playInPairs(await circuitOrder(), qualifiedTeams(teams, teams.length), size, new Set(teams.map((team) => team.id)));
+  if (!pairs) throw new HttpError(409, 'NOT_ENOUGH_TEAMS', `Pas de play-in possible : il faut ${size} équipes au circuit et 2 équipes de Division (${QUALIFY_MATCHES} matchs) pas encore qualifiées.`);
+
+  const order = pairs.pairs.flat();
+  const members = (unwrap(await supabase.from('team_members').select('team_id, user_id').in('team_id', order)) ?? []) as { team_id: string; user_id: string }[];
+  const name = `Play-in — ${season.name ?? 'Saison'}`.slice(0, 60);
+  const tournament = unwrap(
+    await supabase
+      .from('tournaments')
+      .insert({ name, kind: 'playin', size: 4, best_of: 3, final_best_of: 3, third_place: false, bracket: 'single', starts_at: startsAt.toISOString(), season_id: season.id, created_by: adminId })
+      .select('*')
+      .single(),
+  ) as TournamentRow;
+  unwrap(
+    await supabase.from('tournament_teams').insert(
+      order.map((teamId, index) => ({
+        tournament_id: tournament.id,
+        team_id: teamId,
+        seed: index + 1,
+        frozen_roster: members.filter((member) => member.team_id === teamId).map((member) => member.user_id),
+      })),
+    ),
+  );
+  unwrap(
+    await supabase
+      .from('tournament_bracket')
+      .insert(pairs.pairs.map(([a, b], slot) => ({ tournament_id: tournament.id, round: 1, slot, team_a: a, team_b: b, status: 'pending' }))),
+  );
+
+  const date = startsAt.toLocaleString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  await pushToUsers(members.map((member) => member.user_id), {
+    title: `⚔️ Ton équipe joue le play-in`,
+    body: `Une place en grande finale en jeu, BO3 ${date}. Check-in d’un joueur de l’équipe de 2 h à 15 min avant.`,
+    url: '/cod/circuit',
+    tag: `tournoi-${tournament.id}`,
+  });
+  await announce(`⚔️ **${name}** — 2 places pour la grande finale, BO3 ${date} (${CHECKIN_TEXT}).\n${config.siteUrl}/cod/circuit`);
+  return playInOverview(size);
+}
+
+/** Fin du play-in : les vainqueurs des deux rencontres sont qualifiés pour la grande finale. */
+async function completePlayIn(tournament: TournamentRow, entries: BracketEntry[]): Promise<void> {
+  const winners = [0, 1].map((slot) => entries.find((entry) => entry.slot === slot)?.winner ?? null);
+  const claimed = unwrap(
+    await supabase
+      .from('tournaments')
+      .update({ status: 'completed', winner_team: winners[0], finalist_team: winners[1], completed_at: new Date().toISOString() })
+      .eq('id', tournament.id)
+      .eq('status', 'running')
+      .select('id')
+      .maybeSingle(),
+  );
+  if (!claimed) return;
+  const participants = await participantsOf(tournament.id);
+  const names = (unwrap(await supabase.from('teams').select('id, name, tag').in('id', winners.filter(Boolean) as string[])) ?? []) as { id: string; name: string; tag: string }[];
+  const list = names.map((team) => `**[${team.tag}] ${team.name}**`).join(' et ');
+  await pushToUsers(participants.flatMap((p) => p.frozen_roster), {
+    title: `⚔️ ${tournament.name} terminé`,
+    body: list ? `Qualifiées pour la grande finale : ${names.map((team) => team.name).join(' et ')}.` : 'Résultats en ligne.',
+    url: '/cod/circuit',
+    tag: `tournoi-${tournament.id}`,
+  });
+  if (list) await announce(`⚔️ **${tournament.name}** : ${list} rejoignent la grande finale !\n${config.siteUrl}/cod/circuit`);
 }
 
 // --- Administration --------------------------------------------------------------------------
@@ -303,7 +447,7 @@ export async function currentTournament(viewerId: string | null, kind: Kind = 's
 export async function getTournament(id: string, viewerId: string | null) {
   const tournament = await tournamentRow(id);
   const [participants, rows] = await Promise.all([participantsOf(id), entriesOf(id)]);
-  const rounds = roundsFor(tournament.size);
+  const rounds = roundsOf(tournament);
   const teamIds = participants.map((p) => p.team_id);
   const teams = teamIds.length
     ? ((unwrap(await supabase.from('teams').select('id, name, tag, color, logo_url, points').in('id', teamIds)) ?? []) as {
@@ -411,12 +555,22 @@ export async function getTournament(id: string, viewerId: string | null) {
     finalist: card(tournament.finalist_team),
     teams: participants.map((p) => ({ ...card(p.team_id)!, checkedIn: Boolean(p.checked_in_at), forfeit: p.forfeit })),
     bracket: tournament.bracket,
+    minTeams: tournament.kind === 'horus' || tournament.kind === 'anubis' ? CUP_MIN_TEAMS : null,
+    // Ce que rapporte chaque place (Coupe Horus) : points de Division et de circuit.
+    rewards:
+      tournament.kind === 'horus'
+        ? {
+            division: { winner: CUP_BONUS.or, finalist: CUP_BONUS.argent, third: CUP_BONUS.bronze, present: CUP_BONUS.participation },
+            circuit: { winner: CIRCUIT_POINTS.winner, finalist: CIRCUIT_POINTS.finalist, third: CIRCUIT_POINTS.third, present: CIRCUIT_POINTS.present },
+            xp: { win: 500, loss: 150 },
+          }
+        : null,
     rounds: Array.from({ length: rounds }, (_, index) => {
       const round = index + 1;
       const double = tournament.bracket === 'double';
       return {
         round,
-        name: double ? roundNameDouble(round, tournament.size) : roundName(round, rounds),
+        name: double ? roundNameDouble(round, tournament.size) : tournament.kind === 'playin' ? 'Play-in' : roundName(round, rounds),
         bestOf: double ? bestOfDouble(round, formatOf(tournament)) : bestOfFor(round, rounds, formatOf(tournament)),
         entries: display.filter((entry) => entry.round === round && !isThirdPlace(entry, rounds)).map(present),
       };
@@ -710,7 +864,7 @@ async function checkInReminders(): Promise<void> {
     const { data: claimed } = await supabase.rpc('app_claim', { p_key: `checkin_${tournament.id}`, p_value: step });
     if (!claimed) continue;
     const closes = new Date(revealTime(tournament)).toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' });
-    const url = tournament.kind === 'anubis' ? `${PAGE}?coupe=anubis` : tournament.kind === 'saison' ? `${PAGE}?coupe=saison` : PAGE;
+    const url = pageOf(tournament.kind);
     // Joueurs à prévenir : Anubis, chaque inscrit ; équipes, tout l'effectif (n'importe lequel peut faire le check-in).
     let targets: string[];
     if (tournament.kind === 'anubis') {
@@ -759,8 +913,8 @@ async function startTournament(tournament: TournamentRow): Promise<void> {
       if (Object.keys(patch).length) unwrap(await supabase.from('tournament_bracket').update(patch).eq('id', entry.id));
     }
   }
-  await notifyDraw(tournament, participants.filter((p) => p.checked_in_at).flatMap((p) => p.match_roster ?? p.frozen_roster), `${PAGE}?coupe=saison`);
-  await announce(`🏆 **${tournament.name}** : check-in terminé${absent.length ? `, ${absent.length} équipe(s) forfait` : ''}. Premiers matchs à ${hourOf(tournament)} !\n${config.siteUrl}${PAGE}`);
+  await notifyDraw(tournament, participants.filter((p) => p.checked_in_at).flatMap((p) => p.match_roster ?? p.frozen_roster), pageOf(tournament.kind));
+  await announce(`🏆 **${tournament.name}** : check-in terminé${absent.length ? `, ${absent.length} équipe(s) forfait` : ''}. Premiers matchs à ${hourOf(tournament)} !\n${config.siteUrl}${pageOf(tournament.kind)}`);
   await advanceTournament(tournament.id);
 }
 
@@ -886,7 +1040,7 @@ async function startAnubis(tournament: TournamentRow): Promise<void> {
 export async function advanceTournament(id: string): Promise<void> {
   const tournament = await tournamentRow(id);
   if (tournament.status !== 'running') return;
-  const rounds = roundsFor(tournament.size);
+  const rounds = roundsOf(tournament);
   const rows = await entriesOf(id);
   // État enregistré, avant les résultats ci-dessous : sert à savoir quelles rencontres réécrire en base.
   const saved = rows.map((row) => ({ ...row }));
@@ -938,7 +1092,7 @@ export async function advanceTournament(id: string): Promise<void> {
     if (!match?.id) continue;
     if (isCup(tournament.kind)) await openMatchVoice(match, tournament.name).catch((caught) => console.warn('[tournoi] salons vocaux impossibles', (caught as Error).message));
     await pushToUsers([...match.roster_a, ...match.roster_b], {
-      title: `🏆 ${double ? roundNameDouble(entry.round, tournament.size) : isThirdPlace(entry, rounds) ? 'Petite finale' : roundName(entry.round, rounds)} : à vous de jouer`,
+      title: `🏆 ${double ? roundNameDouble(entry.round, tournament.size) : tournament.kind === 'playin' ? 'Play-in' : isThirdPlace(entry, rounds) ? 'Petite finale' : roundName(entry.round, rounds)} : à vous de jouer`,
       body: `${tournament.name} · BO${bestOf}. Ouvre la feuille de match.`,
       url: `/cod/equipes/match/${match.id}`,
       tag: `team-match-${match.id}`,
@@ -946,6 +1100,10 @@ export async function advanceTournament(id: string): Promise<void> {
     });
   }
 
+  if (tournament.kind === 'playin') {
+    if (advanced.every((entry) => entry.status === 'done' || entry.status === 'empty')) await completePlayIn(tournament, advanced);
+    return;
+  }
   const result = double ? podiumDouble(advanced, tournament.size) : podium(advanced, rounds);
   if (result) await completeTournament(tournament, result.winner, result.finalist, result.third);
 }

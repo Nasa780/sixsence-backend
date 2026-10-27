@@ -4,7 +4,8 @@ import { supabase } from '../supabase.js';
 /**
  * Analyse d'un joueur (profil, section « Analyse ») : place sur le site pour chaque chiffre, ratio sur 30 jours,
  * adversaires et coéquipiers les plus fréquents en Classé, face à face avec le visiteur, activité par jour,
- * équipes jouées (actuelle et anciennes). Lecture publique, sauf le face à face (visiteur connecté).
+ * parcours en Division (équipes actuelle et anciennes : dates d'arrivée et de départ enregistrées depuis la migration
+ * 0049, team_memberships ; avant, reconstruites depuis les matchs joués). Lecture publique, sauf le face à face.
  */
 
 const DAY = 86_400_000;
@@ -61,6 +62,13 @@ export async function playerInsights(userId: string, viewerId: string | null) {
       .limit(500),
     supabase.from('team_members').select('team_id, role, joined_at').eq('user_id', userId).maybeSingle(),
   ]);
+  const passages = (unwrap(await supabase.from('team_memberships').select('team_id, role, joined_at, left_at, left_reason').eq('user_id', userId).order('joined_at')) ?? []) as {
+    team_id: string;
+    role: string;
+    joined_at: string;
+    left_at: string | null;
+    left_reason: 'left' | 'disbanded' | null;
+  }[];
   const cod = (unwrap(codRows) ?? []) as CodRow[];
   const teamMatches = (unwrap(teamRows) ?? []) as TeamMatchRow[];
 
@@ -149,9 +157,9 @@ export async function playerInsights(userId: string, viewerId: string | null) {
     byTeam.set(teamId, t);
   }
   const current = unwrap(membership) as { team_id: string; role: string; joined_at: string } | null;
-  const teamIds = [...new Set([...(current ? [current.team_id] : []), ...byTeam.keys()])];
+  const teamIds = [...new Set([...(current ? [current.team_id] : []), ...passages.map((p) => p.team_id), ...byTeam.keys()])];
   const teamCards = teamIds.length
-    ? ((unwrap(await supabase.from('teams').select('id, name, tag, color, logo_url, disbanded_at, cup_tournament').in('id', teamIds)) ?? []) as {
+    ? ((unwrap(await supabase.from('teams').select('id, name, tag, color, logo_url, disbanded_at, cup_tournament, trophies').in('id', teamIds)) ?? []) as {
         id: string;
         name: string;
         tag: string;
@@ -159,23 +167,37 @@ export async function playerInsights(userId: string, viewerId: string | null) {
         logo_url: string | null;
         disbanded_at: string | null;
         cup_tournament: string | null;
+        trophies: { date?: string }[] | null;
       }[])
     : [];
   const teams = teamCards
     .filter((t) => !t.cup_tournament)
-    .map((t) => ({
-      id: t.id,
-      name: t.name,
-      tag: t.tag,
-      color: t.color,
-      logoUrl: t.logo_url,
-      disbanded: Boolean(t.disbanded_at),
-      current: current?.team_id === t.id,
-      role: current?.team_id === t.id ? current.role : null,
-      since: current?.team_id === t.id ? current.joined_at : (byTeam.get(t.id)?.first ?? null),
-      until: current?.team_id === t.id ? null : (byTeam.get(t.id)?.last ?? null),
-      played: byTeam.get(t.id)?.played ?? 0,
-    }))
+    .map((t) => {
+      const isCurrent = current?.team_id === t.id;
+      // Passage enregistré (le dernier dans cette équipe), sinon dates reconstruites depuis les matchs.
+      const passage = passages.filter((p) => p.team_id === t.id).at(-1);
+      const played = byTeam.get(t.id);
+      const since = passage?.joined_at ?? (isCurrent ? current.joined_at : (played?.first ?? null));
+      const until = isCurrent ? null : (passage?.left_at ?? played?.last ?? null);
+      const end = until ? new Date(until).getTime() : Date.now();
+      const trophies = (t.trophies ?? []).filter((trophy) => trophy.date && (!since || new Date(trophy.date).getTime() >= new Date(since).getTime()) && new Date(trophy.date).getTime() <= end).length;
+      return {
+        id: t.id,
+        name: t.name,
+        tag: t.tag,
+        color: t.color,
+        logoUrl: t.logo_url,
+        disbanded: Boolean(t.disbanded_at),
+        current: isCurrent,
+        role: isCurrent ? current.role : (passage?.role ?? null),
+        since,
+        until,
+        leftReason: isCurrent ? null : (passage?.left_reason ?? (t.disbanded_at ? 'disbanded' : null)),
+        exact: Boolean(passage),
+        played: played?.played ?? 0,
+        trophies,
+      };
+    })
     .sort((a, b) => Number(b.current) - Number(a.current) || (b.until ?? '').localeCompare(a.until ?? ''));
 
   // Noms des joueurs cités.

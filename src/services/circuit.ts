@@ -54,6 +54,8 @@ export async function getCircuit() {
     status: string;
   } | null;
   const finalSize = final?.size ?? DEFAULT_FINAL_SIZE;
+  const { playInOverview } = await import('./tournaments.js');
+  const playIn = await playInOverview(finalSize).catch(() => null);
   const ids = standings.map((s) => s.teamId);
   const teams = ids.length
     ? ((unwrap(await supabase.from('teams').select('id, name, tag, color, logo_url, disbanded_at').in('id', ids)) ?? []) as { id: string; name: string; tag: string; color: string; logo_url: string | null; disbanded_at: string | null }[])
@@ -66,6 +68,7 @@ export async function getCircuit() {
     circuitSpots: finalSize - DIVISION_SPOTS,
     divisionSpots: DIVISION_SPOTS,
     final: final ? { id: final.id, name: final.name, startsAt: final.starts_at, status: final.status } : null,
+    playIn,
     cups: cups.map((c) => ({ id: c.id, name: c.name, status: c.status, startsAt: c.starts_at, winner: c.winner_team ? byId.get(c.winner_team)?.name ?? null : null })),
     standings: standings
       .filter((s) => byId.has(s.teamId))
