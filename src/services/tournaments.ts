@@ -2,6 +2,8 @@ import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { postAnnouncement } from './announcements.js';
+import { circuitOrder } from './circuit.js';
+import { finalQualified } from './circuitPolicy.js';
 import { mapPool } from './maps.js';
 import { SUPPRESS_EMBEDS, discord, discordEnabled, discordIds, dm, notifyStaff } from './discord.js';
 import { pushToUsers } from './push.js';
@@ -161,6 +163,20 @@ async function rankedTeams() {
   return rows.map((row) => ({ ...row, played: row.wins + row.losses, createdAt: row.created_at }));
 }
 
+/**
+ * Qualifiés du tournoi de fin de saison : avec un circuit (au moins une Coupe Horus terminée cette saison), les
+ * premières du circuit puis les 2 meilleures de la Division pas encore qualifiées (circuitPolicy) ; sans circuit,
+ * le classement de la Division (QUALIFY_MATCHES matchs au moins). Ordre = têtes de série.
+ */
+async function finalists(size: number) {
+  const teams = await rankedTeams();
+  const division = qualifiedTeams(teams, teams.length);
+  const circuit = await circuitOrder();
+  if (circuit.length === 0) return division.slice(0, size).map((team) => ({ ...team, via: 'division' as const }));
+  const byId = new Map(teams.map((team) => [team.id, team]));
+  return finalQualified(circuit, division, size, new Set(byId.keys())).map((q) => ({ ...byId.get(q.teamId)!, via: q.via }));
+}
+
 // --- Administration --------------------------------------------------------------------------
 
 function parseCreate(body: unknown): { name: string; startsAt: Date; size: number } {
@@ -182,7 +198,7 @@ export async function previewQualified(size: unknown) {
   return {
     size: places,
     minMatches: QUALIFY_MATCHES,
-    qualified: qualifiedTeams(teams, places).map((team, index) => ({ seed: index + 1, id: team.id, name: team.name, tag: team.tag, color: team.color, logoUrl: team.logo_url, points: team.points, played: team.played })),
+    qualified: (await finalists(places)).map((team, index) => ({ seed: index + 1, id: team.id, name: team.name, tag: team.tag, color: team.color, logoUrl: team.logo_url, points: team.points, played: team.played, via: team.via })),
   };
 }
 
@@ -194,8 +210,8 @@ export async function createTournament(adminId: string, body: unknown) {
   if (error) throw fromDbError(error);
   if ((count ?? 0) > 0) throw new HttpError(409, 'TOURNAMENT_EXISTS', 'Un tournoi est déjà prévu ou en cours.');
 
-  const qualified = qualifiedTeams(await rankedTeams(), size);
-  if (qualified.length < 2) throw new HttpError(409, 'NOT_ENOUGH_TEAMS', `Il faut au moins 2 équipes avec ${QUALIFY_MATCHES} matchs pour lancer un tournoi.`);
+  const qualified = await finalists(size);
+  if (qualified.length < 2) throw new HttpError(409, 'NOT_ENOUGH_TEAMS', `Il faut au moins 2 équipes (circuit, ou ${QUALIFY_MATCHES} matchs de Division) pour lancer un tournoi.`);
   const members = (unwrap(await supabase.from('team_members').select('team_id, user_id').in('team_id', qualified.map((team) => team.id))) ?? []) as { team_id: string; user_id: string }[];
   const season = unwrap(await supabase.from('seasons').select('id').eq('is_active', true).maybeSingle()) as { id: number } | null;
 
