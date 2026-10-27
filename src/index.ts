@@ -6,6 +6,7 @@ import { config, isOriginAllowed } from './config.js';
 import { asyncHandler, errorHandler, isUnexpected, notFoundHandler } from './errors.js';
 import { bus } from './events.js';
 import { rateLimit } from './rateLimit.js';
+import { liveActivity } from './services/live.js';
 import { isVisitorId, markPresent, onlineVisitors } from './services/presence.js';
 import { postDailyReport, recordVisit } from './services/siteLog.js';
 import { adminRouter } from './routes/admin.js';
@@ -278,6 +279,20 @@ app.get(
 // Temps forts (joueur et match de la semaine, fil d'activité) et Hall of Fame, publics.
 app.get('/highlights', asyncHandler(async (_req, res) => void res.json(await highlights())));
 app.get('/hall-of-fame', asyncHandler(async (_req, res) => void res.json(await hallOfFame())));
+
+// Panneau « En direct » de l'accueil : activité du moment (Classé, Division, coupe, GTA 6, connectés) et fil récent.
+app.get(
+  '/live',
+  asyncHandler(async (_req, res) => {
+    const queues = await getQueueSummaries();
+    res.json(
+      await liveActivity({
+        online: Math.max(onlineVisitors(), hub.onlineCount()),
+        inQueue: queues.reduce((sum, queue) => sum + queue.size, 0),
+      }),
+    );
+  }),
+);
 
 // Compteurs publics de la page d'accueil.
 app.get(
