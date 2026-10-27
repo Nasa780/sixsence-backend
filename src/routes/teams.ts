@@ -24,6 +24,7 @@ import {
   teamStatus,
 } from '../services/teamMatches.js';
 import { TEAM_REPORT_REASONS } from '../services/teamPolicy.js';
+import { getCircuit } from '../services/circuit.js';
 import { cancelTeamSchedule, scheduleSlots, scheduleTeamMatch } from '../services/teamSchedules.js';
 import { answerChallenge, cancelChallenge, createChallenge, myChallenges } from '../services/challenges.js';
 import { leagueState } from '../services/leagues.js';
@@ -129,6 +130,8 @@ export function teamsRouter(): Router {
   router.get('/me/play', requireAuth, asyncHandler(async (_req, res) => void res.json(await teamPlayState(currentUser(res).id))));
   router.post('/me/queue', requireAuth, asyncHandler(async (req, res) => void res.json(await joinTeamQueue(currentUser(res).id, req.body))));
   // Match programmé : créneaux pris (anonymes), programmer / annuler (Leaders).
+  // Circuit : points des Coupes Horus de la saison, qualification de la grande finale.
+  router.get('/circuit', asyncHandler(async (_req, res) => void res.json(await getCircuit())));
   router.get('/schedule/slots', asyncHandler(async (_req, res) => void res.json(await scheduleSlots())));
   router.post('/me/schedule', requireAuth, asyncHandler(async (req, res) => void res.json(await scheduleTeamMatch(currentUser(res).id, req.body))));
   router.delete('/me/schedule', requireAuth, asyncHandler(async (_req, res) => void res.json(await cancelTeamSchedule(currentUser(res).id))));
