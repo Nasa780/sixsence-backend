@@ -48,7 +48,7 @@ import {
 
 /**
  * Tournoi de fin de saison (Division, étape 3) : création par un admin (qualifiés et
- * effectifs figés), check-in des Leaders 30 min avant, déroulé automatique en une soirée (matchs
+ * effectifs figés), check-in d'un joueur de l'équipe de 2 h à 15 min avant, déroulé automatique en une soirée (matchs
  * créés dès que deux équipes se font face), trophées et rôle Discord du vainqueur.
  * Règles pures dans tournamentPolicy.ts ; tables et fonctions SQL dans la migration 0028.
  *
@@ -222,7 +222,7 @@ export async function createTournament(adminId: string, body: unknown) {
   const date = startsAt.toLocaleString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   await pushToUsers(members.map((member) => member.user_id), {
     title: `🏆 Ton équipe est qualifiée : ${name}`,
-    body: `Début ${date}. Check-in d’un Leader de 2 h à 15 min avant.`,
+    body: `Début ${date}. Check-in d’un joueur de l’équipe de 2 h à 15 min avant.`,
     url: PAGE,
     tag: `tournoi-${tournament.id}`,
   });
@@ -335,7 +335,7 @@ export async function getTournament(id: string, viewerId: string | null) {
         matchRoster: participant.match_roster,
         frozenRoster: await namesOf(roster),
         rosterSize: config.teams.rosterSize,
-        canCheckIn: isLeader && tournament.status === 'scheduled' && checkInOpen(tournament),
+        canCheckIn: tournament.status === 'scheduled' && checkInOpen(tournament),
         canRegister: false,
         canUnregister: tournament.kind === 'horus' && isLeader && open,
       };
@@ -520,14 +520,14 @@ const checkInOpen = (tournament: TournamentRow) => {
 
 // --- Check-in -----------------------------------------------------------------------------
 
-/** Check-in d'un Leader : joueurs du match choisis parmi l'effectif figé (modifiables jusqu'au début). */
+/** Check-in d'un joueur de l'équipe (Leader ou non) : joueurs du match choisis parmi l'effectif figé (modifiables jusqu'au début). */
 export async function checkIn(userId: string, id: string, body: unknown) {
   const tournament = await tournamentRow(id);
   if (tournament.kind === 'anubis') return checkInPlayer(userId, id);
   if (tournament.status !== 'scheduled') throw new HttpError(409, 'TOURNAMENT_CLOSED', 'Le check-in est fermé.');
   if (!checkInOpen(tournament)) throw new HttpError(409, 'CHECKIN_CLOSED', 'Le check-in est ouvert de 2 h à 15 min avant le début du tournoi.');
   const member = await membershipOf(userId);
-  if (!member || !(member.role === 'leader' || member.isOwner)) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader peut faire le check-in.');
+  if (!member) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Rejoins une équipe inscrite pour faire le check-in.');
   const participant = (await participantsOf(id)).find((p) => p.team_id === member.team_id);
   if (!participant) {
     throw new HttpError(403, 'NOT_QUALIFIED', tournament.kind === 'horus' ? 'Ton équipe n’est pas inscrite à cette coupe.' : 'Ton équipe n’est pas qualifiée pour ce tournoi.');
@@ -695,7 +695,7 @@ async function checkInReminders(): Promise<void> {
     if (!claimed) continue;
     const closes = new Date(revealTime(tournament)).toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' });
     const url = tournament.kind === 'anubis' ? `${PAGE}?coupe=anubis` : tournament.kind === 'saison' ? `${PAGE}?coupe=saison` : PAGE;
-    // Joueurs à prévenir : Anubis, chaque inscrit ; équipes, tout l'effectif (le check-in est fait par un Leader).
+    // Joueurs à prévenir : Anubis, chaque inscrit ; équipes, tout l'effectif (n'importe lequel peut faire le check-in).
     let targets: string[];
     if (tournament.kind === 'anubis') {
       const players = (unwrap(await supabase.from('cup_players').select('user_id, checked_in_at').eq('tournament_id', tournament.id)) ?? []) as { user_id: string; checked_in_at: string | null }[];
@@ -707,8 +707,8 @@ async function checkInReminders(): Promise<void> {
     if (targets.length === 0) continue;
     const first = step === 'open';
     const text = first
-      ? `Le check-in de ${tournament.name} est ouvert jusqu’à ${closes}. ${tournament.kind === 'anubis' ? 'Confirme ta présence' : 'Un Leader confirme l’équipe et choisit les joueurs'} : sans check-in, pas de place.`
-      : `Dernier rappel : le check-in de ${tournament.name} ferme à ${closes}. ${tournament.kind === 'anubis' ? 'Confirme ta présence' : 'Un Leader doit valider l’équipe'} pour jouer.`;
+      ? `Le check-in de ${tournament.name} est ouvert jusqu’à ${closes}. ${tournament.kind === 'anubis' ? 'Confirme ta présence' : 'Un joueur de l’équipe confirme sa présence et choisit les joueurs du match'} : sans check-in, pas de place.`
+      : `Dernier rappel : le check-in de ${tournament.name} ferme à ${closes}. ${tournament.kind === 'anubis' ? 'Confirme ta présence' : 'Un joueur de l’équipe doit faire le check-in'} pour jouer.`;
     await pushToUsers(targets, { title: first ? '✅ Check-in ouvert' : '⏰ Check-in : plus que quelques minutes', body: text, url, tag: `checkin-${tournament.id}`, urgent: !first });
     if (discordEnabled && config.teams.discord) await dm(targets, `${first ? '✅' : '⏰'} ${text}\n${config.siteUrl}${url}`);
     if (first) await announce(`✅ **${tournament.name}** : check-in ouvert jusqu’à ${closes}, tirage à ${closes} et premiers matchs à ${hourOf(tournament)}.\n${config.siteUrl}${url}`, tournament.kind);

@@ -95,7 +95,7 @@ import {
  *   POST   /teams/matches/:matchId/proofs      enregistrer une capture déjà envoyée (joueur du match) { path }
  *   GET    /teams/tournament                   tournoi prévu ou en cours (sinon le dernier terminé), tableau, droits du visiteur
  *   GET    /teams/tournaments/:id              un tournoi
- *   POST   /teams/tournaments/:id/checkin      check-in d'un Leader (30 min avant) { roster: [ids parmi l'effectif figé] }
+ *   POST   /teams/tournaments/:id/checkin      check-in d'un joueur de l'équipe (2 h à 15 min avant) { roster: [ids parmi l'effectif figé] }
  *   POST   /teams/tournaments/:id/register     Coupe Horus : inscrire son équipe (Leader) ; DELETE : la désinscrire
  *   GET    /teams/tournament?kind=horus        Coupe Horus prévue ou en cours (sinon la dernière terminée) ; kind=anubis : Coupe Anubis
  *   POST   /teams/tournaments/:id/register     Coupe Anubis : le joueur s'inscrit seul (DELETE : se désinscrit) ; checkin : check-in du joueur
