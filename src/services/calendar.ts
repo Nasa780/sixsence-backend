@@ -51,7 +51,7 @@ export async function calendarEvents(fromInput: unknown, toInput: unknown): Prom
     const anubis = cup.kind === 'anubis';
     let registered: number | null = null;
     if (cup.kind === 'playin') {
-      events.push({ id: `t-${cup.id}`, kind: 'coupe', title: cup.name, subtitle: 'Play-in · 2 places pour la grande finale · BO3', startsAt: cup.starts_at, endsAt: null, href: '/cod/circuit', cup: null });
+      events.push({ id: `t-${cup.id}`, kind: 'coupe', title: cup.name, subtitle: 'Play-in · 2 places pour la grande finale · BO3', startsAt: cup.starts_at, endsAt: null, href: '/cod/tournoi?coupe=playin', cup: null });
       continue;
     }
     if (cup.status === 'scheduled' || cup.kind === 'saison') {

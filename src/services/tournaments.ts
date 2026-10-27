@@ -79,7 +79,7 @@ const isCup = (kind: Kind) => kind === 'horus' || kind === 'anubis';
 /** Un seul tour pour le play-in (2 rencontres indépendantes). */
 const roundsOf = (tournament: Pick<TournamentRow, 'kind' | 'size'>) => (tournament.kind === 'playin' ? 1 : roundsFor(tournament.size));
 /** Page d'un tournoi sur le site. */
-const pageOf = (kind: Kind) => (kind === 'anubis' ? `${PAGE}?coupe=anubis` : kind === 'saison' ? `${PAGE}?coupe=saison` : kind === 'playin' ? '/cod/circuit' : PAGE);
+const pageOf = (kind: Kind) => (kind === 'anubis' ? `${PAGE}?coupe=anubis` : kind === 'saison' ? `${PAGE}?coupe=saison` : kind === 'playin' ? `${PAGE}?coupe=playin` : PAGE);
 
 interface TournamentRow {
   id: string;
@@ -289,10 +289,10 @@ export async function createPlayIn(adminId: string, body: unknown) {
   await pushToUsers(members.map((member) => member.user_id), {
     title: `⚔️ Ton équipe joue le play-in`,
     body: `Une place en grande finale en jeu, BO3 ${date}. Check-in d’un joueur de l’équipe de 2 h à 15 min avant.`,
-    url: '/cod/circuit',
+    url: pageOf('playin'),
     tag: `tournoi-${tournament.id}`,
   });
-  await announce(`⚔️ **${name}** — 2 places pour la grande finale, BO3 ${date} (${CHECKIN_TEXT}).\n${config.siteUrl}/cod/circuit`);
+  await announce(`⚔️ **${name}** — 2 places pour la grande finale, BO3 ${date} (${CHECKIN_TEXT}).\n${config.siteUrl}${pageOf('playin')}`);
   return playInOverview(size);
 }
 
@@ -315,10 +315,10 @@ async function completePlayIn(tournament: TournamentRow, entries: BracketEntry[]
   await pushToUsers(participants.flatMap((p) => p.frozen_roster), {
     title: `⚔️ ${tournament.name} terminé`,
     body: list ? `Qualifiées pour la grande finale : ${names.map((team) => team.name).join(' et ')}.` : 'Résultats en ligne.',
-    url: '/cod/circuit',
+    url: pageOf('playin'),
     tag: `tournoi-${tournament.id}`,
   });
-  if (list) await announce(`⚔️ **${tournament.name}** : ${list} rejoignent la grande finale !\n${config.siteUrl}/cod/circuit`);
+  if (list) await announce(`⚔️ **${tournament.name}** : ${list} rejoignent la grande finale !\n${config.siteUrl}${pageOf('playin')}`);
 }
 
 // --- Administration --------------------------------------------------------------------------
