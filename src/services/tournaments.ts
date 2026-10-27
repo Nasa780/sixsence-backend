@@ -872,6 +872,8 @@ export async function advanceTournament(id: string): Promise<void> {
   if (tournament.status !== 'running') return;
   const rounds = roundsFor(tournament.size);
   const rows = await entriesOf(id);
+  // État enregistré, avant les résultats ci-dessous : sert à savoir quelles rencontres réécrire en base.
+  const saved = rows.map((row) => ({ ...row }));
 
   // Résultats des matchs joués.
   const playing = rows.filter((row) => row.status === 'playing' && row.match_id);
@@ -898,7 +900,7 @@ export async function advanceTournament(id: string): Promise<void> {
   const double = tournament.bracket === 'double';
   const advanced = double ? advanceDouble(rows.map(toEntry), tournament.size) : advanceBracket(rows.map(toEntry), rounds);
   for (const [index, entry] of advanced.entries()) {
-    const row = rows[index]!;
+    const row = saved[index]!;
     if (entry.teamA !== row.team_a || entry.teamB !== row.team_b || entry.winner !== row.winner || entry.status !== row.status) {
       unwrap(await supabase.from('tournament_bracket').update({ team_a: entry.teamA, team_b: entry.teamB, winner: entry.winner, status: entry.status }).eq('id', row.id));
     }
@@ -930,6 +932,48 @@ export async function advanceTournament(id: string): Promise<void> {
 
   const result = double ? podiumDouble(advanced, tournament.size) : podium(advanced, rounds);
   if (result) await completeTournament(tournament, result.winner, result.finalist, result.third);
+}
+
+type CorrectedMatch = { id: string; tournament_id: string | null; team_a: string; team_b: string; winner: 'A' | 'B' | null; created_at: string };
+
+/**
+ * Correction d'un match de tournoi : jamais d'annulation (le tableau en dépend) ; le vainqueur ne change que si le
+ * tournoi est en cours et qu'aucune des deux équipes n'a encore joué de rencontre suivante. Les scores, toujours.
+ */
+export async function assertTournamentCorrectable(match: CorrectedMatch, winner: 'A' | 'B' | null): Promise<void> {
+  if (!match.tournament_id) return;
+  if (winner === null) throw new HttpError(409, 'TOURNAMENT_MATCH', 'Un match de tournoi ne s’annule pas : corrige les scores (le vainqueur peut changer).');
+  if (winner === match.winner) return;
+  const tournament = await tournamentRow(match.tournament_id);
+  if (tournament.status !== 'running') throw new HttpError(409, 'TOURNAMENT_DONE', 'Le tournoi est terminé : seuls les scores peuvent encore être corrigés, pas le vainqueur.');
+  const { count, error } = await supabase
+    .from('team_matches')
+    .select('id', { count: 'exact', head: true })
+    .eq('tournament_id', match.tournament_id)
+    .neq('id', match.id)
+    .neq('status', 'cancelled')
+    .gt('created_at', match.created_at)
+    .or(`team_a.in.(${match.team_a},${match.team_b}),team_b.in.(${match.team_a},${match.team_b})`);
+  if (error) throw fromDbError(error);
+  if ((count ?? 0) > 0) throw new HttpError(409, 'BRACKET_MOVED', 'Une des deux équipes a déjà joué la rencontre suivante : le vainqueur ne peut plus changer.');
+}
+
+/** Après la correction d'un match de tournoi : nouveau vainqueur reporté, rencontres suivantes pas encore jouées refaites. */
+export async function applyTournamentCorrection(match: CorrectedMatch, winner: 'A' | 'B'): Promise<void> {
+  if (!match.tournament_id || winner === match.winner) return;
+  const pair = [match.team_a, match.team_b];
+  unwrap(await supabase.from('tournament_bracket').update({ winner: winner === 'A' ? match.team_a : match.team_b, status: 'done' }).eq('match_id', match.id));
+  // Les deux équipes sont retirées des rencontres sans match (à venir, ou qualification d'office) : le tableau les replace.
+  for (const row of await entriesOf(match.tournament_id)) {
+    if (row.match_id || !(pair.includes(row.team_a ?? '') || pair.includes(row.team_b ?? ''))) continue;
+    unwrap(
+      await supabase
+        .from('tournament_bracket')
+        .update({ team_a: pair.includes(row.team_a ?? '') ? null : row.team_a, team_b: pair.includes(row.team_b ?? '') ? null : row.team_b, winner: null, status: 'pending' })
+        .eq('id', row.id),
+    );
+  }
+  await advanceTournament(match.tournament_id);
 }
 
 async function completeTournament(tournament: TournamentRow, winner: string | null, finalist: string | null, third: string | null = null): Promise<void> {

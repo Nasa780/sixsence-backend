@@ -62,6 +62,34 @@ async function notify(userIds: string[], title: string, body: string) {
   await dm(userIds, `**${title}**\n${body}\n${config.siteUrl}${PAGE}`).catch(() => {});
 }
 
+/** Un défi officiel par équipe sur 7 jours glissants (en attente, accepté ou joué) ; les amicaux sont illimités. */
+const OFFICIAL_DAYS = 7;
+
+/** Date à partir de laquelle l'équipe peut de nouveau jouer un défi officiel, ou null si elle le peut déjà. */
+async function nextOfficialAt(teamId: string, exceptId: string | null = null): Promise<string | null> {
+  let query = supabase
+    .from('team_challenges')
+    .select('id, created_at')
+    .eq('friendly', false)
+    .in('status', ['pending', 'accepted', 'played'])
+    .gt('created_at', new Date(Date.now() - OFFICIAL_DAYS * 86_400_000).toISOString())
+    .or(`from_team.eq.${teamId},to_team.eq.${teamId}`)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (exceptId) query = query.neq('id', exceptId);
+  const rows = (unwrap(await query) ?? []) as { id: string; created_at: string }[];
+  return rows[0] ? new Date(new Date(rows[0].created_at).getTime() + OFFICIAL_DAYS * 86_400_000).toISOString() : null;
+}
+
+
+/** Refuse un défi officiel si l'une des deux équipes en a déjà un cette semaine. */
+async function checkOfficialQuota(myTeam: string, otherTeam: string, exceptId: string | null = null): Promise<void> {
+  const mine = await nextOfficialAt(myTeam, exceptId);
+  if (mine) throw new HttpError(409, 'OFFICIAL_WEEKLY', `Un seul défi officiel par semaine : ton équipe pourra en jouer un autre ${fmtDate(mine)}. Les défis amicaux restent illimités.`);
+  const theirs = await nextOfficialAt(otherTeam, exceptId);
+  if (theirs) throw new HttpError(409, 'OFFICIAL_WEEKLY', `Cette équipe a déjà un défi officiel cette semaine (prochain possible ${fmtDate(theirs)}). Propose-lui un amical.`);
+}
+
 /** Lancer un défi : { teamId (équipe défiée), friendly, roster, scheduledAt?, message? }. */
 export async function createChallenge(userId: string, body: unknown) {
   if (!config.teams.enabled) throw new HttpError(403, 'TEAM_MODE_PAUSED', 'La Division est en pause.');
@@ -88,6 +116,7 @@ export async function createChallenge(userId: string, body: unknown) {
   if (error) throw fromDbError(error);
   if ((count ?? 0) > 0) throw new HttpError(409, 'CHALLENGE_EXISTS', 'Un défi est déjà en cours entre vos deux équipes.');
   const friendly = input.friendly !== false;
+  if (!friendly) await checkOfficialQuota(fromTeam, toTeam);
   unwrap(await supabase.from('team_challenges').insert({ from_team: fromTeam, to_team: toTeam, created_by: userId, friendly, roster_from: roster, scheduled_at: scheduledAt, message }));
   const from = await teamCard(fromTeam);
   await notify(
@@ -112,6 +141,7 @@ export async function answerChallenge(userId: string, id: string, body: unknown)
     return myChallenges(userId);
   }
   const roster = await checkMatchRoster(teamId, (body as { roster?: unknown } | undefined)?.roster);
+  if (!challenge.friendly) await checkOfficialQuota(teamId, challenge.from_team, challenge.id);
   const updated = unwrap(
     await supabase
       .from('team_challenges')
@@ -221,6 +251,8 @@ export async function myChallenges(userId: string) {
   return {
     canManage: member.role === 'leader' || member.isOwner,
     rosterSize: config.teams.rosterSize,
+    // Prochain défi officiel possible (un par semaine), null si dès maintenant.
+    officialAvailableAt: await nextOfficialAt(teamId),
     incoming: open.filter((r) => r.to_team === teamId).map(view),
     outgoing: open.filter((r) => r.from_team === teamId).map(view),
     recent: rows.filter((r) => !open.includes(r)).slice(0, 6).map(view),
