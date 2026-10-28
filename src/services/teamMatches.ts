@@ -556,7 +556,7 @@ export async function postTeamMessage(userId: string, matchId: string, body: unk
   const text = typeof body === 'object' && body ? String((body as { body?: unknown }).body ?? '').trim() : '';
   if (text.length < 1 || text.length > 300) throw new HttpError(400, 'INVALID_MESSAGE', 'Le message doit contenir entre 1 et 300 caractères.');
   if (match.status === 'cancelled' || (match.status === 'completed' && Date.now() - new Date(match.completed_at!).getTime() > 24 * 3600_000)) {
-    throw new HttpError(409, 'MATCH_CLOSED', 'Le chat de ce match est fermé.');
+    throw new HttpError(409, 'MATCH_CLOSED', 'Le tchat de ce match est fermé.');
   }
   unwrap(await supabase.from('team_match_messages').insert({ match_id: matchId, user_id: userId, side, body: text }));
   // Le site se met à jour en direct (temps réel sur team_matches).
@@ -583,7 +583,7 @@ export async function claimTeamForfeit(userId: string, matchId: string, body: un
   const reason = (body as { reason?: unknown } | undefined)?.reason;
   if (reason !== 'host_silent' && reason !== 'absent') throw new HttpError(400, 'INVALID_REASON', 'Motif de forfait inconnu.');
   const options = await forfeitOptions(match, side);
-  if (!options[reason]) throw new HttpError(409, 'FORFEIT_NOT_ALLOWED', reason === 'host_silent' ? 'L’hôte a encore le temps ou a déjà écrit dans le chat.' : 'L’équipe adverse a encore le temps ou est déjà en jeu.');
+  if (!options[reason]) throw new HttpError(409, 'FORFEIT_NOT_ALLOWED', reason === 'host_silent' ? 'L’hôte a encore le temps ou a déjà écrit dans le tchat.' : 'L’équipe adverse a encore le temps ou est déjà en jeu.');
   const now = new Date().toISOString();
   const updated = unwrap(
     await supabase
