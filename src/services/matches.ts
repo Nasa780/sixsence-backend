@@ -172,32 +172,6 @@ export async function getMatch(
   const finished = match.status === 'completed' || match.status === 'cancelled';
   const [votes, pointsAtStake] = await Promise.all([mvpVotesOf(matchId), finished ? Promise.resolve(null) : pointsPreview(matchId)]);
 
-  // Vérification « Prêt ? » : composition des équipes cachée (sauf arbitres) tant que tout le monde n'a pas accepté,
-  // pour qu'on ne puisse pas refuser un match selon ses adversaires ou coéquipiers. Le joueur ne voit que lui-même.
-  if (match.status === 'ready_check' && !(viewerId && (await isReferee(viewerId)))) {
-    const mask = (ids: string[], side: string) => ids.map((id, index) => (id === viewerId ? id : `cache-${side}${index}`));
-    const hidden: Record<string, unknown> = {
-      ...match,
-      team_a: mask(match.team_a, 'a'),
-      team_b: mask(match.team_b, 'b'),
-      ready_users: match.ready_users.map((id, index) => (id === viewerId ? id : `cache-pret${index}`)),
-      points_changes: {},
-      groups: {},
-      group_sizes: {},
-    };
-    delete hidden.discord_dm;
-    delete hidden.discord_channels;
-    return {
-      match: hidden as unknown as CodMatch,
-      players: players.filter((player) => player.id === viewerId),
-      messages: [],
-      proofs: [],
-      privateAccess,
-      mvpVotes: {},
-      mvpVotesFromOthers: {},
-      pointsAtStake: viewerId && pointsAtStake?.[viewerId] ? { [viewerId]: pointsAtStake[viewerId] } : null,
-    };
-  }
   return {
     match,
     players,
