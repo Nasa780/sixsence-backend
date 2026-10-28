@@ -9,6 +9,14 @@ import { syncRankRoles } from './community.js';
 import { correctionWindowHours } from './correctionPolicy.js';
 import { noticeMatchCorrected, noticeMatchResolved } from './matchNotices.js';
 import { mvpVotesOf, resolveOpenRequests } from './moderation.js';
+import { pushToUsers } from './push.js';
+
+/** Lancement d'un match classé, comme en Division : code de la partie sous 10 min, partie lancée sous 15 min. */
+const HOST_MINUTES = 10;
+/** Après ce délai seulement, les joueurs peuvent voter l'annulation du match (cod_vote_cancel, migration 0054). */
+const LAUNCH_MINUTES = 15;
+
+const minutesAfter = (iso: string | null, minutes: number) => (iso ? new Date(new Date(iso).getTime() + minutes * 60_000).toISOString() : null);
 
 /** Joueur tel qu'affiché dans la salle de match. */
 export interface MatchPlayer {
@@ -106,6 +114,12 @@ export async function getMatch(
   mvpVotesFromOthers: Record<string, number>;
   /** Points en jeu par joueur, tant que le match n'est pas terminé. */
   pointsAtStake: Record<string, PointsAtStake> | null;
+  /** Code de la partie privée (joueurs du match et arbitres), donné par l'hôte (premier joueur de l'équipe 1). */
+  gameCode: string | null;
+  gameCodeUpdatedAt: string | null;
+  /** Fin du délai pour donner le code, et fin du délai de lancement (ouvre le vote d'annulation). */
+  hostDeadline: string | null;
+  launchDeadline: string | null;
 }> {
   const match = unwrap(await supabase.from('cod_matches').select('*').eq('id', matchId).maybeSingle()) as CodMatch | null;
   if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
@@ -170,7 +184,11 @@ export async function getMatch(
     }));
 
   const finished = match.status === 'completed' || match.status === 'cancelled';
-  const [votes, pointsAtStake] = await Promise.all([mvpVotesOf(matchId), finished ? Promise.resolve(null) : pointsPreview(matchId)]);
+  const [votes, pointsAtStake, code] = await Promise.all([
+    mvpVotesOf(matchId),
+    finished ? Promise.resolve(null) : pointsPreview(matchId),
+    privateAccess && !finished ? gameCodeOf(matchId) : Promise.resolve(null),
+  ]);
 
   return {
     match,
@@ -181,7 +199,57 @@ export async function getMatch(
     mvpVotes: votes.total,
     mvpVotesFromOthers: votes.fromOthers,
     pointsAtStake,
+    gameCode: code?.code ?? null,
+    gameCodeUpdatedAt: code?.updated_at ?? null,
+    hostDeadline: minutesAfter(match.started_at, HOST_MINUTES),
+    launchDeadline: minutesAfter(match.started_at, LAUNCH_MINUTES),
   };
+}
+
+async function gameCodeOf(matchId: string) {
+  return unwrap(await supabase.from('cod_match_codes').select('code, updated_at').eq('match_id', matchId).maybeSingle()) as { code: string; updated_at: string } | null;
+}
+
+/** Code de la partie privée : donné (ou corrigé) par l'hôte tant que le résultat n'est pas déclaré. */
+export async function setGameCode(matchId: string, userId: string, body: unknown): Promise<void> {
+  const match = unwrap(await supabase.from('cod_matches').select('*').eq('id', matchId).maybeSingle()) as CodMatch | null;
+  if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
+  if (match.team_a[0] !== userId) throw new HttpError(403, 'NOT_HOST', "Seul l'hôte donne le code de la partie.");
+  if (match.status !== 'in_progress') throw new HttpError(409, 'MATCH_NOT_REPORTABLE', 'Le résultat de ce match a déjà été déclaré.');
+  const code = String((body as { code?: unknown } | undefined)?.code ?? '').trim();
+  if (code.length < 1 || code.length > 40 || /[<>]/.test(code)) throw new HttpError(400, 'INVALID_CODE', 'Le code doit contenir entre 1 et 40 caractères.');
+  const before = await gameCodeOf(matchId);
+  const now = new Date().toISOString();
+  if (before) unwrap(await supabase.from('cod_match_codes').update({ code, set_by: userId, updated_at: now }).eq('match_id', matchId));
+  else unwrap(await supabase.from('cod_match_codes').insert({ match_id: matchId, code, set_by: userId, set_at: now, updated_at: now }));
+  // Heure du code sur le match : les feuilles de match des autres joueurs se mettent à jour en direct.
+  unwrap(await supabase.from('cod_matches').update({ game_code_at: now }).eq('id', matchId));
+  await pushToUsers(
+    [...match.team_a, ...match.team_b].filter((id) => id !== userId),
+    {
+      title: before ? 'Code de la partie modifié' : 'Code de la partie disponible',
+      body: "L'hôte a donné le code : rejoins la partie privée.",
+      url: `${config.siteUrl}/cod/match/${matchId}`,
+      tag: `match-${matchId}`,
+    },
+  );
+}
+
+/** Vote d'annulation d'un joueur du match (vote = false le retire), ouvert LAUNCH_MINUTES après le début. */
+export async function voteCancel(matchId: string, userId: string, vote: boolean): Promise<CodMatch> {
+  const match = unwrap(
+    await supabase.rpc('cod_vote_cancel', { p_match: matchId, p_user: userId, p_vote: vote, p_after_minutes: LAUNCH_MINUTES }),
+  ) as CodMatch;
+  announceIfClosed(match);
+  if (match.status === 'cancelled') {
+    await pushToUsers([...match.team_a, ...match.team_b], {
+      title: 'Match annulé',
+      body: 'Les joueurs ont voté l’annulation : aucun point perdu.',
+      url: `${config.siteUrl}/cod/match/${matchId}`,
+      tag: `match-${matchId}`,
+    });
+  }
+  return match;
 }
 
 /** Un joueur accepte le match trouvé (vérification « Prêt ? »). */

@@ -24,6 +24,8 @@ const DB_ERRORS: Record<string, [status: number, message: string]> = {
   MATCH_NOT_CONFIRMABLE: [409, "Ce match n'attend pas de confirmation."],
   SAME_TEAM_AS_REPORTER: [403, "La confirmation doit venir de l'équipe adverse."],
   MATCH_CLOSED: [409, 'Ce match est déjà clôturé.'],
+  CANCEL_VOTE_CLOSED: [409, "Le vote d'annulation est fermé : le match n'est plus en cours."],
+  CANCEL_VOTE_TOO_EARLY: [409, "Le vote d'annulation s'ouvre 15 min après le début du match."],
   INVALID_WINNER: [400, 'Vainqueur invalide.'],
   INVALID_MESSAGE: [400, 'Le message doit contenir entre 1 et 300 caractères.'],
   QUEUE_BANNED: [403, 'Tu es temporairement exclu de la file après des matchs non acceptés.'],

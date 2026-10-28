@@ -26,6 +26,10 @@ export interface CodMatch {
   ready_users: string[];
   started_at: string | null;
   cancel_reason: string | null;
+  /** Heure du code de la partie privée (le code lui-même est dans la table privée cod_match_codes, migration 0054). */
+  game_code_at?: string | null;
+  /** Joueurs qui votent l'annulation (après LAUNCH_MINUTES). */
+  cancel_votes?: string[];
   season_id: number | null;
   discord_channels: Record<string, string>;
   discord_done: boolean;

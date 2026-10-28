@@ -7,7 +7,7 @@ import { notifyStaff } from '../services/discord.js';
 import { noticeResultDisputed, noticeResultReported } from '../services/matchNotices.js';
 import { ARBITRATION_REASONS, REPORT_REASONS, myArbitrations, reportPlayer, requestArbitration, usernameOf, voteMvp } from '../services/moderation.js';
 import { supabase } from '../supabase.js';
-import { addProof, confirmMatch, correctMatch, getMatch, postMessage, reportMatch, resolveMatch } from '../services/matches.js';
+import { addProof, confirmMatch, correctMatch, getMatch, postMessage, reportMatch, resolveMatch, setGameCode, voteCancel } from '../services/matches.js';
 import { acceptReady, acceptWithToken } from '../services/readyAccept.js';
 import { equipCard, markCardsSeen, myCards } from '../services/cards.js';
 import { createParty, getPartyOf, joinParty, kickMember, leaveParty, previewInvite, setPartyFormat } from '../services/parties.js';
@@ -230,6 +230,26 @@ export function codRouter(hub: QueueHub): Router {
       }
       await addProof(uuidParam(req, 'id'), currentUser(res).id, path);
       res.status(201).json({ saved: true });
+    }),
+  );
+
+  // Code de la partie privée, donné par l'hôte (premier joueur de l'équipe 1).
+  router.post(
+    '/matches/:id/code',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      await setGameCode(uuidParam(req, 'id'), currentUser(res).id, req.body);
+      res.json({ ok: true });
+    }),
+  );
+
+  // Vote d'annulation { vote: boolean }, ouvert 15 min après le début du match.
+  router.post(
+    '/matches/:id/cancel-vote',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const vote = (req.body as { vote?: unknown } | undefined)?.vote !== false;
+      res.json({ match: await voteCancel(uuidParam(req, 'id'), currentUser(res).id, vote) });
     }),
   );
 
