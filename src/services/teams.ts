@@ -155,7 +155,7 @@ async function teamStrength(teamId: string): Promise<{ value: number; position: 
   return { value, position: [...averages.values()].filter((v) => v > value).length + 1, total: averages.size };
 }
 
-/** Fiche publique d'une équipe : effectif (titulaires d'abord), place au classement, force, recrutement, devises. */
+/** Fiche publique d'une équipe : effectif (titulaires d'abord), place au classement, force, recrutement, surnoms. */
 export async function getTeam(teamId: string) {
   const team = await teamRow(teamId);
   const members = await membersOf(teamId);
@@ -582,14 +582,14 @@ async function targetIn(teamId: string, targetId: string): Promise<TeamActor> {
   return target;
 }
 
-/** Titulaire / remplaçant (Leader) ; Leader / Joueur (couronne) ; devise du joueur (Leader, 40 caractères). */
+/** Titulaire / remplaçant (Leader) ; Leader / Joueur (couronne) ; surnom du joueur (champ motto, Leader, 40 caractères). */
 export async function updateMember(userId: string, teamId: string, targetId: string, body: unknown) {
   const actor = await actorIn(teamId, userId);
   const target = await targetIn(teamId, targetId);
   const input = (body ?? {}) as { role?: unknown; starter?: unknown; motto?: unknown };
   if (input.motto !== undefined) {
-    if (!canDo(actor, 'edit')) forbid('Seul un Leader choisit les devises.');
-    if (input.motto !== null && typeof input.motto !== 'string') throw new HttpError(400, 'INVALID_MOTTO', 'Devise invalide.');
+    if (!canDo(actor, 'edit')) forbid('Seul un Leader choisit les surnoms.');
+    if (input.motto !== null && typeof input.motto !== 'string') throw new HttpError(400, 'INVALID_MOTTO', 'Surnom invalide.');
     const motto = typeof input.motto === 'string' ? input.motto.normalize('NFC').replace(/\s+/g, ' ').trim() : '';
     if (motto.length > 40 || /[<>]/.test(motto)) throw new HttpError(400, 'INVALID_MOTTO', 'La devise fait 40 caractères au plus, sans < ni >.');
     unwrap(await supabase.from('team_members').update({ motto: motto || null }).eq('team_id', teamId).eq('user_id', targetId));
