@@ -16,6 +16,30 @@ export async function acceptReady(matchId: string, userId: string): Promise<CodM
   return match;
 }
 
+/**
+ * « Prêt automatique » (option du profil, cod_profiles.auto_ready) : à la création du match, le serveur accepte le
+ * « Prêt ? » des joueurs qui l'ont activée, comme s'ils avaient cliqué. Petit délai pour que les messages « Match trouvé »
+ * partent d'abord.
+ */
+export async function autoAcceptReady(match: CodMatch): Promise<void> {
+  const ids = [...match.team_a, ...match.team_b];
+  const { data } = await supabase.from('cod_profiles').select('user_id').in('user_id', ids).eq('auto_ready', true);
+  const auto = ((data ?? []) as { user_id: string }[]).map((row) => row.user_id);
+  if (auto.length === 0) return;
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  for (const userId of auto) {
+    await acceptReady(match.id, userId).catch((caught: Error) => console.warn('[prêt auto]', caught.message));
+  }
+}
+
+/** Active ou coupe le « Prêt automatique » du joueur. */
+export async function setAutoReady(userId: string, body: unknown): Promise<{ autoReady: boolean }> {
+  const on = (body as { on?: unknown } | undefined)?.on === true;
+  const { error } = await supabase.from('cod_profiles').update({ auto_ready: on }).eq('user_id', userId);
+  if (error) throw new HttpError(500, 'AUTO_READY_FAILED', 'Réglage impossible pour le moment.');
+  return { autoReady: on };
+}
+
 /** Joueur du site lié à un compte Discord. */
 export async function userIdFromDiscord(discordId: string): Promise<string | null> {
   const { data } = await supabase.from('users').select('id').eq('discord_id', discordId).maybeSingle();

@@ -8,7 +8,7 @@ import { noticeResultDisputed, noticeResultReported } from '../services/matchNot
 import { ARBITRATION_REASONS, REPORT_REASONS, myArbitrations, reportPlayer, requestArbitration, usernameOf, voteMvp } from '../services/moderation.js';
 import { supabase } from '../supabase.js';
 import { addProof, confirmMatch, correctMatch, getMatch, postMessage, reportMatch, resolveMatch } from '../services/matches.js';
-import { acceptReady, acceptWithToken } from '../services/readyAccept.js';
+import { acceptReady, acceptWithToken, setAutoReady } from '../services/readyAccept.js';
 import { equipCard, markCardsSeen, myCards } from '../services/cards.js';
 import { createParty, getPartyOf, joinParty, kickMember, leaveParty, previewInvite, setPartyFormat } from '../services/parties.js';
 import { getQueueState, getQueueSummaries, joinQueue, leaveQueue, stayInQueue } from '../services/queue.js';
@@ -210,6 +210,14 @@ export function codRouter(hub: QueueHub): Router {
     requireAuth,
     asyncHandler(async (req, res) => {
       res.json({ match: await acceptReady(uuidParam(req, 'id'), currentUser(res).id) });
+    }),
+  );
+  // « Prêt automatique » : { on } active ou coupe l'acceptation automatique du « Prêt ? ».
+  router.post(
+    '/auto-ready',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      res.json(await setAutoReady(currentUser(res).id, req.body));
     }),
   );
   router.post(

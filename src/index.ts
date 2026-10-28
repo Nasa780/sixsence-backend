@@ -18,7 +18,7 @@ import { pushRouter } from './routes/push.js';
 import { teamsRouter } from './routes/teams.js';
 import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
-import { readyToken } from './services/readyAccept.js';
+import { readyToken, autoAcceptReady } from './services/readyAccept.js';
 import { updateAborted, updateReady } from './services/matchFoundDm.js';
 
 /** Adresse publique de l'API (Render la fournit), pour les boutons des notifications. */
@@ -148,6 +148,8 @@ bus.on('match:found', async (match) => {
     });
   }
   void onMatchFound(match);
+  // « Prêt automatique » : acceptation tout de suite pour les joueurs qui l'ont activé.
+  void autoAcceptReady(match).catch((caught: Error) => console.warn('[prêt auto]', caught.message));
   // Notification sur téléphone / ordinateur, même site fermé (appli installée), avec un bouton « Accepter »
   // (jeton signé propre à chaque joueur : la notification n'a pas sa session).
   for (const userId of [...match.team_a, ...match.team_b]) {
