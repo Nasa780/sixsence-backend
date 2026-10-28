@@ -310,6 +310,8 @@ export async function runAllMatchmaking(): Promise<void> {
  * Relance ensuite le matchmaking, puisque la file a pu se remplir.
  */
 export async function expireReadyChecks(): Promise<void> {
+  // « Prêt ? » facultatif : à la fin du compte à rebours, le match démarre pour tout le monde (pas d'annulation).
+  if (!config.cod.readyRequired) await startAfterCountdown();
   const { data, error } = await supabase.rpc('cod_expire_ready_checks');
   if (error) {
     console.error('[ready]', error.message);
@@ -324,6 +326,24 @@ export async function expireReadyChecks(): Promise<void> {
   }
   await runAllMatchmaking();
   bus.emit('queue:changed');
+}
+
+/** Matchs trouvés dont le compte à rebours est fini : démarrés (« Prêt ? » facultatif, COD_READY_REQUIRED différent de « on »). */
+async function startAfterCountdown(): Promise<void> {
+  const { data, error } = await supabase.from('cod_matches').select('id').eq('status', 'ready_check').lte('ready_deadline', new Date().toISOString());
+  if (error) {
+    console.error('[prêt]', error.message);
+    return;
+  }
+  for (const { id } of (data ?? []) as { id: string }[]) {
+    const { data: started, error: startError } = await supabase.rpc('cod_start_after_ready', { p_match: id });
+    if (startError) {
+      console.error('[prêt] démarrage impossible', startError.message);
+      continue;
+    }
+    const match = started as CodMatch | null;
+    if (match?.status === 'in_progress') bus.emit('match:start', match);
+  }
 }
 
 /** Vide la file. Appelé au démarrage : après un redémarrage, plus personne n'est connecté. */
