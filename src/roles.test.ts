@@ -24,7 +24,7 @@ describe("droits sur l'administration", () => {
   });
 
   it('le staff modère et sanctionne, sans gérer le site', () => {
-    for (const [method, path] of [['GET', '/disputes'], ['GET', '/reports'], ['POST', '/reports/4'], ['GET', '/players'], ['GET', '/players/abc/sanctions'], ['POST', '/players/abc/sanctions'], ['POST', '/sanctions/9/lift'], ['GET', '/teams'], ['DELETE', '/teams/abc'], ['POST', '/team-reports/2']]) {
+    for (const [method, path] of [['GET', '/disputes'], ['GET', '/reports'], ['POST', '/reports/4'], ['GET', '/players'], ['GET', '/players/abc/sanctions'], ['POST', '/players/abc/sanctions'], ['POST', '/sanctions/9/lift'], ['GET', '/missed-ready'], ['GET', '/teams'], ['DELETE', '/teams/abc'], ['POST', '/team-reports/2']]) {
       assert.equal(can('staff', method!, path!), true, `${method} ${path}`);
     }
     for (const [method, path] of [['POST', '/players/abc/role'], ['POST', '/players/abc/badges'], ['POST', '/players/abc/unban'], ['POST', '/events'], ['PATCH', '/events/1'], ['POST', '/season/close'], ['POST', '/founders'], ['POST', '/discord/sync-roles']]) {

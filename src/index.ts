@@ -7,6 +7,7 @@ import { asyncHandler, errorHandler, isUnexpected, notFoundHandler } from './err
 import { bus } from './events.js';
 import { rateLimit } from './rateLimit.js';
 import { liveActivity } from './services/live.js';
+import { logMissedReady } from './services/missedReady.js';
 import { isVisitorId, markPresent, onlineVisitors } from './services/presence.js';
 import { postDailyReport, recordVisit } from './services/siteLog.js';
 import { adminRouter } from './routes/admin.js';
@@ -162,13 +163,16 @@ bus.on('match:found', async (match) => {
 });
 bus.on('match:ready', (match) => {
   if (discordEnabled) void updateReady(match);
-  hub.sendToUsers([...match.team_a, ...match.team_b], {
-    type: 'match:ready',
-    matchId: match.id,
-    accepted: match.ready_users.length,
-    total: match.team_size * 2,
-    readyUsers: match.ready_users,
-  });
+  // Chaque joueur ne reçoit que son propre état : la liste des joueurs prêts dévoilerait la composition du match.
+  for (const userId of [...match.team_a, ...match.team_b]) {
+    hub.sendToUser(userId, {
+      type: 'match:ready',
+      matchId: match.id,
+      accepted: match.ready_users.length,
+      total: match.team_size * 2,
+      readyUsers: match.ready_users.includes(userId) ? [userId] : [],
+    });
+  }
 });
 bus.on('match:start', (match) => {
   hub.sendToUsers([...match.team_a, ...match.team_b], { type: 'match:start', matchId: match.id });
@@ -189,11 +193,14 @@ bus.on('match:aborted', async (failure) => {
     hub.sendToUser(userId, { type: 'match:aborted', matchId: failure.match_id, reason: 'released' });
     bus.emit('queue:user', userId);
   }
+  const sanctions: string[] = [];
   for (const userId of failure.missing) {
     const state = await getQueueState(userId);
     hub.sendToUser(userId, { type: 'match:aborted', matchId: failure.match_id, reason: 'missed', bannedUntil: state.bannedUntil });
     void noticeMatchMissed(userId, state.bannedUntil);
+    sanctions.push(state.bannedUntil ? `file bloquée jusqu’à ${new Date(state.bannedUntil).toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' })}` : 'avertissement');
   }
+  void logMissedReady(failure.match_id, failure.missing, sanctions);
 });
 
 // --- HTTP --------------------------------------------------------------------
