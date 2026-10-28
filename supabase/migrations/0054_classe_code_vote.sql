@@ -1,6 +1,6 @@
 -- 0054 : Classé comme la Division pour le lancement. L'hôte (premier joueur de l'équipe 1) donne le code de la partie
 -- privée dans un champ dédié (10 min), 15 min pour lancer la partie ; ensuite seulement, les joueurs peuvent voter
--- l'annulation du match (au moins la moitié de chaque équipe, points rendus). Plus d'autre annulation par les joueurs.
+-- l'annulation du match (tous les joueurs de chaque équipe sauf un, points rendus). Plus d'autre annulation par les joueurs.
 
 -- Code de la partie privée : table privée (joueurs du match et arbitres, lue par le backend).
 create table if not exists public.cod_match_codes (
@@ -18,8 +18,8 @@ alter table public.cod_matches add column if not exists game_code_at timestamptz
 -- Joueurs qui votent l'annulation.
 alter table public.cod_matches add column if not exists cancel_votes uuid[] not null default '{}';
 
--- Vote d'annulation (p_vote = false retire le vote) ; match annulé (motif « vote ») dès qu'au moins la moitié des
--- joueurs de chaque équipe a voté pour.
+-- Vote d'annulation (p_vote = false retire le vote) ; match annulé (motif « vote ») dès que tous les joueurs de chaque
+-- équipe sauf un ont voté pour (1 sur 2, 2 sur 3, 3 sur 4, 4 sur 5 ; 1 sur 1 en 1v1 de test).
 create or replace function public.cod_vote_cancel(p_match uuid, p_user uuid, p_vote boolean, p_after_minutes integer)
 returns public.cod_matches
 language plpgsql
@@ -53,7 +53,7 @@ begin
   select count(*) into got_a from unnest(votes) v where v = any (m.team_a);
   select count(*) into got_b from unnest(votes) v where v = any (m.team_b);
 
-  if got_a > 0 and got_b > 0 and got_a * 2 >= cardinality(m.team_a) and got_b * 2 >= cardinality(m.team_b) then
+  if got_a >= greatest(1, cardinality(m.team_a) - 1) and got_b >= greatest(1, cardinality(m.team_b) - 1) then
     update public.cod_matches
        set cancel_votes = votes, status = 'cancelled', cancel_reason = 'vote', completed_at = now()
      where id = p_match
