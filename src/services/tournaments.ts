@@ -145,6 +145,9 @@ const CUP_ROLES = {
 const formatOf = (tournament: TournamentRow) => ({ bestOf: tournament.best_of, finalBestOf: tournament.final_best_of });
 const toEntry = (row: EntryRow): BracketEntry => ({ round: row.round, slot: row.slot, teamA: row.team_a, teamB: row.team_b, winner: row.winner, status: row.status });
 
+/** Joueurs par équipe d'un tournoi : choisi par l'admin pour les Coupes Horus et Anubis, sinon format de la Division. */
+const playersPerTeam = (tournament: { team_size: number | null }) => tournament.team_size ?? config.teams.rosterSize;
+
 async function tournamentRow(id: string): Promise<TournamentRow> {
   const row = unwrap(await supabase.from('tournaments').select('*').eq('id', id).maybeSingle()) as TournamentRow | null;
   if (!row) throw new HttpError(404, 'TOURNAMENT_NOT_FOUND', 'Tournoi introuvable.');
@@ -497,7 +500,7 @@ export async function getTournament(id: string, viewerId: string | null) {
         checkedIn: Boolean(participant.checked_in_at),
         matchRoster: participant.match_roster,
         frozenRoster: await namesOf(roster),
-        rosterSize: config.teams.rosterSize,
+        rosterSize: playersPerTeam(tournament),
         canCheckIn: tournament.status === 'scheduled' && checkInOpen(tournament),
         canRegister: false,
         canUnregister: tournament.kind === 'horus' && isLeader && open,
@@ -510,7 +513,7 @@ export async function getTournament(id: string, viewerId: string | null) {
         checkedIn: false,
         matchRoster: null,
         frozenRoster: [],
-        rosterSize: config.teams.rosterSize,
+        rosterSize: playersPerTeam(tournament),
         canCheckIn: false,
         canRegister: isLeader && open && participants.length < tournament.size,
         canUnregister: false,
@@ -544,6 +547,8 @@ export async function getTournament(id: string, viewerId: string | null) {
     kind: tournament.kind,
     name: tournament.name,
     posterUrl: posterOf(tournament),
+    // Joueurs par équipe (Coupe Anubis : remplacé par anubisView).
+    teamSize: playersPerTeam(tournament),
     size: tournament.size,
     bestOf: tournament.best_of,
     finalBestOf: tournament.final_best_of,
@@ -711,7 +716,7 @@ export async function checkIn(userId: string, id: string, body: unknown) {
     participant.frozen_roster = await teamMemberIds(member.team_id);
     unwrap(await supabase.from('tournament_teams').update({ frozen_roster: participant.frozen_roster }).eq('tournament_id', id).eq('team_id', member.team_id));
   }
-  const size = config.teams.rosterSize;
+  const size = playersPerTeam(tournament);
   const roster = (body as { roster?: unknown } | undefined)?.roster;
   if (!Array.isArray(roster) || roster.length !== size || new Set(roster).size !== size || !roster.every((rid) => participant.frozen_roster.includes(rid))) {
     throw new HttpError(400, 'INVALID_ROSTER', `Choisis ${size} joueur${size > 1 ? 's' : ''} parmi l’effectif inscrit au tournoi.`);
@@ -738,8 +743,9 @@ export async function registerTeam(userId: string, id: string) {
   if (participants.some((p) => p.team_id === member.team_id)) return getTournament(id, userId);
   if (participants.length >= tournament.size) throw new HttpError(409, 'CUP_FULL', 'La coupe est complète.');
   const roster = await teamMemberIds(member.team_id);
-  if (roster.length < config.teams.rosterSize) {
-    throw new HttpError(409, 'TEAM_TOO_SMALL', `Il faut au moins ${config.teams.rosterSize} joueur${config.teams.rosterSize > 1 ? 's' : ''} dans l’équipe pour s’inscrire.`);
+  const needed = playersPerTeam(tournament);
+  if (roster.length < needed) {
+    throw new HttpError(409, 'TEAM_TOO_SMALL', `Il faut au moins ${needed} joueur${needed > 1 ? 's' : ''} dans l’équipe pour s’inscrire.`);
   }
   unwrap(await supabase.from('tournament_teams').insert({ tournament_id: id, team_id: member.team_id, seed: participants.length + 1, frozen_roster: roster }));
   const left = tournament.size - participants.length - 1;
@@ -1458,7 +1464,7 @@ async function openCup(input: {
       .from('tournaments')
       .insert({
         kind: input.kind,
-        team_size: input.kind === 'anubis' ? input.teamSize : null,
+        team_size: input.teamSize,
         name: input.name,
         size: input.size,
         best_of: input.bestOf,
@@ -1512,9 +1518,11 @@ function parseCupInput(body: unknown) {
   if (!(bestOf === 1 ? [3] : [3, 5]).includes(finalBestOf)) throw new HttpError(400, 'INVALID_CUP', bestOf === 1 ? 'En BO1, la finale se joue en BO3.' : 'Finale en BO3 ou BO5.');
   const bracket: BracketType = (body as { bracket?: unknown } | undefined)?.bracket === 'double' ? 'double' : 'single';
   const kind: 'horus' | 'anubis' = (body as { kind?: unknown } | undefined)?.kind === 'anubis' ? 'anubis' : 'horus';
+  // Joueurs par équipe (2, 3 ou 4 ; 1 en mode test) : obligatoire pour l'Anubis, format de la Division par défaut pour l'Horus.
+  const rawSize = (body as { teamSize?: unknown } | undefined)?.teamSize;
   let teamSize: number | null = null;
-  if (kind === 'anubis') {
-    teamSize = Number((body as { teamSize?: unknown } | undefined)?.teamSize);
+  if (kind === 'anubis' || (rawSize !== undefined && rawSize !== null)) {
+    teamSize = Number(rawSize);
     const sizes: number[] = config.teams.rosterSize === 1 ? [1, ...ANUBIS_TEAM_SIZES] : [...ANUBIS_TEAM_SIZES];
     if (!sizes.includes(teamSize)) throw new HttpError(400, 'INVALID_CUP', 'Taille des équipes : 2, 3 ou 4 joueurs.');
   }
@@ -1690,7 +1698,7 @@ export async function updateCup(id: string, body: unknown) {
     input.bestOf !== row.best_of ||
     input.finalBestOf !== row.final_best_of ||
     input.bracket !== row.bracket ||
-    (row.kind === 'anubis' && input.teamSize !== row.team_size);
+    input.teamSize !== row.team_size;
   if (checkInOpen && formatChanged) throw new HttpError(409, 'CHECKIN_OPEN', 'Le check-in est ouvert : seuls le nom et l’affiche se modifient encore.');
   if (formatChanged && startsAt.getTime() < Date.now() + (REVEAL_MINUTES + 5) * 60_000) {
     throw new HttpError(400, 'INVALID_CUP', `La coupe doit commencer dans plus de ${REVEAL_MINUTES + 5} min.`);
@@ -1714,7 +1722,7 @@ export async function updateCup(id: string, body: unknown) {
         final_best_of: input.finalBestOf,
         bracket: input.bracket,
         third_place: input.bracket === 'single',
-        team_size: row.kind === 'anubis' ? input.teamSize : null,
+        team_size: input.teamSize,
       })
       .eq('id', id),
   );
@@ -1772,7 +1780,7 @@ export async function listCups() {
       completedAt: row.completed_at,
       checkInOpensAt: new Date(new Date(row.starts_at).getTime() - CHECKIN_MINUTES * 60_000).toISOString(),
       size: row.size,
-      teamSize: row.team_size,
+      teamSize: playersPerTeam(row),
       bestOf: row.best_of,
       finalBestOf: row.final_best_of,
       bracket: row.bracket,

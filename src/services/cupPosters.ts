@@ -30,7 +30,7 @@ export function cupDate(iso: string): string {
 
 /** Ligne de format : « 4v4 · BO3 · Élimination directe ». */
 export function cupFormat(source: PosterSource): string {
-  const size = source.kind === 'anubis' ? source.team_size : config.teams.rosterSize;
+  const size = source.team_size ?? config.teams.rosterSize;
   return [size ? `${size}v${size}` : null, `BO${source.best_of}`, source.bracket === 'double' ? 'Double élimination' : 'Élimination directe'].filter(Boolean).join(' · ');
 }
 
