@@ -19,6 +19,8 @@ import { listTeamDisputes } from '../services/teamMatches.js';
 import {
   cancelTournament,
   createCup,
+  setCupPoster,
+  setSchedulePoster,
   createSchedule,
   createPlayIn,
   createTournament,
@@ -178,6 +180,9 @@ export function adminRouter(): Router {
   router.post('/cups', asyncHandler(async (req, res) => void res.status(201).json(await createCup(currentUser(res).id, req.body))));
   router.post('/cups/schedules', asyncHandler(async (req, res) => void res.status(201).json(await createSchedule(currentUser(res).id, req.body))));
   router.patch('/cups/schedules/:id', asyncHandler(async (req, res) => void res.json(await updateSchedule(uuidParam(req, 'id'), req.body))));
+  // Affiche d'une coupe ou d'un rendez-vous : { posterUrl } (image du bucket cup-posters) ou null.
+  router.post('/cups/:id/poster', asyncHandler(async (req, res) => void res.json(await setCupPoster(uuidParam(req, 'id'), req.body))));
+  router.post('/cups/schedules/:id/poster', asyncHandler(async (req, res) => void res.json(await setSchedulePoster(uuidParam(req, 'id'), req.body))));
   router.delete('/cups/schedules/:id', asyncHandler(async (req, res) => void res.json(await deleteSchedule(uuidParam(req, 'id')))));
 
   router.post('/tournaments/:id/entries/:entryId/winner', asyncHandler(async (req, res) => {

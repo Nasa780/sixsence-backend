@@ -109,6 +109,8 @@ export interface Announcement {
   url?: string;
   /** Ligne courte sous le titre de l'image (date, format…). */
   subtitle?: string;
+  /** Image à la place du bandeau généré (affiche d'une coupe). */
+  image?: string;
 }
 
 /** Publie une annonce. Au mieux : une erreur Discord est journalisée, jamais remontée (sauf `strict`, pour l'admin). */
@@ -133,7 +135,7 @@ export async function postAnnouncement(item: Announcement, strict = false): Prom
             description: `${item.text.slice(0, 3800)}${link ? `\n\n👉 [En savoir plus](${link})` : ''}`,
             url: link,
             color: NOTIFY[item.type].color,
-            image: { url: imageUrl(item.type, item.title, item.subtitle) },
+            image: { url: item.image ?? imageUrl(item.type, item.title, item.subtitle) },
             footer: { text: `SixSence · ${NOTIFY[item.type].label}` },
             timestamp: new Date().toISOString(),
           },

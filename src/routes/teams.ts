@@ -28,7 +28,7 @@ import { getCircuit } from '../services/circuit.js';
 import { cancelTeamSchedule, scheduleSlots, scheduleTeamMatch } from '../services/teamSchedules.js';
 import { answerChallenge, cancelChallenge, createChallenge, myChallenges } from '../services/challenges.js';
 import { leagueState } from '../services/leagues.js';
-import { checkIn, currentTournament, getTournament, registerTeam, setSquadRoster, unregisterTeam } from '../services/tournaments.js';
+import { checkIn, currentTournament, getTournament, listCups, registerTeam, setSquadRoster, unregisterTeam } from '../services/tournaments.js';
 import {
   answerInvite,
   inviteLinkPreview,
@@ -157,6 +157,8 @@ export function teamsRouter(): Router {
     optionalAuth,
     asyncHandler(async (req, res) => void res.json({ tournament: await currentTournament(viewerOf(res)?.id ?? null, req.query.kind === 'horus' || req.query.kind === 'anubis' || req.query.kind === 'playin' ? req.query.kind : 'saison') })),
   );
+  // Liste des coupes (page Tournoi) : prochaines et dernières terminées, avec leur affiche.
+  router.get('/cups', asyncHandler(async (_req, res) => void res.json(await listCups())));
   router.get('/tournaments/:tournamentId', optionalAuth, asyncHandler(async (req, res) => void res.json(await getTournament(uuidParam(req, 'tournamentId'), viewerOf(res)?.id ?? null))));
   router.post('/tournaments/:tournamentId/checkin', requireAuth, asyncHandler(async (req, res) => void res.json(await checkIn(currentUser(res).id, uuidParam(req, 'tournamentId'), req.body))));
   router.post('/tournaments/:tournamentId/register', requireAuth, asyncHandler(async (req, res) => void res.json(await registerTeam(currentUser(res).id, uuidParam(req, 'tournamentId')))));

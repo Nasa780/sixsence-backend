@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { postAnnouncement } from './announcements.js';
+import { parsePosterUrl, posterOf } from './cupPosters.js';
 import { circuitOrder } from './circuit.js';
 import { CIRCUIT_POINTS, finalQualified, finalWithPlayIn, playInPairs } from './circuitPolicy.js';
 import { mapPool } from './maps.js';
@@ -96,6 +97,8 @@ interface TournamentRow {
   size: number;
   starts_at: string;
   status: 'scheduled' | 'running' | 'completed' | 'cancelled';
+  /** Affiche envoyée par l'admin (migration 0055) ; sinon affiche générée (posterOf). */
+  poster_url: string | null;
   winner_team: string | null;
   finalist_team: string | null;
   created_at: string;
@@ -540,6 +543,7 @@ export async function getTournament(id: string, viewerId: string | null) {
     id: tournament.id,
     kind: tournament.kind,
     name: tournament.name,
+    posterUrl: posterOf(tournament),
     size: tournament.size,
     bestOf: tournament.best_of,
     finalBestOf: tournament.final_best_of,
@@ -1278,7 +1282,8 @@ async function completeCup(tournament: TournamentRow, winner: string | null, fin
       title: `${tournament.name} : victoire de ${label(winner)}`,
       subtitle: 'Résultats',
       text: `🥇 **${label(winner)}** (+${CUP_BONUS.or} pts)\n🥈 ${label(finalist)} (+${CUP_BONUS.argent} pts)${third ? `\n🥉 ${label(third)} (+${CUP_BONUS.bronze} pts)` : ''}\n\nFélicitations aux vainqueurs ! Le tableau final et les trophées sont en ligne.`,
-      url: PAGE,
+      url: `${PAGE}?id=${tournament.id}`,
+      image: posterOf(tournament),
     });
   const winnerEntry = participants.find((p) => p.team_id === winner);
   if (winnerEntry) await passCupRole('horus', winnerEntry.match_roster ?? winnerEntry.frozen_roster);
@@ -1328,7 +1333,8 @@ async function rewardAnubis(tournament: TournamentRow, winner: string | null, fi
       title: `${tournament.name} : victoire de ${label(winner)}`,
       subtitle: 'Résultats',
       text: `🥇 **${label(winner)}** : ${await list(winner)}\n🥈 ${label(finalist)} : ${await list(finalist)}${third ? `\n🥉 ${label(third)} : ${await list(third)}` : ''}\n\nLes médailles sont sur les profils des joueurs.`,
-      url: `${PAGE}?coupe=anubis`,
+      url: `${PAGE}?id=${tournament.id}`,
+      image: posterOf(tournament),
     });
   await passCupRole('anubis', rosterOf(winner));
 }
@@ -1371,6 +1377,7 @@ interface ScheduleRow {
   active: boolean;
   last_date: string | null;
   created_by: string | null;
+  poster_url: string | null;
 }
 
 /** Décalage de Paris (minutes) à un instant donné. */
@@ -1426,6 +1433,7 @@ async function ensureScheduledCups(): Promise<void> {
       startsAt: next.startsAt,
       scheduleId: schedule.id,
       adminId: schedule.created_by,
+      posterUrl: schedule.poster_url,
     });
     unwrap(await supabase.from('cup_schedules').update({ last_date: next.day }).eq('id', schedule.id));
   }
@@ -1442,6 +1450,7 @@ async function openCup(input: {
   startsAt: Date;
   scheduleId: string | null;
   adminId: string | null;
+  posterUrl: string | null;
 }) {
   const season = unwrap(await supabase.from('seasons').select('id').eq('is_active', true).maybeSingle()) as { id: number } | null;
   const tournament = unwrap(
@@ -1460,6 +1469,7 @@ async function openCup(input: {
         season_id: season?.id ?? null,
         schedule_id: input.scheduleId,
         created_by: input.adminId,
+        poster_url: input.posterUrl,
       })
       .select('*')
       .single(),
@@ -1482,7 +1492,8 @@ async function openCup(input: {
         input.kind === 'anubis'
           ? `Inscris-toi **seul** : les équipes de ${input.teamSize} sont tirées au sort au début de la coupe (${input.size} équipes au plus).\n\n📅 **${date}**\n⚔️ ${format}\n🥇 Médailles or, argent et bronze sur ton profil.`
           : `Inscris ton équipe : ${input.size} places.\n\n📅 **${date}**\n⚔️ ${format}\n🏆 Trophées or, argent et bronze et points de Division.`,
-      url: input.kind === 'anubis' ? `${PAGE}?coupe=anubis` : PAGE,
+      url: `${PAGE}?id=${tournament.id}`,
+      image: posterOf(tournament),
     });
   return tournament;
 }
@@ -1507,7 +1518,8 @@ function parseCupInput(body: unknown) {
     const sizes: number[] = config.teams.rosterSize === 1 ? [1, ...ANUBIS_TEAM_SIZES] : [...ANUBIS_TEAM_SIZES];
     if (!sizes.includes(teamSize)) throw new HttpError(400, 'INVALID_CUP', 'Taille des équipes : 2, 3 ou 4 joueurs.');
   }
-  return { kind, teamSize, name, size, bestOf, finalBestOf, bracket };
+  const posterUrl = parsePosterUrl((body as { posterUrl?: unknown } | undefined)?.posterUrl);
+  return { kind, teamSize, name, size, bestOf, finalBestOf, bracket, posterUrl };
 }
 
 export async function cupAdmin() {
@@ -1533,6 +1545,8 @@ export async function cupAdmin() {
       bracket: row.bracket,
       active: row.active,
       next: nextOccurrence(row.weekday, row.start_time).startsAt.toISOString(),
+      posterUrl: row.poster_url,
+      poster: posterOf({ ...row, starts_at: nextOccurrence(row.weekday, row.start_time).startsAt.toISOString() }),
     })),
     cups: ((cups.data ?? []) as TournamentRow[]).map((row) => ({
       id: row.id,
@@ -1545,6 +1559,8 @@ export async function cupAdmin() {
       bestOf: row.best_of,
       finalBestOf: row.final_best_of,
       bracket: row.bracket,
+      posterUrl: row.poster_url,
+      poster: posterOf(row),
     })),
   };
 }
@@ -1579,6 +1595,7 @@ export async function createSchedule(adminId: string, body: unknown) {
       best_of: input.bestOf,
       final_best_of: input.finalBestOf,
       bracket: input.bracket,
+      poster_url: input.posterUrl,
       created_by: adminId,
     }),
   );
@@ -1605,6 +1622,7 @@ export async function updateSchedule(id: string, body: unknown) {
           best_of: input.bestOf,
           final_best_of: input.finalBestOf,
           bracket: input.bracket,
+          poster_url: input.posterUrl,
           last_date: null,
         })
         .eq('id', id),
@@ -1628,4 +1646,72 @@ export async function createCup(adminId: string, body: unknown) {
   if (startsAt.getTime() < Date.now() + (REVEAL_MINUTES + 5) * 60_000) throw new HttpError(400, 'INVALID_CUP', `La coupe doit commencer dans plus de ${REVEAL_MINUTES + 5} min.`);
   await openCup({ ...input, startsAt, scheduleId: null, adminId });
   return cupAdmin();
+}
+
+/** Affiche d'une coupe déjà créée (ou null : retour à l'affiche générée). */
+export async function setCupPoster(id: string, body: unknown) {
+  const posterUrl = parsePosterUrl((body as { posterUrl?: unknown } | undefined)?.posterUrl);
+  unwrap(await supabase.from('tournaments').update({ poster_url: posterUrl }).eq('id', id).in('kind', ['horus', 'anubis']));
+  return cupAdmin();
+}
+
+/** Affiche d'un rendez-vous récurrent (reprise par ses prochaines coupes), ou null. */
+export async function setSchedulePoster(id: string, body: unknown) {
+  const posterUrl = parsePosterUrl((body as { posterUrl?: unknown } | undefined)?.posterUrl);
+  unwrap(await supabase.from('cup_schedules').update({ poster_url: posterUrl }).eq('id', id));
+  return cupAdmin();
+}
+
+/**
+ * Liste publique des coupes (page Tournoi, façon Sked) : prochaines coupes et tournoi de saison (prévus ou en cours,
+ * par date), puis les dernières terminées avec leur vainqueur. Affiche, format, places prises.
+ */
+export async function listCups() {
+  const kinds = ['horus', 'anubis', 'saison'];
+  const [upcoming, past] = await Promise.all([
+    supabase.from('tournaments').select('*').in('kind', kinds).in('status', ['scheduled', 'running']).order('starts_at').limit(20),
+    supabase.from('tournaments').select('*').in('kind', kinds).eq('status', 'completed').order('completed_at', { ascending: false }).limit(9),
+  ]);
+  if (upcoming.error) throw fromDbError(upcoming.error);
+  if (past.error) throw fromDbError(past.error);
+  const rows = [...((upcoming.data ?? []) as TournamentRow[]), ...((past.data ?? []) as TournamentRow[])];
+  const ids = rows.map((row) => row.id);
+  const [teamRows, playerRows] = ids.length
+    ? await Promise.all([
+        supabase.from('tournament_teams').select('tournament_id').in('tournament_id', ids),
+        supabase.from('cup_players').select('tournament_id').in('tournament_id', ids),
+      ])
+    : [{ data: [] }, { data: [] }];
+  const count = (list: { tournament_id: string }[] | null, id: string) => (list ?? []).filter((row) => row.tournament_id === id).length;
+  const winnerIds = rows.map((row) => row.winner_team).filter(Boolean) as string[];
+  const winners = winnerIds.length
+    ? ((unwrap(await supabase.from('teams').select('id, name, tag, color, logo_url').in('id', winnerIds)) ?? []) as { id: string; name: string; tag: string; color: string; logo_url: string | null }[])
+    : [];
+  const view = (row: TournamentRow) => {
+    const winner = winners.find((team) => team.id === row.winner_team);
+    const anubis = row.kind === 'anubis';
+    return {
+      id: row.id,
+      kind: row.kind,
+      name: row.name,
+      status: row.status,
+      startsAt: row.starts_at,
+      completedAt: row.completed_at,
+      checkInOpensAt: new Date(new Date(row.starts_at).getTime() - CHECKIN_MINUTES * 60_000).toISOString(),
+      size: row.size,
+      teamSize: row.team_size,
+      bestOf: row.best_of,
+      finalBestOf: row.final_best_of,
+      bracket: row.bracket,
+      // Coupe Anubis : joueurs inscrits sur la capacité ; sinon équipes sur les places.
+      registered: anubis ? count(playerRows.data as { tournament_id: string }[] | null, row.id) : count(teamRows.data as { tournament_id: string }[] | null, row.id),
+      capacity: anubis ? anubisCapacity(row.size, row.team_size ?? config.teams.rosterSize) : row.size,
+      posterUrl: posterOf(row),
+      winner: winner ? { id: winner.id, name: winner.name, tag: winner.tag, color: winner.color, logoUrl: winner.logo_url } : null,
+    };
+  };
+  return {
+    upcoming: ((upcoming.data ?? []) as TournamentRow[]).map(view),
+    past: ((past.data ?? []) as TournamentRow[]).map(view),
+  };
 }
