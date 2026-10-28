@@ -270,7 +270,7 @@ export function roundNameDouble(round: number, size: number): string {
 // --- Coupe Anubis : équipes formées au hasard --------------------------------------------------
 
 /** Tailles d'équipe proposées pour la Coupe Anubis (1 : test à deux comptes seulement). */
-export const ANUBIS_TEAM_SIZES = [2, 3, 4] as const;
+export const ANUBIS_TEAM_SIZES = [2, 3, 4, 5] as const;
 
 /** Noms des équipes formées (nom, tag, couleur), dans l'ordre du tirage. */
 export const ANUBIS_TEAMS = [

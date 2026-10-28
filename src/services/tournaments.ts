@@ -1518,13 +1518,13 @@ function parseCupInput(body: unknown) {
   if (!(bestOf === 1 ? [3] : [3, 5]).includes(finalBestOf)) throw new HttpError(400, 'INVALID_CUP', bestOf === 1 ? 'En BO1, la finale se joue en BO3.' : 'Finale en BO3 ou BO5.');
   const bracket: BracketType = (body as { bracket?: unknown } | undefined)?.bracket === 'double' ? 'double' : 'single';
   const kind: 'horus' | 'anubis' = (body as { kind?: unknown } | undefined)?.kind === 'anubis' ? 'anubis' : 'horus';
-  // Joueurs par équipe (2, 3 ou 4 ; 1 en mode test) : obligatoire pour l'Anubis, format de la Division par défaut pour l'Horus.
+  // Joueurs par équipe (2 à 5 ; 1 en mode test) : obligatoire pour l'Anubis, format de la Division par défaut pour l'Horus.
   const rawSize = (body as { teamSize?: unknown } | undefined)?.teamSize;
   let teamSize: number | null = null;
   if (kind === 'anubis' || (rawSize !== undefined && rawSize !== null)) {
     teamSize = Number(rawSize);
     const sizes: number[] = config.teams.rosterSize === 1 ? [1, ...ANUBIS_TEAM_SIZES] : [...ANUBIS_TEAM_SIZES];
-    if (!sizes.includes(teamSize)) throw new HttpError(400, 'INVALID_CUP', 'Taille des équipes : 2, 3 ou 4 joueurs.');
+    if (!sizes.includes(teamSize)) throw new HttpError(400, 'INVALID_CUP', 'Taille des équipes : 2 à 5 joueurs.');
   }
   const posterUrl = parsePosterUrl((body as { posterUrl?: unknown } | undefined)?.posterUrl);
   return { kind, teamSize, name, size, bestOf, finalBestOf, bracket, posterUrl };
