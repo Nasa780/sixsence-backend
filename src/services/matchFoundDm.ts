@@ -44,11 +44,16 @@ function foundBody(match: CodMatch): Body {
       {
         color: GREEN,
         title: '⚡ MATCH TROUVÉ',
-        description: `**Classé ${match.format ?? `${match.team_size}v${match.team_size}`}** · ${match.mode}\n⏳ **${left} s** pour accepter`,
+        description: config.cod.readyRequired
+          ? `**Classé ${match.format ?? `${match.team_size}v${match.team_size}`}** · ${match.mode}\n⏳ **${left} s** pour accepter`
+          : `**Classé ${match.format ?? `${match.team_size}v${match.team_size}`}** · ${match.mode}\n⏳ Lancement dans **${left} s** : prépare-toi et rejoins le vocal`,
         image: { url: `${site}/api/og/match?${banner.toString()}` },
       },
     ],
-    components: [{ type: 1, components: [{ type: 2, style: 3, label: 'Je suis prêt', emoji: { name: '✅' }, custom_id: `ready:${match.id}` }, openButton(match.id)] }],
+    // « Prêt ? » facultatif : plus de bouton « Je suis prêt », le match démarre tout seul.
+    components: config.cod.readyRequired
+      ? [{ type: 1, components: [{ type: 2, style: 3, label: 'Je suis prêt', emoji: { name: '✅' }, custom_id: `ready:${match.id}` }, openButton(match.id)] }]
+      : [{ type: 1, components: [openButton(match.id)] }],
   };
 }
 

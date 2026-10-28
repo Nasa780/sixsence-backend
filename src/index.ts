@@ -153,11 +153,11 @@ bus.on('match:found', async (match) => {
   for (const userId of [...match.team_a, ...match.team_b]) {
     void pushToUsers([userId], {
       title: '⚡ Match trouvé !',
-      body: `${match.format ?? ''} · ${match.map} — accepte dans la minute.`,
+      body: config.cod.readyRequired ? `${match.format ?? ''} · ${match.map} — accepte dans la minute.` : `${match.format ?? ''} · ${match.map} — lancement dans 1 min.`,
       url: `/cod/match/${match.id}`,
       tag: `match-${match.id}`,
       urgent: true,
-      ready: { url: `${PUBLIC_API_URL}/cod/matches/${match.id}/ready-token`, token: readyToken(match.id, userId, match.ready_deadline) },
+      ready: config.cod.readyRequired ? { url: `${PUBLIC_API_URL}/cod/matches/${match.id}/ready-token`, token: readyToken(match.id, userId, match.ready_deadline) } : undefined,
     });
   }
 });

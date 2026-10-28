@@ -120,6 +120,11 @@ export const config = {
     /** Temps laissé à chaque joueur pour accepter un match trouvé (vérification « Prêt ? »). */
     readySeconds: integer('COD_READY_SECONDS', 60, 10),
     /**
+     * Clic « Prêt » obligatoire (COD_READY_REQUIRED=on) : sinon (défaut depuis le 2026-10-28), le match trouvé démarre
+     * tout seul à la fin du compte à rebours, sans annulation ni sanction. Code du « Prêt ? » obligatoire conservé.
+     */
+    readyRequired: process.env.COD_READY_REQUIRED?.trim() === 'on',
+    /**
      * Délai de grâce après une déconnexion (page fermée, écran verrouillé, autre appli), le même sur
      * ordinateur et téléphone : le joueur garde sa place, la notification push le prévient du match.
      */
