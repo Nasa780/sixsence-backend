@@ -32,6 +32,7 @@ import {
   updateSchedule,
 } from '../services/tournaments.js';
 import { adminDisbandTeam, adminTeamReports, adminTeams, closeTeamReport, moderateTeam } from '../services/teams.js';
+import { missedReadyChecks } from '../services/missedReady.js';
 import { supabase } from '../supabase.js';
 import { activateLeagues, prepareLeagueMoves } from '../services/leagues.js';
 
@@ -79,6 +80,7 @@ import { activateLeagues, prepareLeagueMoves } from '../services/leagues.js';
  *   GET    /admin/players/:id/sanctions    historique des sanctions d'un joueur
  *   POST   /admin/players/:id/sanctions    { type, reason, minutes?, points?, reportId? } sanctionner
  *   POST   /admin/sanctions/:id/lift       { reason? } lever une sanction
+ *   GET    /admin/missed-ready             derniers « Prêt ? » manqués (joueur, match, nombre sur 7 jours)
  *   POST   /admin/players/:id/unban        lever une exclusion de la file
  *   POST   /admin/season/close             { nextName } clôturer la saison (ligues : montées et descentes)
  *   POST   /admin/leagues/activate         première répartition des équipes en ligues (16 équipes au moins)
@@ -276,6 +278,9 @@ export function adminRouter(): Router {
   }));
   router.post('/players/:id/sanctions', asyncHandler(async (req, res) => {
     res.status(201).json({ sanction: await applySanction(uuidParam(req, 'id'), req.body, currentUser(res).id) });
+  }));
+  router.get('/missed-ready', asyncHandler(async (_req, res) => {
+    res.json({ missed: await missedReadyChecks() });
   }));
   router.post('/sanctions/:id/lift', asyncHandler(async (req, res) => {
     res.json({ sanction: await liftSanction(req.params.id, currentUser(res).id, req.body) });
