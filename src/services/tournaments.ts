@@ -1523,11 +1523,24 @@ function parseCupInput(body: unknown) {
 }
 
 export async function cupAdmin() {
-  const [auto, schedules, cups] = await Promise.all([
+  const [auto, schedules, open, done] = await Promise.all([
     cupsAuto(),
     supabase.from('cup_schedules').select('*').order('created_at'),
-    supabase.from('tournaments').select('*').in('kind', ['horus', 'anubis']).order('starts_at', { ascending: false }).limit(12),
+    supabase.from('tournaments').select('*').in('kind', ['horus', 'anubis']).in('status', ['scheduled', 'running']).order('starts_at'),
+    supabase.from('tournaments').select('*').in('kind', ['horus', 'anubis']).in('status', ['completed', 'cancelled']).order('starts_at', { ascending: false }).limit(15),
   ]);
+  const cupRows = [...((open.data ?? []) as TournamentRow[]), ...((done.data ?? []) as TournamentRow[])];
+  const ids = cupRows.map((row) => row.id);
+  const [teamRows, playerRows] = ids.length
+    ? await Promise.all([
+        supabase.from('tournament_teams').select('tournament_id, checked_in_at').in('tournament_id', ids),
+        supabase.from('cup_players').select('tournament_id, checked_in_at').in('tournament_id', ids),
+      ])
+    : [{ data: [] }, { data: [] }];
+  const entriesOfCup = (row: TournamentRow) =>
+    ((row.kind === 'anubis' ? playerRows.data : teamRows.data) ?? ([] as { tournament_id: string; checked_in_at: string | null }[])).filter(
+      (entry: { tournament_id: string }) => entry.tournament_id === row.id,
+    ) as { tournament_id: string; checked_in_at: string | null }[];
   return {
     auto,
     // Mode test (TEAM_MATCH_PLAYERS=1) : Coupe Anubis en 1v1 possible.
@@ -1548,20 +1561,29 @@ export async function cupAdmin() {
       posterUrl: row.poster_url,
       poster: posterOf({ ...row, starts_at: nextOccurrence(row.weekday, row.start_time).startsAt.toISOString() }),
     })),
-    cups: ((cups.data ?? []) as TournamentRow[]).map((row) => ({
-      id: row.id,
-      kind: row.kind,
-      teamSize: row.team_size,
-      name: row.name,
-      size: row.size,
-      startsAt: row.starts_at,
-      status: row.status,
-      bestOf: row.best_of,
-      finalBestOf: row.final_best_of,
-      bracket: row.bracket,
-      posterUrl: row.poster_url,
-      poster: posterOf(row),
-    })),
+    cups: cupRows.map((row) => {
+      const entries = entriesOfCup(row);
+      return {
+        id: row.id,
+        kind: row.kind,
+        teamSize: row.team_size,
+        name: row.name,
+        size: row.size,
+        startsAt: row.starts_at,
+        checkInOpensAt: new Date(new Date(row.starts_at).getTime() - CHECKIN_MINUTES * 60_000).toISOString(),
+        status: row.status,
+        bestOf: row.best_of,
+        finalBestOf: row.final_best_of,
+        bracket: row.bracket,
+        scheduleId: row.schedule_id,
+        // Coupe Anubis : joueurs ; sinon équipes.
+        registered: entries.length,
+        checkedIn: entries.filter((entry) => entry.checked_in_at).length,
+        capacity: row.kind === 'anubis' ? anubisCapacity(row.size, row.team_size ?? config.teams.rosterSize) : row.size,
+        posterUrl: row.poster_url,
+        poster: posterOf(row),
+      };
+    }),
   };
 }
 
@@ -1645,6 +1667,57 @@ export async function createCup(adminId: string, body: unknown) {
   if (Number.isNaN(startsAt.getTime())) throw new HttpError(400, 'INVALID_CUP', 'Date de début invalide.');
   if (startsAt.getTime() < Date.now() + (REVEAL_MINUTES + 5) * 60_000) throw new HttpError(400, 'INVALID_CUP', `La coupe doit commencer dans plus de ${REVEAL_MINUTES + 5} min.`);
   await openCup({ ...input, startsAt, scheduleId: null, adminId });
+  return cupAdmin();
+}
+
+/**
+ * Modifier une coupe prévue (admin) : nom et affiche jusqu'au début ; date, places et format seulement avant l'ouverture
+ * du check-in (2 h avant). Les places ne descendent pas sous le nombre d'inscrits.
+ */
+export async function updateCup(id: string, body: unknown) {
+  const row = await tournamentRow(id);
+  if (row.kind !== 'horus' && row.kind !== 'anubis') throw new HttpError(400, 'INVALID_CUP', 'Seules les Coupes Horus et Anubis se modifient ici.');
+  if (row.status !== 'scheduled') throw new HttpError(409, 'CUP_STARTED', 'La coupe a déjà commencé : elle ne se modifie plus.');
+  const input = parseCupInput({ ...(body as object), kind: row.kind });
+  const raw = (body as { startsAt?: unknown } | undefined)?.startsAt;
+  const startsAt = typeof raw === 'string' ? new Date(raw) : new Date(row.starts_at);
+  if (Number.isNaN(startsAt.getTime())) throw new HttpError(400, 'INVALID_CUP', 'Date de début invalide.');
+
+  const checkInOpen = Date.now() >= new Date(row.starts_at).getTime() - CHECKIN_MINUTES * 60_000;
+  const formatChanged =
+    startsAt.getTime() !== new Date(row.starts_at).getTime() ||
+    input.size !== row.size ||
+    input.bestOf !== row.best_of ||
+    input.finalBestOf !== row.final_best_of ||
+    input.bracket !== row.bracket ||
+    (row.kind === 'anubis' && input.teamSize !== row.team_size);
+  if (checkInOpen && formatChanged) throw new HttpError(409, 'CHECKIN_OPEN', 'Le check-in est ouvert : seuls le nom et l’affiche se modifient encore.');
+  if (formatChanged && startsAt.getTime() < Date.now() + (REVEAL_MINUTES + 5) * 60_000) {
+    throw new HttpError(400, 'INVALID_CUP', `La coupe doit commencer dans plus de ${REVEAL_MINUTES + 5} min.`);
+  }
+  const registered =
+    row.kind === 'anubis'
+      ? ((await supabase.from('cup_players').select('user_id', { count: 'exact', head: true }).eq('tournament_id', id)).count ?? 0)
+      : ((await supabase.from('tournament_teams').select('team_id', { count: 'exact', head: true }).eq('tournament_id', id)).count ?? 0);
+  const capacity = row.kind === 'anubis' ? anubisCapacity(input.size, input.teamSize ?? config.teams.rosterSize) : input.size;
+  if (registered > capacity) throw new HttpError(409, 'CUP_TOO_SMALL', `${registered} ${row.kind === 'anubis' ? 'joueurs' : 'équipes'} déjà inscrits : choisis plus de places.`);
+
+  unwrap(
+    await supabase
+      .from('tournaments')
+      .update({
+        name: input.name,
+        poster_url: input.posterUrl,
+        starts_at: startsAt.toISOString(),
+        size: input.size,
+        best_of: input.bestOf,
+        final_best_of: input.finalBestOf,
+        bracket: input.bracket,
+        third_place: input.bracket === 'single',
+        team_size: row.kind === 'anubis' ? input.teamSize : null,
+      })
+      .eq('id', id),
+  );
   return cupAdmin();
 }
 

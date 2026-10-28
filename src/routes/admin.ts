@@ -21,6 +21,7 @@ import {
   createCup,
   setCupPoster,
   setSchedulePoster,
+  updateCup,
   createSchedule,
   createPlayIn,
   createTournament,
@@ -181,6 +182,8 @@ export function adminRouter(): Router {
   router.post('/cups/schedules', asyncHandler(async (req, res) => void res.status(201).json(await createSchedule(currentUser(res).id, req.body))));
   router.patch('/cups/schedules/:id', asyncHandler(async (req, res) => void res.json(await updateSchedule(uuidParam(req, 'id'), req.body))));
   // Affiche d'une coupe ou d'un rendez-vous : { posterUrl } (image du bucket cup-posters) ou null.
+  // Modifier une coupe prévue : tous les champs de la création (nom, startsAt, places, format, affiche).
+  router.patch('/cups/:id', asyncHandler(async (req, res) => void res.json(await updateCup(uuidParam(req, 'id'), req.body))));
   router.post('/cups/:id/poster', asyncHandler(async (req, res) => void res.json(await setCupPoster(uuidParam(req, 'id'), req.body))));
   router.post('/cups/schedules/:id/poster', asyncHandler(async (req, res) => void res.json(await setSchedulePoster(uuidParam(req, 'id'), req.body))));
   router.delete('/cups/schedules/:id', asyncHandler(async (req, res) => void res.json(await deleteSchedule(uuidParam(req, 'id')))));
