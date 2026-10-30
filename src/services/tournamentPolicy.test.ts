@@ -5,6 +5,8 @@ import {
   LOSERS_BASE,
   advanceBracket,
   anubisCapacity,
+  anubisReserve,
+  reserveTeams,
   formTeams,
   advanceDouble,
   bestOfDouble,
@@ -218,5 +220,18 @@ describe('Coupe Anubis : formation des équipes', () => {
   it('pas assez de joueurs : moins d’équipes', () => {
     assert.equal(formTeams(players(7), 2, 8).length, 3);
     assert.equal(anubisCapacity(8, 4), 40);
+  });
+});
+
+describe('places de remplaçant des coupes', () => {
+  it("un quart des places, une au moins", () => {
+    assert.equal(reserveTeams(4), 1);
+    assert.equal(reserveTeams(8), 2);
+    assert.equal(reserveTeams(16), 4);
+    assert.equal(reserveTeams(2), 1);
+  });
+  it('Coupe Anubis : autant d’équipes de joueurs', () => {
+    assert.equal(anubisReserve(8, 4), 8);
+    assert.equal(anubisReserve(4, 2), 2);
   });
 });

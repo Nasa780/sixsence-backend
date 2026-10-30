@@ -3,6 +3,7 @@ import type { CodMatch } from '../events.js';
 import { supabase } from '../supabase.js';
 import { dm, notifyStaff } from './discord.js';
 import { pushToUsers } from './push.js';
+import { waitedFor } from './waitPolicy.js';
 
 /**
  * Notifications de la vie d'un match (notification push + message privé Discord) :
@@ -145,25 +146,36 @@ export async function noticeMatchFinished(match: CodMatch): Promise<void> {
 const REMINDER_HOURS = 2;
 
 /**
- * Relance de l'équipe : contestations, demandes d'arbitrage et signalements en attente depuis
- * plus de 2 h. Un seul message toutes les 2 h au plus (app_claim), et rien s'il n'y a rien.
+ * Relance de l'équipe : contestations (classé, Division et coupes), demandes d'arbitrage et signalements en attente
+ * depuis plus de 2 h, avec la vraie durée d'attente du plus ancien de chaque liste. Un seul message toutes les 2 h au
+ * plus (app_claim), et rien s'il n'y a rien.
  */
 export async function remindStaff(now = Date.now()): Promise<void> {
   const before = new Date(now - REMINDER_HOURS * 60 * 60_000).toISOString();
-  const count = async (query: PromiseLike<{ count: number | null }>) => (await query).count ?? 0;
-  const [disputes, arbitrations, reports] = await Promise.all([
-    count(supabase.from('cod_matches').select('id', { count: 'exact', head: true }).eq('status', 'disputed').lt('reported_at', before)),
-    count(supabase.from('cod_arbitration_requests').select('id', { count: 'exact', head: true }).eq('status', 'open').lt('created_at', before)),
-    count(supabase.from('cod_player_reports').select('id', { count: 'exact', head: true }).eq('status', 'open').lt('created_at', before)),
+  // Éléments en attente depuis plus de 2 h, du plus ancien au plus récent : nombre et date du plus ancien.
+  const waiting = async (query: PromiseLike<{ data: unknown }>, column: string) => {
+    const rows = ((await query).data ?? []) as Record<string, string>[];
+    return { count: rows.length, oldest: rows[0]?.[column] ?? null };
+  };
+  const [disputes, teamDisputes, arbitrations, reports] = await Promise.all([
+    waiting(supabase.from('cod_matches').select('reported_at').eq('status', 'disputed').lt('reported_at', before).order('reported_at').limit(100), 'reported_at'),
+    waiting(supabase.from('team_matches').select('updated_at').eq('status', 'disputed').lt('updated_at', before).order('updated_at').limit(100), 'updated_at'),
+    waiting(supabase.from('cod_arbitration_requests').select('created_at').eq('status', 'open').lt('created_at', before).order('created_at').limit(100), 'created_at'),
+    waiting(supabase.from('cod_player_reports').select('created_at').eq('status', 'open').lt('created_at', before).order('created_at').limit(100), 'created_at'),
   ]);
-  if (disputes + arbitrations + reports === 0) return;
+  if (disputes.count + teamDisputes.count + arbitrations.count + reports.count === 0) return;
   const slot = String(Math.floor(now / (REMINDER_HOURS * 60 * 60_000)));
   const { data: claimed } = await supabase.rpc('app_claim', { p_key: 'staff_reminder', p_value: slot });
   if (!claimed) return;
+  const line = (item: { count: number; oldest: string | null }, one: string, many: string, link: string) =>
+    item.count
+      ? `${item.count} ${item.count > 1 ? many : one}, ${item.count > 1 ? 'la plus ancienne ' : ''}en attente depuis ${waitedFor(now - Date.parse(item.oldest!))} (${config.siteUrl}${link})`
+      : '';
   const parts = [
-    disputes ? `${disputes} contestation${disputes > 1 ? 's' : ''} (${config.siteUrl}/admin?onglet=disputes)` : '',
-    arbitrations ? `${arbitrations} demande${arbitrations > 1 ? 's' : ''} d'arbitrage (${config.siteUrl}/admin?onglet=arbitrages)` : '',
-    reports ? `${reports} signalement${reports > 1 ? 's' : ''} (${config.siteUrl}/admin?onglet=signalements)` : '',
+    line(disputes, 'contestation en Classé', 'contestations en Classé', '/admin?onglet=disputes'),
+    line(teamDisputes, 'contestation en Division ou en coupe', 'contestations en Division ou en coupe', '/admin?onglet=disputes'),
+    line(arbitrations, "demande d'arbitrage", "demandes d'arbitrage", '/admin?onglet=arbitrages'),
+    line(reports, 'signalement', 'signalements', '/admin?onglet=signalements'),
   ].filter(Boolean);
-  await notifyStaff(`⏰ **En attente depuis plus de ${REMINDER_HOURS} h**\n${parts.map((part) => `• ${part}`).join('\n')}`);
+  await notifyStaff(`⏰ **En attente de l'équipe**\n${parts.map((part) => `• ${part}`).join('\n')}`);
 }
