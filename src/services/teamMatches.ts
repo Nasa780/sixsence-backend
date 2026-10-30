@@ -389,7 +389,7 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
 
   let viewer = null;
   let proofs: { id: number; userId: string; username: string; url: string; createdAt: string }[] | null = null;
-  let messages: { id: number; userId: string; username: string; side: Side | null; body: string; createdAt: string }[] | null = null;
+  let messages: { id: number; userId: string; username: string; role: string | null; side: Side | null; body: string; createdAt: string }[] | null = null;
   // Code de la partie privée : sa présence est publique, le code seulement pour le match et les arbitres.
   const code = await gameCodeOf(match.id);
   let gameCode: string | null = null;
@@ -493,9 +493,14 @@ async function messagesOf(matchId: string) {
     created_at: string;
   }[];
   const ids = [...new Set(rows.map((row) => row.user_id))];
-  const users = ids.length ? ((unwrap(await supabase.from('users').select('id, username').in('id', ids)) ?? []) as { id: string; username: string }[]) : [];
-  const names = new Map(users.map((user) => [user.id, user.username]));
-  return rows.map((row) => ({ id: row.id, userId: row.user_id, username: names.get(row.user_id) ?? 'Joueur', side: row.side, body: row.body, createdAt: row.created_at }));
+  const users = ids.length ? ((unwrap(await supabase.from('users').select('id, username, role').in('id', ids)) ?? []) as { id: string; username: string; role: string }[]) : [];
+  const byId = new Map(users.map((user) => [user.id, user]));
+  // role : admin, staff ou arbitre qui écrit sans être d'une des deux équipes (side null), affiché en couleur par le site.
+  const staffRole = (row: { user_id: string; side: Side | null }) => {
+    const role = byId.get(row.user_id)?.role;
+    return !row.side && role && ['admin', 'staff', 'arbitre'].includes(role) ? role : null;
+  };
+  return rows.map((row) => ({ id: row.id, userId: row.user_id, username: byId.get(row.user_id)?.username ?? 'Joueur', role: staffRole(row), side: row.side, body: row.body, createdAt: row.created_at }));
 }
 
 /**

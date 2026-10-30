@@ -36,6 +36,7 @@ import {
 } from '../services/tournaments.js';
 import { adminDisbandTeam, adminTeamReports, adminTeams, closeTeamReport, moderateTeam } from '../services/teams.js';
 import { missedReadyChecks } from '../services/missedReady.js';
+import { sendStaffDm } from '../services/staffDm.js';
 import { supabase } from '../supabase.js';
 import { activateLeagues, prepareLeagueMoves } from '../services/leagues.js';
 
@@ -80,6 +81,7 @@ import { activateLeagues, prepareLeagueMoves } from '../services/leagues.js';
  *   GET    /admin/players?q=&offset=       rechercher des joueurs (pseudo même stylisé, identifiant Activision ; 50 par page)
  *   POST   /admin/players/:id/badges       { badges: [...] }
  *   POST   /admin/players/:id/role         { role: "member" | "arbitre" | "staff" | "admin" }
+ *   POST   /admin/players/:id/message      { text } message privé du bot SixSence au joueur (admin, trace dans le journal)
  *   GET    /admin/players/:id/sanctions    historique des sanctions d'un joueur
  *   POST   /admin/players/:id/sanctions    { type, reason, minutes?, points?, reportId? } sanctionner
  *   POST   /admin/sanctions/:id/lift       { reason? } lever une sanction
@@ -266,6 +268,9 @@ export function adminRouter(): Router {
     res.json({ badges });
   }));
 
+  router.post('/players/:id/message', asyncHandler(async (req, res) => {
+    res.json(await sendStaffDm(currentUser(res).id, uuidParam(req, 'id'), req.body));
+  }));
   router.post('/players/:id/role', asyncHandler(async (req, res) => {
     const role = (req.body as { role?: unknown } | undefined)?.role as Role;
     if (!ROLES.includes(role)) throw new HttpError(400, 'INVALID_INPUT', 'Rôle invalide.');
