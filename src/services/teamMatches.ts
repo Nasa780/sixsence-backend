@@ -1,4 +1,5 @@
-import { isReferee, roleOf } from '../auth.js';
+import { isReferee, refuseOwnMatch, roleOf } from '../auth.js';
+import { mayArbitrateOwnMatch } from '../roles.js';
 import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
@@ -413,9 +414,9 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
       canReport: Boolean(mySide) && match.status === 'in_progress' && state.phase !== 'done',
       canConfirm: Boolean(mySide) && match.status === 'awaiting_confirmation' && match.reported_team !== mySide,
       canPickMap3: Boolean(side) && match.status === 'in_progress' && state.phase === 'decider' && match.maps.length === match.best_of - 1 && match.map3_picker === mySide,
-      canResolve: referee && !isPlayer && OPEN.includes(match.status),
+      canResolve: referee && (!isPlayer || mayArbitrateOwnMatch(await roleOf(viewerId))) && OPEN.includes(match.status),
       canProve: isPlayer && proofWindowOpen(match),
-      canCorrect: referee && !isPlayer && match.status === 'completed' && !match.friendly && withinWindow(match.completed_at, correctionWindowHours(await roleOf(viewerId))),
+      canCorrect: referee && (!isPlayer || mayArbitrateOwnMatch(await roleOf(viewerId))) && match.status === 'completed' && !match.friendly && withinWindow(match.completed_at, correctionWindowHours(await roleOf(viewerId))),
     };
     // Captures : visibles des joueurs du match et des arbitres seulement (liens signés d'une heure).
     if (isPlayer || referee) proofs = await proofsOf(match.id, players);
@@ -826,7 +827,7 @@ export async function resolveTeamMatch(staffId: string, matchId: string, body: u
   if (!(await isReferee(staffId))) throw new HttpError(403, 'FORBIDDEN', 'Réservé aux arbitres.');
   const match = await matchRow(matchId);
   // Pas d'arbitrage de son propre match (double validation entre les équipes, arbitre neutre en cas de litige).
-  if ([...match.roster_a, ...match.roster_b].includes(staffId)) throw new HttpError(403, 'OWN_MATCH', 'Tu joues ce match : un autre arbitre tranche.');
+  await refuseOwnMatch([...match.roster_a, ...match.roster_b], staffId);
   if (!OPEN.includes(match.status)) throw new HttpError(409, 'MATCH_CLOSED', 'Ce match est déjà clôturé.');
   const scores = (body as { scores?: unknown } | undefined)?.scores;
   const forfeitWinner = (body as { forfeitWinner?: unknown } | undefined)?.forfeitWinner;
@@ -885,7 +886,7 @@ async function tournamentLabel(tournamentId: string, round: number | null, match
 export async function correctTeamMatch(staffId: string, matchId: string, body: unknown) {
   if (!(await isReferee(staffId))) throw new HttpError(403, 'FORBIDDEN', 'Réservé à l’équipe SixSence.');
   const match = await matchRow(matchId);
-  if ([...match.roster_a, ...match.roster_b].includes(staffId)) throw new HttpError(403, 'OWN_MATCH', 'Tu joues ce match : un autre arbitre tranche.');
+  await refuseOwnMatch([...match.roster_a, ...match.roster_b], staffId);
   if (match.friendly) throw new HttpError(409, 'FRIENDLY_MATCH', 'Un match amical ne se corrige pas : il ne compte pas au classement.');
   const input = (body ?? {}) as { scores?: unknown; reason?: unknown };
   const reason = typeof input.reason === 'string' ? input.reason : '';

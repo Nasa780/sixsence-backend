@@ -1,6 +1,6 @@
 import type { RequestHandler, Response } from 'express';
 import { HttpError } from './errors.js';
-import { MATCH_REFEREES, ROLES, type Role } from './roles.js';
+import { MATCH_REFEREES, ROLES, mayArbitrateOwnMatch, type Role } from './roles.js';
 import { supabase } from './supabase.js';
 
 export { MATCH_REFEREES, MODERATORS, ROLES, type Role } from './roles.js';
@@ -107,6 +107,20 @@ export async function roleOf(userId: string): Promise<Role> {
 /** Vrai pour l'admin, le staff et les arbitres (lecture du chat et des preuves des matchs). */
 export async function isReferee(userId: string): Promise<boolean> {
   return MATCH_REFEREES.includes(await roleOf(userId));
+}
+
+/** Refuse d'arbitrer un match qu'on joue (players : joueurs du match), sauf pour l'admin (mayArbitrateOwnMatch). */
+export async function refuseOwnMatch(players: string[], userId: string): Promise<void> {
+  if (players.includes(userId) && !mayArbitrateOwnMatch(await roleOf(userId))) {
+    throw new HttpError(403, 'OWN_MATCH', 'Tu joues ce match : déclare le résultat comme les autres joueurs, un autre membre de l’équipe tranchera.');
+  }
+}
+
+/** Joueurs d'un match classé (vide s'il n'existe pas). */
+export async function codMatchPlayers(matchId: string): Promise<string[]> {
+  const { data } = await supabase.from('cod_matches').select('team_a, team_b').eq('id', matchId).maybeSingle();
+  const match = data as { team_a: string[]; team_b: string[] } | null;
+  return match ? [...match.team_a, ...match.team_b] : [];
 }
 
 /** Middleware : exige l'un des rôles donnés. À placer après requireAuth. */

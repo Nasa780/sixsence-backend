@@ -1,3 +1,4 @@
+import { codMatchPlayers, refuseOwnMatch } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
@@ -238,6 +239,9 @@ export async function closeCase(table: Table, id: unknown, adminId: string, body
   }
   const resolution = cleanDetails(input.resolution);
   const reopened = input.status === 'open';
+  const current = unwrap(await supabase.from(table).select('*').eq('id', caseId).maybeSingle()) as { match_id?: string | null; target_id?: string | null } | null;
+  if (current?.match_id) await refuseOwnMatch(await codMatchPlayers(current.match_id), adminId);
+  if (current?.target_id) await refuseOwnMatch([current.target_id], adminId);
   const row = unwrap(
     await supabase
       .from(table)

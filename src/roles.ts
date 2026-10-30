@@ -13,6 +13,14 @@ export const MATCH_REFEREES: Role[] = ['admin', 'staff', 'arbitre'];
 /** Équipe de modération : signalements et sanctions. */
 export const MODERATORS: Role[] = ['admin', 'staff'];
 
+/**
+ * Arbitrer un match qu'on joue (trancher, annuler, corriger, traiter une demande d'arbitrage) : réservé à l'admin.
+ * Arbitres et staff qui jouent le match le déclarent comme les autres joueurs ; un autre membre de l'équipe tranche.
+ */
+export function mayArbitrateOwnMatch(role: Role): boolean {
+  return role === 'admin';
+}
+
 /** Rôles autorisés pour une route de /admin (chemin relatif : « /disputes »…). Le reste : admin. */
 export function rolesFor(method: string, path: string): Role[] {
   if (path === '/overview' || path === '/disputes' || path === '/team-disputes' || (method === 'GET' && path === '/matches') || path.startsWith('/arbitrations') || /^\/matches\/[^/]+\/cancel$/.test(path)) {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { rolesFor } from './roles.js';
+import { mayArbitrateOwnMatch, rolesFor } from './roles.js';
 
 const can = (role: string, method: string, path: string) => rolesFor(method, path).includes(role as never);
 
@@ -37,5 +37,14 @@ describe("droits sur l'administration", () => {
       assert.equal(can('admin', method!, path!), true);
       assert.equal(can('member', method!, path!), false);
     }
+  });
+});
+
+describe('arbitrer son propre match', () => {
+  it("seul l'admin tranche, annule ou corrige un match qu'il joue", () => {
+    assert.equal(mayArbitrateOwnMatch('admin'), true);
+    assert.equal(mayArbitrateOwnMatch('staff'), false);
+    assert.equal(mayArbitrateOwnMatch('arbitre'), false);
+    assert.equal(mayArbitrateOwnMatch('member'), false);
   });
 });
