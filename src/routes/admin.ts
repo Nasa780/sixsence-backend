@@ -1,5 +1,5 @@
 import { Router, type RequestHandler } from 'express';
-import { currentUser, requireAuth, requireRoles } from '../auth.js';
+import { codMatchPlayers, currentUser, refuseOwnMatch, requireAuth, requireRoles } from '../auth.js';
 import { config } from '../config.js';
 import { ROLES, rolesFor, type Role } from '../roles.js';
 import { HttpError, asyncHandler, unwrap, uuidParam } from '../errors.js';
@@ -195,6 +195,8 @@ export function adminRouter(): Router {
   }));
 
   router.post('/matches/:id/cancel', asyncHandler(async (req, res) => {
+    // Pas d'annulation de son propre match, sauf pour l'admin.
+    await refuseOwnMatch(await codMatchPlayers(uuidParam(req, 'id')), currentUser(res).id);
     res.json({ match: await resolveMatch(uuidParam(req, 'id'), null) });
   }));
 
