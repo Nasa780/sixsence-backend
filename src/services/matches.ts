@@ -28,11 +28,12 @@ export interface MatchPlayer {
   points: number;
 }
 
-/** Message du chat de match, avec le pseudo de son auteur. */
+/** Message du chat de match, avec le pseudo de son auteur ; role : admin, staff ou arbitre qui n'est pas joueur du match. */
 export interface MatchMessage {
   id: number;
   user_id: string;
   username: string;
+  role: 'admin' | 'staff' | 'arbitre' | null;
   body: string;
   created_at: string;
 }
@@ -166,10 +167,19 @@ export async function getMatch(
     };
   });
 
-  const chat = ((messages.data ?? []) as Omit<MatchMessage, 'username'>[]).map((message) => ({
-    ...message,
-    username: nameById.get(message.user_id) ?? 'Joueur',
-  }));
+  // Messages de l'équipe SixSence (auteur hors du match) : pseudo et rôle lus à part.
+  const rawChat = (messages.data ?? []) as Omit<MatchMessage, 'username' | 'role'>[];
+  const staffIds = [...new Set(rawChat.map((message) => message.user_id).filter((id) => !ids.includes(id)))];
+  const staffRows = staffIds.length ? ((unwrap(await supabase.from('users').select('id, username, role').in('id', staffIds)) ?? []) as { id: string; username: string; role: string }[]) : [];
+  const staffById = new Map(staffRows.map((row) => [row.id, row]));
+  const chat: MatchMessage[] = rawChat.map((message) => {
+    const staff = staffById.get(message.user_id);
+    return {
+      ...message,
+      username: nameById.get(message.user_id) ?? staff?.username ?? 'Joueur',
+      role: staff && ['admin', 'staff', 'arbitre'].includes(staff.role) ? (staff.role as MatchMessage['role']) : null,
+    };
+  });
 
   const proofRows = (proofs.data ?? []) as { id: number; user_id: string; storage_path: string; created_at: string }[];
   const urls = await proofUrls(proofRows.map((proof) => proof.storage_path));
@@ -326,6 +336,16 @@ function announceIfClosed(match: CodMatch | null): void {
 
 /** Message dans le chat du match (joueurs du match uniquement, vérifié en SQL). */
 export async function postMessage(matchId: string, userId: string, body: string): Promise<void> {
+  const match = unwrap(await supabase.from('cod_matches').select('team_a, team_b').eq('id', matchId).maybeSingle()) as { team_a: string[]; team_b: string[] } | null;
+  if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
+  const player = match.team_a.includes(userId) || match.team_b.includes(userId);
+  // L'équipe SixSence (admin, staff, arbitres) écrit aussi dans le tchat d'un match qu'elle ne joue pas.
+  if (!player && (await isReferee(userId))) {
+    const text = body.trim();
+    if (text.length < 1 || text.length > 300) throw new HttpError(400, 'INVALID_MESSAGE', 'Le message doit contenir entre 1 et 300 caractères.');
+    unwrap(await supabase.from('cod_match_messages').insert({ match_id: matchId, user_id: userId, body: text }));
+    return;
+  }
   unwrap(await supabase.rpc('cod_post_message', { p_match: matchId, p_user: userId, p_body: body }));
 }
 
