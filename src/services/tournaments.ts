@@ -29,6 +29,8 @@ import {
   advanceBracket,
   advanceDouble,
   anubisCapacity,
+  anubisReserve,
+  reserveTeams,
   bestOfDouble,
   bestOfFor,
   bracketSizeFor,
@@ -48,6 +50,7 @@ import {
   type BracketEntry,
   type BracketType,
 } from './tournamentPolicy.js';
+import { CUP_ALERT_MINUTES, CUP_FORFEIT_ALERT_MINUTES, waitedFor } from './waitPolicy.js';
 
 /**
  * Tournoi de fin de saison (Division, étape 3) : création par un admin (qualifiés et
@@ -127,6 +130,8 @@ interface ParticipantRow {
   checked_in_at: string | null;
   forfeit: boolean;
   captain: string | null;
+  /** Remplaçant présent mais pas retenu au tirage (migration 0056). */
+  bench: boolean;
 }
 
 interface CupPlayerRow {
@@ -504,6 +509,8 @@ export async function getTournament(id: string, viewerId: string | null) {
         canCheckIn: tournament.status === 'scheduled' && checkInOpen(tournament),
         canRegister: false,
         canUnregister: tournament.kind === 'horus' && isLeader && open,
+        // Rang de remplaçant (1, 2…) si l'équipe est inscrite au-delà des places, sinon null.
+        reserveRank: tournament.kind === 'horus' && participants.indexOf(participant) >= tournament.size ? participants.indexOf(participant) - tournament.size + 1 : null,
       };
     } else if (member && tournament.kind === 'horus') {
       viewer = {
@@ -515,7 +522,9 @@ export async function getTournament(id: string, viewerId: string | null) {
         frozenRoster: [],
         rosterSize: playersPerTeam(tournament),
         canCheckIn: false,
-        canRegister: isLeader && open && participants.length < tournament.size,
+        canRegister: isLeader && open && participants.length < tournament.size + reserveTeams(tournament.size),
+        // L'inscription se fait comme remplaçante (places de la coupe prises).
+        asReserve: participants.length >= tournament.size,
         canUnregister: false,
       };
     }
@@ -525,6 +534,9 @@ export async function getTournament(id: string, viewerId: string | null) {
     const row = rows.find((r) => r.round === entry.round && r.slot === entry.slot);
     const match = row?.match_id ? matchById.get(row.match_id) : undefined;
     const mapsA = match ? match.scores.filter(([a, b]) => a > b).length : null;
+    // Vainqueur désigné par l'admin après un match annulé : score de forfait (1-0 en BO1, 2-0 en BO3, 3-0 en BO5).
+    const decided = Boolean(match && match.status === 'cancelled' && entry.status === 'done' && entry.winner);
+    const forfeitMaps = match ? Math.ceil(match.best_of / 2) : 0;
     return {
       id: row?.id ?? null,
       slot: entry.slot,
@@ -533,7 +545,8 @@ export async function getTournament(id: string, viewerId: string | null) {
       winner: entry.winner,
       status: entry.status,
       matchId: row?.match_id ?? null,
-      score: match ? [mapsA, match.scores.length - mapsA!] : null,
+      score: decided ? (entry.winner === entry.teamA ? [forfeitMaps, 0] : [0, forfeitMaps]) : match ? [mapsA, match.scores.length - mapsA!] : null,
+      decided,
     };
   };
   const thirdEntry = display.find((entry) => isThirdPlace(entry, rounds));
@@ -562,7 +575,15 @@ export async function getTournament(id: string, viewerId: string | null) {
     completedAt: tournament.completed_at,
     winner: card(tournament.winner_team),
     finalist: card(tournament.finalist_team),
-    teams: participants.map((p) => ({ ...card(p.team_id)!, checkedIn: Boolean(p.checked_in_at), forfeit: p.forfeit })),
+    teams: participants.map((p, index) => ({
+      ...card(p.team_id)!,
+      checkedIn: Boolean(p.checked_in_at),
+      forfeit: p.forfeit,
+      // Coupe Horus : inscrite au-delà des places (remplaçante tant que le tirage n'est pas fait) ; bench : pas retenue.
+      reserve: tournament.kind === 'horus' && tournament.status === 'scheduled' && index >= tournament.size,
+      bench: p.bench,
+    })),
+    reserveSlots: tournament.kind === 'horus' ? reserveTeams(tournament.size) : 0,
     bracket: tournament.bracket,
     minTeams: tournament.kind === 'horus' || tournament.kind === 'anubis' ? CUP_MIN_TEAMS : null,
     // Ce que rapporte chaque place (Coupe Horus) : points de Division et de circuit.
@@ -617,6 +638,7 @@ async function anubisView(tournament: TournamentRow, participants: ParticipantRo
   const person = (id: string) => people.get(id) ?? { id, username: 'Joueur', avatarUrl: null, points: 0 };
   const teamSize = tournament.team_size ?? config.teams.rosterSize;
   const capacity = anubisCapacity(tournament.size, teamSize);
+  const reserve = anubisReserve(tournament.size, teamSize);
   const open = tournament.status === 'scheduled' && Date.now() < new Date(tournament.starts_at).getTime();
   const squads = participants.map((p) => {
     const starters = p.match_roster ?? p.frozen_roster.slice(0, teamSize);
@@ -638,7 +660,10 @@ async function anubisView(tournament: TournamentRow, participants: ParticipantRo
       solo: true,
       registered: Boolean(me),
       checkedIn: Boolean(me?.checked_in_at),
-      canRegister: !me && open && players.length < capacity,
+      canRegister: !me && open && players.length < capacity + reserve,
+      // Inscription comme remplaçant (places prises) ; rang de remplaçant du joueur inscrit au-delà des places.
+      asReserve: players.length >= capacity,
+      reserveRank: me && players.indexOf(me) >= capacity ? players.indexOf(me) - capacity + 1 : null,
       canUnregister: Boolean(me) && open,
       canCheckIn: Boolean(me) && !me?.checked_in_at && tournament.status === 'scheduled' && checkInOpen(tournament),
       teamId: squad?.team_id ?? null,
@@ -649,9 +674,10 @@ async function anubisView(tournament: TournamentRow, participants: ParticipantRo
   return {
     teamSize,
     capacity,
+    reserveSlots: reserve,
     registered: players.length,
     checkedInCount: players.filter((p) => p.checked_in_at).length,
-    players: players.map((p) => ({ ...person(p.user_id), checkedIn: Boolean(p.checked_in_at) })),
+    players: players.map((p, index) => ({ ...person(p.user_id), checkedIn: Boolean(p.checked_in_at), reserve: index >= capacity })),
     squads,
     viewer,
   };
@@ -741,15 +767,21 @@ export async function registerTeam(userId: string, id: string) {
   if (!member || !(member.role === 'leader' || member.isOwner)) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader peut inscrire l’équipe.');
   const participants = await participantsOf(id);
   if (participants.some((p) => p.team_id === member.team_id)) return getTournament(id, userId);
-  if (participants.length >= tournament.size) throw new HttpError(409, 'CUP_FULL', 'La coupe est complète.');
+  const reserve = reserveTeams(tournament.size);
+  if (participants.length >= tournament.size + reserve) throw new HttpError(409, 'CUP_FULL', 'La coupe est complète, places de remplaçant comprises.');
   const roster = await teamMemberIds(member.team_id);
   const needed = playersPerTeam(tournament);
   if (roster.length < needed) {
     throw new HttpError(409, 'TEAM_TOO_SMALL', `Il faut au moins ${needed} joueur${needed > 1 ? 's' : ''} dans l’équipe pour s’inscrire.`);
   }
-  unwrap(await supabase.from('tournament_teams').insert({ tournament_id: id, team_id: member.team_id, seed: participants.length + 1, frozen_roster: roster }));
+  // Ordre d'inscription (seed) : après le dernier inscrit, même si une équipe s'est désinscrite entre-temps (remplaçants).
+  const nextSeed = participants.reduce((max, p) => Math.max(max, p.seed ?? 0), 0) + 1;
+  unwrap(await supabase.from('tournament_teams').insert({ tournament_id: id, team_id: member.team_id, seed: nextSeed, frozen_roster: roster }));
   const left = tournament.size - participants.length - 1;
-  if (left === 1 || left === 0) await announce(`🏆 **${tournament.name}** : ${left === 0 ? 'complète !' : 'plus qu’une place !'}\n${config.siteUrl}${PAGE}`, tournament.kind);
+  if (left === 1 || left === 0) {
+    const text = left === 0 ? `complète ! Encore ${reserve} place${reserve > 1 ? 's' : ''} de remplaçant si une équipe manque le check-in.` : 'plus qu’une place !';
+    await announce(`🏆 **${tournament.name}** : ${text}\n${config.siteUrl}${PAGE}`, tournament.kind);
+  }
   return getTournament(id, userId);
 }
 
@@ -782,11 +814,15 @@ async function registerPlayer(userId: string, tournament: TournamentRow) {
   const { count, error } = await supabase.from('cup_players').select('user_id', { count: 'exact', head: true }).eq('tournament_id', tournament.id);
   if (error) throw fromDbError(error);
   const capacity = anubisCapacity(tournament.size, tournament.team_size ?? config.teams.rosterSize);
-  if ((count ?? 0) >= capacity) throw new HttpError(409, 'CUP_FULL', 'La coupe est complète.');
+  const reserve = anubisReserve(tournament.size, tournament.team_size ?? config.teams.rosterSize);
+  if ((count ?? 0) >= capacity + reserve) throw new HttpError(409, 'CUP_FULL', 'La coupe est complète, places de remplaçant comprises.');
   const { error: insertError } = await supabase.from('cup_players').insert({ tournament_id: tournament.id, user_id: userId });
   if (insertError && insertError.code !== '23505') throw fromDbError(insertError);
   const left = capacity - (count ?? 0) - 1;
-  if (left === 1 || left === 0) await announce(`𓂀 **${tournament.name}** : ${left === 0 ? 'complète !' : 'plus qu’une place !'}\n${config.siteUrl}${PAGE}?coupe=anubis`, tournament.kind);
+  if (left === 1 || left === 0) {
+    const text = left === 0 ? `complète ! Encore ${reserve} place${reserve > 1 ? 's' : ''} de remplaçant si des joueurs manquent le check-in.` : 'plus qu’une place !';
+    await announce(`𓂀 **${tournament.name}** : ${text}\n${config.siteUrl}${PAGE}?coupe=anubis`, tournament.kind);
+  }
   return getTournament(tournament.id, userId);
 }
 
@@ -849,9 +885,34 @@ export async function sweepTournaments(): Promise<void> {
     for (const tournament of due) await startTournament(tournament);
     const running = (unwrap(await supabase.from('tournaments').select('id').eq('status', 'running')) ?? []) as { id: string }[];
     for (const row of running) await advanceTournament(row.id);
+    await alertCupDelays();
     await ensureScheduledCups();
   } catch (caught) {
     console.error('[tournoi] tâche impossible', (caught as Error).message);
+  }
+}
+
+/**
+ * Alerte rapide du staff pour les coupes en cours (un litige bloque tout le tableau) : contestation sans décision
+ * depuis 5 min, forfait sans réponse depuis 20 min. Une alerte par match et par étape (app_claim), en plus de la
+ * relance générale ; une rencontre bloquée (match annulé) est déjà signalée tout de suite par advanceTournament.
+ */
+async function alertCupDelays(now = Date.now()): Promise<void> {
+  const running = (unwrap(await supabase.from('tournaments').select('id, name').eq('status', 'running')) ?? []) as { id: string; name: string }[];
+  if (running.length === 0) return;
+  const names = new Map(running.map((row) => [row.id, row.name]));
+  const matches = (unwrap(
+    await supabase.from('team_matches').select('id, tournament_id, status, updated_at, forfeit_claimed_at').in('tournament_id', [...names.keys()]).in('status', ['disputed', 'forfeit_claimed']),
+  ) ?? []) as { id: string; tournament_id: string; status: string; updated_at: string; forfeit_claimed_at: string | null }[];
+  for (const match of matches) {
+    const disputed = match.status === 'disputed';
+    const since = disputed ? match.updated_at : match.forfeit_claimed_at;
+    if (!since || now - Date.parse(since) < (disputed ? CUP_ALERT_MINUTES : CUP_FORFEIT_ALERT_MINUTES) * 60_000) continue;
+    const { data: claimed } = await supabase.rpc('app_claim', { p_key: `cup_alert_${match.id}`, p_value: `${match.status}-${since}` });
+    if (!claimed) continue;
+    await notifyStaff(
+      `🚨 **${names.get(match.tournament_id)}** : ${disputed ? 'contestation' : 'forfait sans réponse'} en attente depuis ${waitedFor(now - Date.parse(since))}, le tableau est bloqué.\n${config.siteUrl}/cod/equipes/match/${match.id}`,
+    );
   }
 }
 
@@ -934,7 +995,11 @@ async function startTournament(tournament: TournamentRow): Promise<void> {
  */
 async function startCup(tournament: TournamentRow): Promise<void> {
   const participants = await participantsOf(tournament.id);
-  const present = participants.filter((p) => p.checked_in_at);
+  // Présentes dans l'ordre d'inscription (seed) : une titulaire absente laisse sa place à la première remplaçante présente.
+  const checked = participants.filter((p) => p.checked_in_at);
+  const present = checked.slice(0, tournament.size);
+  const benched = checked.slice(tournament.size);
+  const promoted = present.filter((p) => participants.indexOf(p) >= tournament.size).length;
   const absent = participants.filter((p) => !p.checked_in_at).map((p) => p.team_id);
   if (present.length < CUP_MIN_TEAMS) {
     const claimed = unwrap(
@@ -956,13 +1021,23 @@ async function startCup(tournament: TournamentRow): Promise<void> {
   );
   if (!claimed) return;
   if (absent.length) unwrap(await supabase.from('tournament_teams').update({ forfeit: true }).eq('tournament_id', tournament.id).in('team_id', absent));
+  if (benched.length) {
+    unwrap(await supabase.from('tournament_teams').update({ bench: true }).eq('tournament_id', tournament.id).in('team_id', benched.map((p) => p.team_id)));
+    await pushToUsers(benched.flatMap((p) => p.match_roster ?? p.frozen_roster), {
+      title: `🏆 ${tournament.name}`,
+      body: 'Toutes les équipes titulaires sont présentes : ton équipe reste remplaçante pour cette coupe. Merci d’avoir été là !',
+      url: PAGE,
+      tag: `tournoi-${tournament.id}`,
+    });
+  }
   const drawn = shuffle(present.map((p) => p.team_id));
   for (const [index, teamId] of drawn.entries()) {
     unwrap(await supabase.from('tournament_teams').update({ seed: index + 1 }).eq('tournament_id', tournament.id).eq('team_id', teamId));
   }
   await drawBracket(tournament, drawn, size);
   await notifyDraw(tournament, present.flatMap((p) => p.match_roster ?? p.frozen_roster), PAGE);
-  await announce(`🏆 **${tournament.name}** : ${present.length} équipes, tableau tiré au sort ! Premiers matchs à ${hourOf(tournament)}.\n${config.siteUrl}${PAGE}`, tournament.kind);
+  const replaced = promoted ? ` (${promoted} remplaçante${promoted > 1 ? 's' : ''} entrée${promoted > 1 ? 's' : ''} dans le tableau)` : '';
+  await announce(`🏆 **${tournament.name}** : ${present.length} équipes${replaced}, tableau tiré au sort ! Premiers matchs à ${hourOf(tournament)}.\n${config.siteUrl}${PAGE}`, tournament.kind);
   await advanceTournament(tournament.id);
 }
 
@@ -980,9 +1055,12 @@ async function drawBracket(tournament: TournamentRow, drawn: string[], size: num
  * remplaçants), équipes temporaires créées, tableau tiré au sort. Moins de 4 équipes complètes : annulée.
  */
 async function startAnubis(tournament: TournamentRow): Promise<void> {
-  const players = (unwrap(await supabase.from('cup_players').select('*').eq('tournament_id', tournament.id)) ?? []) as CupPlayerRow[];
-  const present = players.filter((p) => p.checked_in_at);
+  const players = (unwrap(await supabase.from('cup_players').select('*').eq('tournament_id', tournament.id).order('registered_at')) ?? []) as CupPlayerRow[];
   const teamSize = tournament.team_size ?? config.teams.rosterSize;
+  // Présents dans l'ordre d'inscription : un absent laisse sa place au premier remplaçant présent ; au-delà, pas de place.
+  const checked = players.filter((p) => p.checked_in_at);
+  const present = checked.slice(0, anubisCapacity(tournament.size, teamSize));
+  const overflow = checked.slice(present.length).map((p) => p.user_id);
   const info = await playersInfo(present.map((p) => p.user_id));
   const formed = formTeams(present.map((p) => ({ id: p.user_id, points: info.get(p.user_id)?.points ?? 0 })), teamSize, tournament.size);
   if (formed.length < CUP_MIN_TEAMS) {
@@ -1038,9 +1116,18 @@ async function startAnubis(tournament: TournamentRow): Promise<void> {
   }
   await drawBracket(tournament, teamIds, size);
   const placed = formed.reduce((total, squad) => total + squad.starters.length + squad.subs.length, 0);
-  const benched = present.length - placed;
+  // Remplaçants présents restés sans place (tous les inscrits étaient là) : prévenus.
+  if (overflow.length) {
+    await pushToUsers(overflow, {
+      title: `𓂀 ${tournament.name}`,
+      body: 'Tous les joueurs inscrits avant toi sont présents : tu restes remplaçant pour cette coupe. Merci d’avoir été là !',
+      url: `${PAGE}?coupe=anubis`,
+      tag: `tournoi-${tournament.id}`,
+    });
+  }
+  const benched = present.length - placed + overflow.length;
   await announce(
-    `𓂀 **${tournament.name}** : ${formed.length} équipes de ${teamSize} tirées au sort parmi ${present.length} joueurs${benched > 0 ? ` (${benched} sans place)` : ''} ! Premiers matchs à ${hourOf(tournament)}.\n${config.siteUrl}${PAGE}?coupe=anubis`,
+    `𓂀 **${tournament.name}** : ${formed.length} équipes de ${teamSize} tirées au sort parmi ${present.length + overflow.length} joueurs${benched > 0 ? ` (${benched} sans place)` : ''} ! Premiers matchs à ${hourOf(tournament)}.\n${config.siteUrl}${PAGE}?coupe=anubis`,
     tournament.kind,
   );
   await advanceTournament(tournament.id);
@@ -1588,6 +1675,8 @@ export async function cupAdmin() {
         registered: entries.length,
         checkedIn: entries.filter((entry) => entry.checked_in_at).length,
         capacity: row.kind === 'anubis' ? anubisCapacity(row.size, row.team_size ?? config.teams.rosterSize) : row.size,
+        // Places de remplaçant en plus (inscrits au-delà de capacity).
+        reserveSlots: row.kind === 'anubis' ? anubisReserve(row.size, row.team_size ?? config.teams.rosterSize) : reserveTeams(row.size),
         posterUrl: row.poster_url,
         poster: posterOf(row),
       };
@@ -1787,6 +1876,8 @@ export async function listCups() {
       // Coupe Anubis : joueurs inscrits sur la capacité ; sinon équipes sur les places.
       registered: anubis ? count(playerRows.data as { tournament_id: string }[] | null, row.id) : count(teamRows.data as { tournament_id: string }[] | null, row.id),
       capacity: anubis ? anubisCapacity(row.size, row.team_size ?? config.teams.rosterSize) : row.size,
+      // Places de remplaçant en plus (inscrits au-delà de capacity), seulement pour les coupes ouvertes à l'inscription.
+      reserveSlots: row.kind === 'anubis' ? anubisReserve(row.size, row.team_size ?? config.teams.rosterSize) : row.kind === 'horus' ? reserveTeams(row.size) : 0,
       posterUrl: posterOf(row),
       winner: winner ? { id: winner.id, name: winner.name, tag: winner.tag, color: winner.color, logoUrl: winner.logo_url } : null,
     };

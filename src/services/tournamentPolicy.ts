@@ -295,6 +295,14 @@ export const ANUBIS_TEAMS = [
 /** Joueurs au plus dans une Coupe Anubis : une place de remplaçant par équipe. */
 export const anubisCapacity = (teams: number, teamSize: number) => teams * (teamSize + 1);
 
+/**
+ * Places de remplaçant en plus des places de la coupe : un quart des places (une au moins). Coupe Horus : équipes
+ * (4 → 1, 8 → 2, 16 → 4) ; Coupe Anubis : autant d'équipes de joueurs (anubisReserve). Au tirage, les présents au
+ * check-in prennent les places dans l'ordre d'inscription : un absent laisse sa place au premier remplaçant présent.
+ */
+export const reserveTeams = (places: number) => Math.max(1, Math.ceil(places / 4));
+export const anubisReserve = (teams: number, teamSize: number) => reserveTeams(teams) * teamSize;
+
 export interface AnubisPlayer {
   id: string;
   points: number;
