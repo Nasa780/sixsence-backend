@@ -185,6 +185,10 @@ describe('Coupe Horus en double élimination', () => {
   it('formats et noms', () => {
     assert.equal(bestOfDouble(GRAND_FINAL, { bestOf: 1, finalBestOf: 3 }), 3);
     assert.equal(bestOfDouble(LOSERS_BASE + 1, { bestOf: 1, finalBestOf: 3 }), 1);
+    // Tableau des perdants en BO1 quand les autres matchs sont en BO3.
+    assert.equal(bestOfDouble(LOSERS_BASE + 2, { bestOf: 3, finalBestOf: 5, losersBestOf: 1 }), 1);
+    assert.equal(bestOfDouble(2, { bestOf: 3, finalBestOf: 5, losersBestOf: 1 }), 3);
+    assert.equal(bestOfDouble(GRAND_FINAL, { bestOf: 3, finalBestOf: 5, losersBestOf: 1 }), 5);
     assert.equal(roundNameDouble(GRAND_FINAL, 8), 'Grande finale');
     assert.equal(roundNameDouble(LOSERS_BASE + 4, 8), 'Finale des perdants');
     assert.equal(roundNameDouble(3, 8), 'Finale des gagnants');

@@ -25,7 +25,9 @@ import {
   createSchedule,
   createPlayIn,
   createTournament,
+  addTournamentMessage,
   cupAdmin,
+  deleteTournamentMessage,
   deleteSchedule,
   forceEntryWinner,
   listTournaments,
@@ -67,6 +69,7 @@ import { activateLeagues, prepareLeagueMoves } from '../services/leagues.js';
  *   POST   /admin/playin                   { startsAt, size } créer le play-in (7e et 8e du circuit contre 2 équipes de Division)
  *   DELETE /admin/tournaments/:id          annuler le tournoi
  *   POST   /admin/tournaments/:id/entries/:entryId/winner { side } désigner le vainqueur d'une rencontre
+ *   POST   /admin/tournaments/:id/messages  { body } message de l'organisation sur la fiche (admin) ; DELETE …/messages/:messageId
  *   GET    /admin/cups                      Coupe Horus : interrupteur, rendez-vous, dernières coupes (admin)
  *   POST   /admin/cups/auto                 { on } coupes automatiques activées ou non
  *   POST   /admin/cups                      { name, startsAt, size, bestOf, finalBestOf } coupe ponctuelle
@@ -178,6 +181,12 @@ export function adminRouter(): Router {
     res.json(await cancelTournament(uuidParam(req, 'id')));
   }));
   // --- Coupe Horus (admin) --------------------------------------------------------------
+  router.post('/tournaments/:id/messages', asyncHandler(async (req, res) => void res.status(201).json(await addTournamentMessage(currentUser(res).id, uuidParam(req, 'id'), req.body))));
+  router.delete('/tournaments/:id/messages/:messageId', asyncHandler(async (req, res) => {
+    const messageId = Number(req.params.messageId);
+    if (!Number.isInteger(messageId) || messageId <= 0) throw new HttpError(400, 'INVALID_MESSAGE', 'Message invalide.');
+    res.json(await deleteTournamentMessage(uuidParam(req, 'id'), messageId));
+  }));
   router.get('/cups', asyncHandler(async (_req, res) => void res.json(await cupAdmin())));
   router.post('/cups/auto', asyncHandler(async (req, res) => void res.json(await setCupsAuto(req.body))));
   router.post('/cups', asyncHandler(async (req, res) => void res.status(201).json(await createCup(currentUser(res).id, req.body))));
