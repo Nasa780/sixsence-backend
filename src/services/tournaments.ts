@@ -579,6 +579,21 @@ export async function getTournament(id: string, viewerId: string | null) {
   }
   const messages = await tournamentMessages(tournament.id);
 
+  // Joueurs de chaque équipe (participants et podium de la fiche) : ceux du check-in, sinon l'effectif figé (tournoi
+  // de saison, play-in) ou l'effectif du moment (Coupe Horus). Coupe Anubis : équipes formées dans anubisView.
+  const rosterOf = new Map<string, string[]>();
+  if (tournament.kind !== 'anubis') {
+    const live = participants.filter((p) => !p.match_roster?.length && tournament.kind === 'horus').map((p) => p.team_id);
+    const members = live.length ? ((unwrap(await supabase.from('team_members').select('team_id, user_id').in('team_id', live)) ?? []) as { team_id: string; user_id: string }[]) : [];
+    for (const p of participants) {
+      rosterOf.set(
+        p.team_id,
+        p.match_roster?.length ? p.match_roster : tournament.kind === 'horus' ? members.filter((m) => m.team_id === p.team_id).map((m) => m.user_id) : p.frozen_roster,
+      );
+    }
+  }
+  const people = new Map((await namesOf([...new Set([...rosterOf.values()].flat())])).map((person) => [person.id, person]));
+
   if (tournament.kind === 'anubis') return { ...publicView(), ...(await anubisView(tournament, participants, card, viewerId)) };
   return { ...publicView(), viewer };
 
@@ -613,6 +628,7 @@ export async function getTournament(id: string, viewerId: string | null) {
       // Coupe Horus : inscrite au-delà des places (remplaçante tant que le tirage n'est pas fait) ; bench : pas retenue.
       reserve: tournament.kind === 'horus' && tournament.status === 'scheduled' && index >= tournament.size,
       bench: p.bench,
+      players: (rosterOf.get(p.team_id) ?? []).map((userId) => people.get(userId)).filter(Boolean),
     })),
     reserveSlots: tournament.kind === 'horus' ? reserveTeams(tournament.size) : 0,
     bracket: tournament.bracket,
