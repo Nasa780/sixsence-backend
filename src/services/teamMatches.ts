@@ -650,7 +650,7 @@ async function disputeForfeit(match: TeamMatch, why: string): Promise<void> {
   if (!updated) return;
   const teams = await teamsById([match.team_a, match.team_b]);
   await notifyStaff(
-    `⚔️ Forfait de Division ${why} : **[${teams.get(match.team_a)?.tag}] vs [${teams.get(match.team_b)?.tag}]** — un arbitre doit trancher.\n${config.siteUrl}${matchUrl(match.id)}`,
+    `⚔️ Forfait ${match.tournament_id ? 'en coupe' : 'de Division'} ${why} : **[${teams.get(match.team_a)?.tag}] vs [${teams.get(match.team_b)?.tag}]** — un arbitre doit trancher.\n${config.siteUrl}${matchUrl(match.id)}`,
   );
 }
 
@@ -785,7 +785,7 @@ export async function confirmTeamScores(userId: string, matchId: string, body: u
     if (!updated) throw new HttpError(409, 'MATCH_NOT_CONFIRMABLE', 'Ce match n’attend plus de confirmation.');
     const teams = await teamsById([match.team_a, match.team_b]);
     await notifyStaff(
-      `⚔️ Match de Division contesté : **[${teams.get(match.team_a)?.tag}] vs [${teams.get(match.team_b)?.tag}]** — un arbitre doit trancher.\n${config.siteUrl}${matchUrl(matchId)}`,
+      `⚔️ Match ${match.tournament_id ? 'de coupe' : 'de Division'} contesté : **[${teams.get(match.team_a)?.tag}] vs [${teams.get(match.team_b)?.tag}]** — un arbitre doit trancher.\n${config.siteUrl}${matchUrl(matchId)}`,
     );
   }
   return getTeamMatch(matchId, userId);
@@ -1056,23 +1056,27 @@ async function sweepTeamDiscord(): Promise<void> {
           return typeof value === 'number' ? ` (${value >= 0 ? '+' : ''}${value} pts)` : '';
         };
         const loserSide: Side = match.winner === 'A' ? 'B' : 'A';
+        // Match de coupe : nom de la coupe et rouge des tournois (pas de points d'équipe en jeu).
+        const cup = match.tournament_id
+          ? ((unwrap(await supabase.from('tournaments').select('name').eq('id', match.tournament_id).maybeSingle()) as { name: string } | null) ?? { name: 'Tournoi' })
+          : null;
         await discord(`/channels/${resultsChannelId}/messages`, {
           method: 'POST',
           body: {
             allowed_mentions: { parse: [] },
             embeds: [
               {
-                author: { name: `⚔️ DIVISION · BO${match.best_of}${match.tournament_id ? ' · TOURNOI' : ''}` },
+                author: { name: cup ? `🏆 ${cup.name.toUpperCase()} · BO${match.best_of}` : `⚔️ DIVISION · BO${match.best_of}` },
                 title: `[${a?.tag}] ${a?.name}  vs  [${b?.tag}] ${b?.name}`,
                 url: `${config.siteUrl}${matchUrl(match.id)}`,
-                color: Number.parseInt((winner?.color ?? '#d4af37').replace('#', ''), 16) || 0xd4af37,
+                color: cup ? 0xe5484d : Number.parseInt((winner?.color ?? '#d4af37').replace('#', ''), 16) || 0xd4af37,
                 description:
                   `🏆 Victoire de **[${winner?.tag}] ${winner?.name}**${points(match.winner)} ${match.forfeit ? 'par forfait' : `${won} – ${lost}`}\n` +
                   `[${loser?.tag}] ${loser?.name}${points(loserSide)}${match.corrected_at ? '\n_Résultat corrigé par l’équipe SixSence_' : ''}`,
                 fields: match.forfeit
                   ? []
                   : match.scores.map(([x, y], i) => ({ name: `Map ${i + 1} · ${match.maps[i]?.map ?? '?'}`, value: `[${a?.tag}] ${x} – ${y} [${b?.tag}]`, inline: true })),
-                footer: { text: 'Division · matchs d’équipe' },
+                footer: { text: cup ? `${cup.name} · coupe` : 'Division · matchs d’équipe' },
                 timestamp: match.completed_at ?? undefined,
               },
             ],
@@ -1083,7 +1087,7 @@ async function sweepTeamDiscord(): Promise<void> {
     await supabase.from('team_matches').update({ discord_done: true }).eq('id', match.id);
     if (match.status === 'completed' && !match.corrected_at) {
       await pushToUsers([...match.roster_a, ...match.roster_b], {
-        title: 'Match de Division terminé',
+        title: match.tournament_id ? 'Match de coupe terminé' : 'Match de Division terminé',
         body: `Victoire de l’équipe ${match.winner === 'A' ? '1' : '2'} · ${match.scores.map(([x, y]) => `${x}-${y}`).join(' · ')}`,
         url: matchUrl(match.id),
         tag: `team-match-${match.id}`,

@@ -1315,7 +1315,10 @@ async function announce(content: string, kind: Kind = 'saison', illustrated = fa
 
 // --- Coupe Horus : fin, récompenses ------------------------------------------------------------
 
-/** Fin d'une Coupe Horus : trophées or / argent / bronze, points de Division, rôle Discord, annonces. */
+/**
+ * Fin d'une Coupe Horus : trophées or / argent / bronze (fiche d'équipe, et profil des joueurs de l'équipe : cup_medals
+ * kind horus), points de Division, rôle Discord, annonces.
+ */
 async function completeCup(tournament: TournamentRow, winner: string | null, finalist: string | null, third: string | null): Promise<void> {
   const claimed = unwrap(
     await supabase
@@ -1342,6 +1345,25 @@ async function completeCup(tournament: TournamentRow, winner: string | null, fin
   }
   // Points de Division : podium, et participation pour les autres équipes présentes.
   const participants = (await participantsOf(tournament.id)).filter((p) => !p.forfeit);
+  // Trophée aussi sur le profil des joueurs de l'équipe (joueurs du check-in, sinon effectif inscrit).
+  const podiumNames = new Map(
+    ((unwrap(await supabase.from('teams').select('id, name').in('id', [winner, finalist, third].filter(Boolean) as string[])) ?? []) as { id: string; name: string }[]).map((t) => [t.id, t.name]),
+  );
+  const playerTrophies = podiumPlaces.flatMap(([teamId, place]) => {
+    const entry = participants.find((p) => p.team_id === teamId);
+    return (entry?.match_roster ?? entry?.frozen_roster ?? []).map((userId) => ({
+      user_id: userId,
+      tournament_id: tournament.id,
+      place,
+      name: tournament.name,
+      team_name: podiumNames.get(teamId ?? '') ?? null,
+      kind: 'horus',
+    }));
+  });
+  if (playerTrophies.length) {
+    const { error } = await supabase.from('cup_medals').upsert(playerTrophies, { onConflict: 'user_id,tournament_id' });
+    if (error) console.error('[coupe] trophées des joueurs impossibles', error.message);
+  }
   for (const p of participants) {
     const placed = podiumPlaces.find(([teamId]) => teamId === p.team_id);
     const points = placed ? placed[2] : CUP_BONUS.participation;
