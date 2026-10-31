@@ -66,8 +66,8 @@ import { CUP_ALERT_MINUTES, CUP_FORFEIT_ALERT_MINUTES, waitedFor } from './waitP
  * (cup_schedules) créés automatiquement quand l'interrupteur app_state 'cups_auto' vaut 'on'.
  *
  * Coupe Anubis (kind 'anubis', migration 0040) : inscription individuelle (cup_players), check-in de chaque
- * joueur 30 min avant, puis équipes formées au hasard à la taille choisie par l'admin (team_size), remplaçants
- * répartis, capitaine = le mieux classé (formTeams). Équipes temporaires (teams.cup_tournament, créées
+ * joueur 30 min avant, puis équipes formées au hasard à la taille choisie par l'admin (team_size), sans remplaçant
+ * (liste d'attente seulement avant le tirage), capitaine = le mieux classé (formTeams). Équipes temporaires (teams.cup_tournament, créées
  * dissoutes : jamais au classement). Même tableau et même déroulé que la Coupe Horus ; récompenses :
  * médailles or / argent / bronze pour les joueurs (cup_medals) et rôle « Vainqueur — Coupe Anubis » ; pas de points.
  *
@@ -661,7 +661,7 @@ export async function getTournament(id: string, viewerId: string | null) {
 
 type Card = { id: string; name: string; tag: string; color: string; logoUrl: string | null; seed: number | null } | null;
 
-/** Coupe Anubis : joueurs inscrits, équipes formées (capitaine, titulaires, remplaçants) et droits du visiteur. */
+/** Coupe Anubis : joueurs inscrits (liste d'attente comprise), équipes formées (capitaine, joueurs) et droits du visiteur. */
 async function anubisView(tournament: TournamentRow, participants: ParticipantRow[], card: (teamId: string | null) => Card, viewerId: string | null) {
   const players = (unwrap(await supabase.from('cup_players').select('*').eq('tournament_id', tournament.id).order('registered_at')) ?? []) as CupPlayerRow[];
   const ids = [...new Set([...players.map((p) => p.user_id), ...participants.flatMap((p) => p.frozen_roster)])];
@@ -672,13 +672,13 @@ async function anubisView(tournament: TournamentRow, participants: ParticipantRo
   const reserve = anubisReserve(tournament.size, teamSize);
   const open = tournament.status === 'scheduled' && Date.now() < new Date(tournament.starts_at).getTime();
   const squads = participants.map((p) => {
+    // Anciennes coupes : l'équipe jouée (match_roster) ; les remplaçants d'alors ne sont plus affichés.
     const starters = p.match_roster ?? p.frozen_roster.slice(0, teamSize);
     return {
       team: card(p.team_id),
       captain: p.captain,
       forfeit: p.forfeit,
       starters: starters.map(person),
-      subs: p.frozen_roster.filter((id) => !starters.includes(id)).map(person),
     };
   });
 
@@ -686,7 +686,6 @@ async function anubisView(tournament: TournamentRow, participants: ParticipantRo
   if (viewerId) {
     const me = players.find((p) => p.user_id === viewerId);
     const squad = participants.find((p) => p.frozen_roster.includes(viewerId));
-    const eliminated = squad ? await teamEliminated(tournament, squad.team_id) : false;
     viewer = {
       solo: true,
       registered: Boolean(me),
@@ -699,7 +698,6 @@ async function anubisView(tournament: TournamentRow, participants: ParticipantRo
       canCheckIn: Boolean(me) && !me?.checked_in_at && tournament.status === 'scheduled' && checkInOpen(tournament),
       teamId: squad?.team_id ?? null,
       isCaptain: Boolean(squad && squad.captain === viewerId),
-      canSetRoster: Boolean(squad && squad.captain === viewerId && tournament.status === 'running' && !eliminated && squad.frozen_roster.length > teamSize),
     };
   }
   return {
@@ -727,13 +725,6 @@ async function playersInfo(ids: string[]) {
       { id: user.id, username: user.username, avatarUrl: user.avatar_url, points: points.get(user.id) ?? 0 },
     ]),
   );
-}
-
-/** Équipe éliminée : battue dans le tableau (une fois en élimination directe, deux fois en double élimination). */
-async function teamEliminated(tournament: TournamentRow, teamId: string): Promise<boolean> {
-  if (tournament.status !== 'running') return true;
-  const losses = (await entriesOf(tournament.id)).filter((e) => e.status === 'done' && (e.team_a === teamId || e.team_b === teamId) && e.winner && e.winner !== teamId);
-  return losses.length >= (tournament.bracket === 'double' ? 2 : 1);
 }
 
 async function teamMemberIds(teamId: string): Promise<string[]> {
@@ -846,12 +837,12 @@ async function registerPlayer(userId: string, tournament: TournamentRow) {
   if (error) throw fromDbError(error);
   const capacity = anubisCapacity(tournament.size, tournament.team_size ?? config.teams.rosterSize);
   const reserve = anubisReserve(tournament.size, tournament.team_size ?? config.teams.rosterSize);
-  if ((count ?? 0) >= capacity + reserve) throw new HttpError(409, 'CUP_FULL', 'La coupe est complète, places de remplaçant comprises.');
+  if ((count ?? 0) >= capacity + reserve) throw new HttpError(409, 'CUP_FULL', 'La coupe est complète, liste d’attente comprise.');
   const { error: insertError } = await supabase.from('cup_players').insert({ tournament_id: tournament.id, user_id: userId });
   if (insertError && insertError.code !== '23505') throw fromDbError(insertError);
   const left = capacity - (count ?? 0) - 1;
   if (left === 1 || left === 0) {
-    const text = left === 0 ? `complète ! Encore ${reserve} place${reserve > 1 ? 's' : ''} de remplaçant si des joueurs manquent le check-in.` : 'plus qu’une place !';
+    const text = left === 0 ? `complète ! Encore ${reserve} place${reserve > 1 ? 's' : ''} en liste d’attente si des joueurs manquent le check-in.` : 'plus qu’une place !';
     await announce(`𓂀 **${tournament.name}** : ${text}\n${config.siteUrl}${PAGE}?coupe=anubis`, tournament.kind);
   }
   return getTournament(tournament.id, userId);
@@ -869,21 +860,6 @@ async function checkInPlayer(userId: string, id: string) {
     const { count } = await supabase.from('cup_players').select('user_id', { count: 'exact', head: true }).eq('tournament_id', id).eq('user_id', userId);
     if (!count) throw new HttpError(403, 'NOT_REGISTERED', 'Tu n’es pas inscrit à cette coupe.');
   }
-  return getTournament(id, userId);
-}
-
-/** Capitaine d'une équipe formée : titulaires des prochains matchs (remplaçant qui entre, titulaire qui sort). */
-export async function setSquadRoster(userId: string, id: string, body: unknown) {
-  const tournament = await tournamentRow(id);
-  if (tournament.kind !== 'anubis' || tournament.status !== 'running') throw new HttpError(409, 'TOURNAMENT_NOT_RUNNING', 'La coupe n’est pas en cours.');
-  const squad = (await participantsOf(id)).find((p) => p.captain === userId);
-  if (!squad) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul le capitaine choisit les titulaires.');
-  const size = tournament.team_size ?? config.teams.rosterSize;
-  const roster = (body as { roster?: unknown } | undefined)?.roster;
-  if (!Array.isArray(roster) || roster.length !== size || new Set(roster).size !== size || !roster.every((rid) => squad.frozen_roster.includes(rid))) {
-    throw new HttpError(400, 'INVALID_ROSTER', `Choisis ${size} titulaire${size > 1 ? 's' : ''} dans ton équipe.`);
-  }
-  unwrap(await supabase.from('tournament_teams').update({ match_roster: roster }).eq('tournament_id', id).eq('team_id', squad.team_id));
   return getTournament(id, userId);
 }
 
@@ -1082,13 +1058,14 @@ async function drawBracket(tournament: TournamentRow, drawn: string[], size: num
 }
 
 /**
- * Début d'une Coupe Anubis : équipes formées au hasard parmi les joueurs présents au check-in (capitaine,
- * remplaçants), équipes temporaires créées, tableau tiré au sort. Moins de 4 équipes complètes : annulée.
+ * Début d'une Coupe Anubis : équipes formées au hasard parmi les joueurs présents au check-in (capitaine, sans
+ * remplaçant), équipes temporaires créées, tableau tiré au sort. Moins de 4 équipes complètes : annulée.
  */
 async function startAnubis(tournament: TournamentRow): Promise<void> {
   const players = (unwrap(await supabase.from('cup_players').select('*').eq('tournament_id', tournament.id).order('registered_at')) ?? []) as CupPlayerRow[];
   const teamSize = tournament.team_size ?? config.teams.rosterSize;
-  // Présents dans l'ordre d'inscription : un absent laisse sa place au premier remplaçant présent ; au-delà, pas de place.
+  // Présents dans l'ordre d'inscription : un absent laisse sa place au premier inscrit présent de la liste d'attente ;
+  // au-delà, pas de place. Une fois les équipes tirées, plus aucun changement.
   const checked = players.filter((p) => p.checked_in_at);
   const present = checked.slice(0, anubisCapacity(tournament.size, teamSize));
   const overflow = checked.slice(present.length).map((p) => p.user_id);
@@ -1130,14 +1107,14 @@ async function startAnubis(tournament: TournamentRow): Promise<void> {
         tournament_id: tournament.id,
         team_id: team.id,
         seed: index + 1,
-        frozen_roster: [...squad.starters, ...squad.subs],
+        frozen_roster: squad.starters,
         match_roster: squad.starters,
         checked_in_at: now,
         captain: squad.captain,
       }),
     );
-    unwrap(await supabase.from('cup_players').update({ team_id: team.id }).eq('tournament_id', tournament.id).in('user_id', [...squad.starters, ...squad.subs]));
-    await pushToUsers([...squad.starters, ...squad.subs], {
+    unwrap(await supabase.from('cup_players').update({ team_id: team.id }).eq('tournament_id', tournament.id).in('user_id', squad.starters));
+    await pushToUsers(squad.starters, {
       title: `𓂀 ${tournament.name} : tu joues avec ${base.name} [${base.tag}]`,
       body: `Capitaine : ${info.get(squad.captain)?.username ?? 'tiré au sort'}. Rejoins ton équipe : premiers matchs à ${hourOf(tournament)}.`,
       url: `${PAGE}?coupe=anubis`,
@@ -1146,17 +1123,18 @@ async function startAnubis(tournament: TournamentRow): Promise<void> {
     });
   }
   await drawBracket(tournament, teamIds, size);
-  const placed = formed.reduce((total, squad) => total + squad.starters.length + squad.subs.length, 0);
-  // Remplaçants présents restés sans place (tous les inscrits étaient là) : prévenus.
-  if (overflow.length) {
-    await pushToUsers(overflow, {
+  // Présents restés sans place (liste d'attente, ou joueurs en trop pour une équipe complète) : prévenus.
+  const placedIds = new Set(formed.flatMap((squad) => squad.starters));
+  const unplaced = [...present.map((p) => p.user_id).filter((id) => !placedIds.has(id)), ...overflow];
+  if (unplaced.length) {
+    await pushToUsers(unplaced, {
       title: `𓂀 ${tournament.name}`,
-      body: 'Tous les joueurs inscrits avant toi sont présents : tu restes remplaçant pour cette coupe. Merci d’avoir été là !',
+      body: 'Pas de place pour toi dans les équipes de cette coupe : les joueurs inscrits avant toi sont présents. Merci d’avoir été là !',
       url: `${PAGE}?coupe=anubis`,
       tag: `tournoi-${tournament.id}`,
     });
   }
-  const benched = present.length - placed + overflow.length;
+  const benched = unplaced.length;
   await announce(
     `𓂀 **${tournament.name}** : ${formed.length} équipes de ${teamSize} tirées au sort parmi ${present.length + overflow.length} joueurs${benched > 0 ? ` (${benched} sans place)` : ''} ! Premiers matchs à ${hourOf(tournament)}.\n${config.siteUrl}${PAGE}?coupe=anubis`,
     tournament.kind,
@@ -1435,7 +1413,7 @@ async function completeCup(tournament: TournamentRow, winner: string | null, fin
   if (winnerEntry) await passCupRole('horus', winnerEntry.match_roster ?? winnerEntry.frozen_roster);
 }
 
-/** Fin d'une Coupe Anubis : médailles or / argent / bronze pour tous les joueurs des équipes du podium (remplaçants compris), rôle Discord. */
+/** Fin d'une Coupe Anubis : médailles or / argent / bronze pour tous les joueurs des équipes du podium, rôle Discord. */
 async function rewardAnubis(tournament: TournamentRow, winner: string | null, finalist: string | null, third: string | null): Promise<void> {
   const participants = await participantsOf(tournament.id);
   const teams = (unwrap(await supabase.from('teams').select('id, name, tag').in('id', [winner, finalist, third].filter(Boolean) as string[])) ?? []) as {
