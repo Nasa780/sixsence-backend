@@ -1,11 +1,20 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { declarationError, deciderPicker, isCompleteSeries, isValidMapScore, pickMaps, seriesState, stakes } from './teamMatchPolicy.js';
+import { declarationError, deciderPicker, isCompleteSeries, isValidMapScore, pickMaps, roundsToWin, seriesState, stakes } from './teamMatchPolicy.js';
 
 describe('matchs d’équipe (BO3 / BO5)', () => {
   it('score d’une map : 6 manches gagnantes', () => {
     assert.ok(isValidMapScore([6, 4]) && isValidMapScore([0, 6]) && isValidMapScore([6, 5]));
     for (const score of [[6, 6], [5, 4], [7, 2], [6, -1], [6, 2.5], [6], 'x']) assert.ok(!isValidMapScore(score), JSON.stringify(score));
+  });
+
+  it('BO1 : une map en 8 manches gagnantes', () => {
+    assert.equal(roundsToWin(1), 8);
+    assert.equal(roundsToWin(3), 6);
+    assert.ok(isValidMapScore([8, 7], 8) && !isValidMapScore([6, 4], 8));
+    assert.equal(declarationError([], [[8, 5]], 1), null);
+    assert.ok(declarationError([], [[6, 4]], 1));
+    assert.ok(isCompleteSeries([[3, 8]], 1) && !isCompleteSeries([[6, 3]], 1));
   });
 
   it('BO3 : maps 1 et 2, puis map décisive à 1-1', () => {

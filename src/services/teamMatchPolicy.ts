@@ -1,7 +1,8 @@
 /**
  * Matchs d'équipe (BO3, ou BO5 en finale de tournoi) : règles pures, testées dans teamMatchPolicy.test.ts.
  *
- *   - chaque map se joue en 6 manches gagnantes : un score valide est [6, 0..5] ou [0..5, 6] ;
+ *   - chaque map se joue en 6 manches gagnantes en BO3 / BO5, 8 en BO1 (roundsToWin) : un score valide est
+ *     [6, 0..5] ou [0..5, 6] (BO1 : [8, 0..7] ou [0..7, 8]) ;
  *   - toutes les maps sont tirées au sort à la création (la décisive n'est jouée qu'à égalité) ;
  *   - une seule déclaration, à la fin : toute la série (BO3 : 2 ou 3 maps), confirmée une fois par
  *     l'équipe adverse ;
@@ -13,12 +14,14 @@ export type Side = 'A' | 'B';
 export type MapScore = [number, number];
 
 export const ROUNDS_TO_WIN = 6;
+/** Manches gagnantes d'une map : 8 en BO1 (comme le Classé), 6 en BO3 et BO5. */
+export const roundsToWin = (bestOf: number) => (bestOf > 1 ? ROUNDS_TO_WIN : 8);
 
-export function isValidMapScore(score: unknown): score is MapScore {
+export function isValidMapScore(score: unknown, rounds = ROUNDS_TO_WIN): score is MapScore {
   if (!Array.isArray(score) || score.length !== 2) return false;
   const [a, b] = score;
   if (!Number.isInteger(a) || !Number.isInteger(b)) return false;
-  return (a === ROUNDS_TO_WIN && b >= 0 && b < ROUNDS_TO_WIN) || (b === ROUNDS_TO_WIN && a >= 0 && a < ROUNDS_TO_WIN);
+  return (a === rounds && b >= 0 && b < rounds) || (b === rounds && a >= 0 && a < rounds);
 }
 
 const mapWinner = ([a, b]: MapScore): Side => (a > b ? 'A' : 'B');
@@ -58,7 +61,8 @@ export function deciderPicker(scores: MapScore[]): Side | 'random' {
 export function declarationError(confirmed: MapScore[], declared: unknown, bestOf = 3): string | null {
   if (seriesState(confirmed, bestOf).phase === 'done') return 'Le match est déjà terminé.';
   if (!Array.isArray(declared) || declared.length === 0) return 'Déclare les scores de toutes les maps jouées.';
-  if (!declared.every(isValidMapScore)) return 'Score invalide : une équipe doit avoir 6 manches, l’autre entre 0 et 5.';
+  const rounds = roundsToWin(bestOf);
+  if (!declared.every((score) => isValidMapScore(score, rounds))) return `Score invalide : une équipe doit avoir ${rounds} manches, l’autre entre 0 et ${rounds - 1}.`;
   const all = [...confirmed, ...(declared as MapScore[])];
   if (all.length > bestOf) return `Une série se joue en ${bestOf} maps au plus.`;
   for (let i = confirmed.length; i < all.length - 1; i += 1) {
@@ -70,7 +74,8 @@ export function declarationError(confirmed: MapScore[], declared: unknown, bestO
 
 /** Scores d'une série complète (arbitrage) : chaque score valide, vainqueur exactement sur la dernière map. */
 export function isCompleteSeries(scores: unknown, bestOf = 3): scores is MapScore[] {
-  if (!Array.isArray(scores) || scores.length < Math.ceil(bestOf / 2) || scores.length > bestOf || !scores.every(isValidMapScore)) return false;
+  const rounds = roundsToWin(bestOf);
+  if (!Array.isArray(scores) || scores.length < Math.ceil(bestOf / 2) || scores.length > bestOf || !scores.every((score) => isValidMapScore(score, rounds))) return false;
   return Boolean(seriesState(scores, bestOf).winner) && !seriesState(scores.slice(0, -1), bestOf).winner;
 }
 
