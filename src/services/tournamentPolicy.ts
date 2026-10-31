@@ -295,8 +295,8 @@ export const ANUBIS_TEAMS = [
   { name: 'Thot', tag: 'THO', color: '#6f86d6' },
 ] as const;
 
-/** Joueurs au plus dans une Coupe Anubis : une place de remplaçant par équipe. */
-export const anubisCapacity = (teams: number, teamSize: number) => teams * (teamSize + 1);
+/** Places d'une Coupe Anubis (hors liste d'attente) : des équipes complètes, sans remplaçant. */
+export const anubisCapacity = (teams: number, teamSize: number) => teams * teamSize;
 
 /**
  * Places de remplaçant en plus des places de la coupe : un quart des places (une au moins). Coupe Horus : équipes
@@ -313,14 +313,13 @@ export interface AnubisPlayer {
 
 export interface FormedTeam {
   starters: string[];
-  subs: string[];
   captain: string;
 }
 
 /**
  * Forme les équipes d'une Coupe Anubis parmi les joueurs présents : tirage au sort, autant d'équipes
- * complètes que possible (au plus `maxTeams`), joueurs restants en remplaçants (un par équipe) ;
- * capitaine = titulaire avec le plus de points en Classé (égalité : au hasard, l'ordre étant tiré au sort).
+ * complètes que possible (au plus `maxTeams`), sans remplaçant (une fois les équipes tirées, plus de changement) ;
+ * capitaine = joueur avec le plus de points en Classé (égalité : au hasard, l'ordre étant tiré au sort).
  */
 export function formTeams(players: AnubisPlayer[], teamSize: number, maxTeams: number, random = Math.random): FormedTeam[] {
   const drawn = shuffle(players, random);
@@ -329,12 +328,7 @@ export function formTeams(players: AnubisPlayer[], teamSize: number, maxTeams: n
   for (let index = 0; index < count; index += 1) {
     const starters = drawn.slice(index * teamSize, (index + 1) * teamSize);
     const captain = [...starters].sort((a, b) => b.points - a.points)[0]!;
-    teams.push({ starters: starters.map((player) => player.id), subs: [], captain: captain.id });
-  }
-  const rest = drawn.slice(count * teamSize);
-  for (const [index, player] of rest.entries()) {
-    if (index >= count) break;
-    teams[index]!.subs.push(player.id);
+    teams.push({ starters: starters.map((player) => player.id), captain: captain.id });
   }
   return teams;
 }
