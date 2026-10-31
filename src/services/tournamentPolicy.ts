@@ -51,6 +51,8 @@ export function roundName(round: number, rounds: number): string {
 export interface MatchFormat {
   bestOf: number;
   finalBestOf: number;
+  /** Double élimination : BO des matchs du tableau des perdants (null ou absent = bestOf). */
+  losersBestOf?: number | null;
 }
 export const SEASON_FORMAT: MatchFormat = { bestOf: 3, finalBestOf: 5 };
 
@@ -252,8 +254,9 @@ export function podiumDouble(entries: BracketEntry[], size: number): { winner: s
   return { winner: final!.winner, finalist: final!.winner === final!.teamA ? final!.teamB : final!.teamA, third };
 }
 
-/** Format en double élimination : la grande finale a le sien, tout le reste suit les autres matchs. */
-export const bestOfDouble = (round: number, format: MatchFormat) => (round === GRAND_FINAL ? format.finalBestOf : format.bestOf);
+/** Format en double élimination : la grande finale a le sien, le tableau des perdants le sien s'il est réglé (losersBestOf), le reste suit les autres matchs. */
+export const bestOfDouble = (round: number, format: MatchFormat) =>
+  round === GRAND_FINAL ? format.finalBestOf : isLosers(round) && format.losersBestOf ? format.losersBestOf : format.bestOf;
 
 /** Nom d'un tour en double élimination. */
 export function roundNameDouble(round: number, size: number): string {

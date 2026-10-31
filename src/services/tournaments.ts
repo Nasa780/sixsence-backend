@@ -91,6 +91,8 @@ interface TournamentRow {
   kind: Kind;
   best_of: number;
   final_best_of: number;
+  /** BO du tableau des perdants (double élimination), null = best_of (migration 0058). */
+  losers_best_of: number | null;
   third_place: boolean;
   bracket: BracketType;
   third_team: string | null;
@@ -143,11 +145,13 @@ interface CupPlayerRow {
 }
 
 const PAGE = '/cod/tournoi';
+/** Match de tournoi « en retard » : partie pas encore créée par l'hôte (pas de code) 10 min après le match. */
+const LATE_MINUTES = 10;
 const CUP_ROLES = {
   horus: { name: 'Vainqueur — Coupe Horus', key: 'horus_role_holders', color: 0xd4af37 },
   anubis: { name: 'Vainqueur — Coupe Anubis', key: 'anubis_role_holders', color: 0x7f5af0 },
 } as const;
-const formatOf = (tournament: TournamentRow) => ({ bestOf: tournament.best_of, finalBestOf: tournament.final_best_of });
+const formatOf = (tournament: TournamentRow) => ({ bestOf: tournament.best_of, finalBestOf: tournament.final_best_of, losersBestOf: tournament.losers_best_of });
 const toEntry = (row: EntryRow): BracketEntry => ({ round: row.round, slot: row.slot, teamA: row.team_a, teamB: row.team_b, winner: row.winner, status: row.status });
 
 /** Joueurs par équipe d'un tournoi : choisi par l'admin pour les Coupes Horus et Anubis, sinon format de la Division. */
@@ -473,9 +477,21 @@ export async function getTournament(id: string, viewerId: string | null) {
   const teamById = new Map(teams.map((team) => [team.id, team]));
   const matchIds = rows.map((row) => row.match_id).filter(Boolean) as string[];
   const matches = matchIds.length
-    ? ((unwrap(await supabase.from('team_matches').select('id, status, scores, winner, best_of').in('id', matchIds)) ?? []) as { id: string; status: string; scores: [number, number][]; winner: string | null; best_of: number }[])
+    ? ((unwrap(await supabase.from('team_matches').select('id, status, scores, winner, best_of, created_at').in('id', matchIds)) ?? []) as {
+        id: string;
+        status: string;
+        scores: [number, number][];
+        winner: string | null;
+        best_of: number;
+        created_at: string;
+      }[])
     : [];
   const matchById = new Map(matches.map((match) => [match.id, match]));
+  // Code de la partie déjà donné (table privée) : sans lui 10 min après la création, le match est « en retard ».
+  const openIds = matches.filter((match) => match.status === 'in_progress').map((match) => match.id);
+  const withCode = new Set(
+    openIds.length ? (((unwrap(await supabase.from('team_match_codes').select('match_id').in('match_id', openIds)) ?? []) as { match_id: string }[]).map((row) => row.match_id)) : [],
+  );
   // Avant le début : le tableau affiche déjà les têtes de série et les places vides.
   const display =
     tournament.status === 'scheduled'
@@ -547,9 +563,21 @@ export async function getTournament(id: string, viewerId: string | null) {
       matchId: row?.match_id ?? null,
       score: decided ? (entry.winner === entry.teamA ? [forfeitMaps, 0] : [0, forfeitMaps]) : match ? [mapsA, match.scores.length - mapsA!] : null,
       decided,
+      // Retard : partie pas encore créée par l'hôte 10 min après le match ; litige : contestation ou forfait déclaré.
+      late: Boolean(match && match.status === 'in_progress' && match.scores.length === 0 && !withCode.has(match.id) && Date.now() - new Date(match.created_at).getTime() > LATE_MINUTES * 60_000),
+      dispute: Boolean(match && (match.status === 'disputed' || match.status === 'forfeit_claimed')),
     };
   };
   const thirdEntry = display.find((entry) => isThirdPlace(entry, rounds));
+
+  // Rendez-vous récurrent : jour, heure et numéro d'édition (coupes du même rendez-vous jusqu'à celle-ci).
+  let recurrence: { weekday: number; time: string; edition: number } | null = null;
+  if (tournament.schedule_id) {
+    const schedule = unwrap(await supabase.from('cup_schedules').select('weekday, start_time').eq('id', tournament.schedule_id).maybeSingle()) as { weekday: number; start_time: string } | null;
+    const { count } = await supabase.from('tournaments').select('id', { count: 'exact', head: true }).eq('schedule_id', tournament.schedule_id).lte('starts_at', tournament.starts_at);
+    if (schedule) recurrence = { weekday: schedule.weekday, time: schedule.start_time.slice(0, 5), edition: count ?? 1 };
+  }
+  const messages = await tournamentMessages(tournament.id);
 
   if (tournament.kind === 'anubis') return { ...publicView(), ...(await anubisView(tournament, participants, card, viewerId)) };
   return { ...publicView(), viewer };
@@ -565,6 +593,9 @@ export async function getTournament(id: string, viewerId: string | null) {
     size: tournament.size,
     bestOf: tournament.best_of,
     finalBestOf: tournament.final_best_of,
+    losersBestOf: tournament.bracket === 'double' ? tournament.losers_best_of : null,
+    schedule: recurrence,
+    messages,
     registered: participants.length,
     third: card(tournament.third_team),
     thirdPlace: thirdEntry ? { name: 'Petite finale', bestOf: tournament.best_of, entry: present(thirdEntry) } : null,
@@ -1488,6 +1519,7 @@ interface ScheduleRow {
   size: number;
   best_of: number;
   final_best_of: number;
+  losers_best_of: number | null;
   bracket: BracketType;
   active: boolean;
   last_date: string | null;
@@ -1544,6 +1576,7 @@ async function ensureScheduledCups(): Promise<void> {
       size: schedule.size,
       bestOf: schedule.best_of,
       finalBestOf: schedule.final_best_of,
+      losersBestOf: schedule.losers_best_of,
       bracket: schedule.bracket,
       startsAt: next.startsAt,
       scheduleId: schedule.id,
@@ -1561,6 +1594,7 @@ async function openCup(input: {
   size: number;
   bestOf: number;
   finalBestOf: number;
+  losersBestOf: number | null;
   bracket: BracketType;
   startsAt: Date;
   scheduleId: string | null;
@@ -1578,6 +1612,7 @@ async function openCup(input: {
         size: input.size,
         best_of: input.bestOf,
         final_best_of: input.finalBestOf,
+        losers_best_of: input.losersBestOf,
         bracket: input.bracket,
         third_place: input.bracket === 'single',
         starts_at: input.startsAt.toISOString(),
@@ -1590,7 +1625,7 @@ async function openCup(input: {
       .single(),
   ) as TournamentRow;
   const date = input.startsAt.toLocaleString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-  const format = `${input.bracket === 'double' ? 'double élimination' : 'élimination directe'}, BO${input.bestOf} (finale BO${input.finalBestOf}), ${date}. Check-in de 2 h à 15 min avant.`;
+  const format = `${input.bracket === 'double' ? 'double élimination' : 'élimination directe'}, BO${input.bestOf}${input.losersBestOf && input.losersBestOf !== input.bestOf ? ` (perdants BO${input.losersBestOf})` : ''} (finale BO${input.finalBestOf}), ${date}. Check-in de 2 h à 15 min avant.`;
   await announce(
     input.kind === 'anubis'
       ? `𓂀 **${input.name}** : inscriptions ouvertes ! Inscris-toi seul, les équipes de ${input.teamSize} sont tirées au sort (${input.size} équipes max), ${format}\n${config.siteUrl}${PAGE}?coupe=anubis`
@@ -1636,7 +1671,10 @@ function parseCupInput(body: unknown) {
     if (!sizes.includes(teamSize)) throw new HttpError(400, 'INVALID_CUP', 'Taille des équipes : 2 à 5 joueurs.');
   }
   const posterUrl = parsePosterUrl((body as { posterUrl?: unknown } | undefined)?.posterUrl);
-  return { kind, teamSize, name, size, bestOf, finalBestOf, bracket, posterUrl };
+  // Double élimination : BO du tableau des perdants (1 ou 3), sinon même BO que les autres matchs.
+  const rawLosers = Number((body as { losersBestOf?: unknown } | undefined)?.losersBestOf);
+  const losersBestOf = bracket === 'double' && (rawLosers === 1 || rawLosers === 3) ? rawLosers : null;
+  return { kind, teamSize, name, size, bestOf, finalBestOf, losersBestOf, bracket, posterUrl };
 }
 
 export async function cupAdmin() {
@@ -1672,6 +1710,7 @@ export async function cupAdmin() {
       size: row.size,
       bestOf: row.best_of,
       finalBestOf: row.final_best_of,
+      losersBestOf: row.losers_best_of,
       bracket: row.bracket,
       active: row.active,
       next: nextOccurrence(row.weekday, row.start_time).startsAt.toISOString(),
@@ -1691,6 +1730,7 @@ export async function cupAdmin() {
         status: row.status,
         bestOf: row.best_of,
         finalBestOf: row.final_best_of,
+        losersBestOf: row.losers_best_of,
         bracket: row.bracket,
         scheduleId: row.schedule_id,
         // Coupe Anubis : joueurs ; sinon équipes.
@@ -1735,6 +1775,7 @@ export async function createSchedule(adminId: string, body: unknown) {
       size: input.size,
       best_of: input.bestOf,
       final_best_of: input.finalBestOf,
+      losers_best_of: input.losersBestOf,
       bracket: input.bracket,
       poster_url: input.posterUrl,
       created_by: adminId,
@@ -1762,6 +1803,7 @@ export async function updateSchedule(id: string, body: unknown) {
           size: input.size,
           best_of: input.bestOf,
           final_best_of: input.finalBestOf,
+          losers_best_of: input.losersBestOf,
           bracket: input.bracket,
           poster_url: input.posterUrl,
           last_date: null,
@@ -1808,6 +1850,7 @@ export async function updateCup(id: string, body: unknown) {
     input.size !== row.size ||
     input.bestOf !== row.best_of ||
     input.finalBestOf !== row.final_best_of ||
+    input.losersBestOf !== row.losers_best_of ||
     input.bracket !== row.bracket ||
     input.teamSize !== row.team_size;
   if (checkInOpen && formatChanged) throw new HttpError(409, 'CHECKIN_OPEN', 'Le check-in est ouvert : seuls le nom et l’affiche se modifient encore.');
@@ -1831,6 +1874,7 @@ export async function updateCup(id: string, body: unknown) {
         size: input.size,
         best_of: input.bestOf,
         final_best_of: input.finalBestOf,
+        losers_best_of: input.losersBestOf,
         bracket: input.bracket,
         third_place: input.bracket === 'single',
         team_size: input.teamSize,
@@ -1838,6 +1882,35 @@ export async function updateCup(id: string, body: unknown) {
       .eq('id', id),
   );
   return cupAdmin();
+}
+
+// --- Messages de l'organisation (fiche d'une coupe) -------------------------------------------
+
+/** Derniers messages de l'équipe SixSence sur un tournoi (les plus récents d'abord), avec l'auteur. */
+async function tournamentMessages(tournamentId: string) {
+  const rows = (unwrap(await supabase.from('tournament_messages').select('id, author_id, body, created_at').eq('tournament_id', tournamentId).order('created_at', { ascending: false }).limit(10)) ?? []) as {
+    id: number;
+    author_id: string | null;
+    body: string;
+    created_at: string;
+  }[];
+  const authors = await playersInfo([...new Set(rows.map((row) => row.author_id).filter(Boolean) as string[])]);
+  return rows.map((row) => ({ id: row.id, body: row.body, createdAt: row.created_at, author: row.author_id ? authors.get(row.author_id)?.username ?? 'Équipe SixSence' : 'Équipe SixSence' }));
+}
+
+/** Publier un message de l'organisation sur un tournoi (admin) : 1 000 caractères au plus. */
+export async function addTournamentMessage(adminId: string, id: string, body: unknown) {
+  await tournamentRow(id);
+  const text = typeof (body as { body?: unknown } | undefined)?.body === 'string' ? (body as { body: string }).body.trim() : '';
+  if (!text || text.length > 1000) throw new HttpError(400, 'INVALID_MESSAGE', 'Le message fait entre 1 et 1 000 caractères.');
+  unwrap(await supabase.from('tournament_messages').insert({ tournament_id: id, author_id: adminId, body: text }));
+  return { messages: await tournamentMessages(id) };
+}
+
+/** Retirer un message de l'organisation (admin). */
+export async function deleteTournamentMessage(id: string, messageId: number) {
+  unwrap(await supabase.from('tournament_messages').delete().eq('tournament_id', id).eq('id', messageId));
+  return { messages: await tournamentMessages(id) };
 }
 
 /** Affiche d'une coupe déjà créée (ou null : retour à l'affiche générée). */
