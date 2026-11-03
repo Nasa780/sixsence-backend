@@ -36,6 +36,7 @@ import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQu
 import { getSiteStats } from './services/stats.js';
 import { calendarEvents, calendarIcs } from './services/calendar.js';
 import { hallOfFame, highlights } from './services/highlights.js';
+import { clipsRouter } from './routes/clips.js';
 import { globalSearch } from './services/search.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
 import { noticeMatchAbandoned, noticeMatchFinished, noticeMatchMissed, remindStaff } from './services/matchNotices.js';
@@ -314,6 +315,7 @@ if (config.localSafe) {
 }
 app.use('/cod', codRouter(hub));
 app.use('/gta', gtaRouter());
+app.use('/clips', clipsRouter());
 app.use('/push', pushRouter());
 app.use('/teams', teamsRouter());
 app.use('/admin', adminRouter());
