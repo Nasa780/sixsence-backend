@@ -49,8 +49,8 @@ async function leadersOf(teamId: string): Promise<string[]> {
 
 async function notify(userIds: string[], title: string, body: string) {
   const ids = [...new Set(userIds)];
-  await pushToUsers(ids, { title, body, url: PAGE, tag: 'match-programme' });
-  if (discordEnabled && config.teams.discord) await dm(ids, `**${title}**\n${body}\n${config.siteUrl}${PAGE}`).catch(() => {});
+  await pushToUsers(ids, { category: 'equipe', title, body, url: PAGE, tag: 'match-programme' });
+  if (discordEnabled && config.teams.discord) await dm(ids, `**${title}**\n${body}\n${config.siteUrl}${PAGE}`, 'equipe').catch(() => {});
 }
 
 /** Programmer (ou déplacer) le match de son équipe : { slot (ISO, quart d'heure), roster }. */
