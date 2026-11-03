@@ -41,6 +41,7 @@ import { globalSearch } from './services/search.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
 import { noticeMatchAbandoned, noticeMatchFinished, noticeMatchMissed, remindStaff } from './services/matchNotices.js';
 import { syncAllCards, syncCards } from './services/cards.js';
+import { sweepTwitch, twitchEnabled } from './services/twitchLive.js';
 import { supabase } from './supabase.js';
 import { QueueHub } from './ws/hub.js';
 
@@ -401,6 +402,9 @@ if (live) setTimeout(() => {
   })().catch((error) => console.warn('[cartes]', (error as Error).message));
 }, 30_000);
 const cardsTimer = live ? setInterval(() => void syncAllCards().catch(() => {}), 60 * 60_000) : undefined;
+// Joueurs en direct sur Twitch, toutes les 2 minutes (rien sans application Twitch).
+const twitchTimer = twitchEnabled ? setInterval(() => void sweepTwitch(), 2 * 60_000) : undefined;
+void sweepTwitch();
 // Top de la semaine (lundi 10 h, heure de Paris) et relance de l'équipe (attente de plus de 2 h), vérifiés toutes les 15 minutes.
 const weeklyTimer = live
   ? setInterval(() => {
@@ -436,6 +440,7 @@ function shutdown(signal: string): void {
   clearInterval(teamQueueTimer);
   clearInterval(weeklyTimer);
   clearInterval(cardsTimer);
+  clearInterval(twitchTimer);
   clearInterval(readyTimer);
   clearInterval(queueTimer);
   clearInterval(discordTimer);
