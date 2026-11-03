@@ -302,6 +302,7 @@ export async function createPlayIn(adminId: string, body: unknown) {
 
   const date = startsAt.toLocaleString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   await pushToUsers(members.map((member) => member.user_id), {
+    category: 'coupes',
     title: `⚔️ Ton équipe joue le play-in`,
     body: `Une place en grande finale en jeu, BO3 ${date}. Check-in d’un joueur de l’équipe de 2 h à 15 min avant.`,
     url: pageOf('playin'),
@@ -328,6 +329,7 @@ async function completePlayIn(tournament: TournamentRow, entries: BracketEntry[]
   const names = (unwrap(await supabase.from('teams').select('id, name, tag').in('id', winners.filter(Boolean) as string[])) ?? []) as { id: string; name: string; tag: string }[];
   const list = names.map((team) => `**[${team.tag}] ${team.name}**`).join(' et ');
   await pushToUsers(participants.flatMap((p) => p.frozen_roster), {
+    category: 'coupes',
     title: `⚔️ ${tournament.name} terminé`,
     body: list ? `Qualifiées pour la grande finale : ${names.map((team) => team.name).join(' et ')}.` : 'Résultats en ligne.',
     url: pageOf('playin'),
@@ -396,6 +398,7 @@ export async function createTournament(adminId: string, body: unknown) {
 
   const date = startsAt.toLocaleString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   await pushToUsers(members.map((member) => member.user_id), {
+    category: 'coupes',
     title: `🏆 Ton équipe est qualifiée : ${name}`,
     body: `Début ${date}. Check-in d’un joueur de l’équipe de 2 h à 15 min avant.`,
     url: PAGE,
@@ -973,8 +976,8 @@ async function checkInReminders(): Promise<void> {
     const text = first
       ? `Le check-in de ${tournament.name} est ouvert jusqu’à ${closes}. ${tournament.kind === 'anubis' ? 'Confirme ta présence' : 'Un joueur de l’équipe confirme sa présence et choisit les joueurs du match'} : sans check-in, pas de place.`
       : `Dernier rappel : le check-in de ${tournament.name} ferme à ${closes}. ${tournament.kind === 'anubis' ? 'Confirme ta présence' : 'Un joueur de l’équipe doit faire le check-in'} pour jouer.`;
-    await pushToUsers(targets, { title: first ? '✅ Check-in ouvert' : '⏰ Check-in : plus que quelques minutes', body: text, url, tag: `checkin-${tournament.id}`, urgent: !first });
-    if (discordEnabled && config.teams.discord) await dm(targets, `${first ? '✅' : '⏰'} ${text}\n${config.siteUrl}${url}`);
+    await pushToUsers(targets, { category: 'coupes', title: first ? '✅ Check-in ouvert' : '⏰ Check-in : plus que quelques minutes', body: text, url, tag: `checkin-${tournament.id}`, urgent: !first });
+    if (discordEnabled && config.teams.discord) await dm(targets, `${first ? '✅' : '⏰'} ${text}\n${config.siteUrl}${url}`, 'coupes');
     if (first) await announce(`✅ **${tournament.name}** : check-in ouvert jusqu’à ${closes}, tirage à ${closes} et premiers matchs à ${hourOf(tournament)}.\n${config.siteUrl}${url}`, tournament.kind);
   }
 }
@@ -984,8 +987,8 @@ async function notifyDraw(tournament: TournamentRow, userIds: string[], url: str
   const players = [...new Set(userIds)];
   if (players.length === 0) return;
   const text = `Tirage effectué : ton tableau est en ligne, premiers matchs à ${hourOf(tournament)}. Rejoins ton équipe.`;
-  await pushToUsers(players, { title: `🏆 ${tournament.name}`, body: text, url, tag: `tournoi-${tournament.id}`, urgent: true });
-  if (discordEnabled && config.teams.discord) await dm(players, `🏆 **${tournament.name}** — ${text}\n${config.siteUrl}${url}`);
+  await pushToUsers(players, { category: 'coupes', title: `🏆 ${tournament.name}`, body: text, url, tag: `tournoi-${tournament.id}`, urgent: true });
+  if (discordEnabled && config.teams.discord) await dm(players, `🏆 **${tournament.name}** — ${text}\n${config.siteUrl}${url}`, 'coupes');
 }
 
 /** Tirage (15 min avant) : équipes sans check-in déclarées forfait (retirées du 1er tour) ; 1ers matchs à l'heure du début. */
@@ -1030,6 +1033,7 @@ async function startCup(tournament: TournamentRow): Promise<void> {
     );
     if (!claimed) return;
     await pushToUsers(participants.flatMap((p) => p.frozen_roster), {
+      category: 'coupes',
       title: `🏆 ${tournament.name} annulée`,
       body: `Pas assez d’équipes présentes au check-in (${present.length} sur ${CUP_MIN_TEAMS} minimum).`,
       url: PAGE,
@@ -1047,6 +1051,7 @@ async function startCup(tournament: TournamentRow): Promise<void> {
   if (benched.length) {
     unwrap(await supabase.from('tournament_teams').update({ bench: true }).eq('tournament_id', tournament.id).in('team_id', benched.map((p) => p.team_id)));
     await pushToUsers(benched.flatMap((p) => p.match_roster ?? p.frozen_roster), {
+      category: 'coupes',
       title: `🏆 ${tournament.name}`,
       body: 'Toutes les équipes titulaires sont présentes : ton équipe reste remplaçante pour cette coupe. Merci d’avoir été là !',
       url: PAGE,
@@ -1093,6 +1098,7 @@ async function startAnubis(tournament: TournamentRow): Promise<void> {
     );
     if (!claimed) return;
     await pushToUsers(players.map((p) => p.user_id), {
+      category: 'coupes',
       title: `𓂀 ${tournament.name} annulée`,
       body: `Pas assez de joueurs présents au check-in (${present.length}, il en faut ${CUP_MIN_TEAMS * teamSize}).`,
       url: PAGE,
@@ -1131,6 +1137,7 @@ async function startAnubis(tournament: TournamentRow): Promise<void> {
     );
     unwrap(await supabase.from('cup_players').update({ team_id: team.id }).eq('tournament_id', tournament.id).in('user_id', squad.starters));
     await pushToUsers(squad.starters, {
+      category: 'coupes',
       title: `𓂀 ${tournament.name} : tu joues avec ${base.name} [${base.tag}]`,
       body: `Capitaine : ${info.get(squad.captain)?.username ?? 'tiré au sort'}. Rejoins ton équipe : premiers matchs à ${hourOf(tournament)}.`,
       url: `${PAGE}?coupe=anubis`,
@@ -1144,6 +1151,7 @@ async function startAnubis(tournament: TournamentRow): Promise<void> {
   const unplaced = [...present.map((p) => p.user_id).filter((id) => !placedIds.has(id)), ...overflow];
   if (unplaced.length) {
     await pushToUsers(unplaced, {
+      category: 'coupes',
       title: `𓂀 ${tournament.name}`,
       body: 'Pas de place pour toi dans les équipes de cette coupe : les joueurs inscrits avant toi sont présents. Merci d’avoir été là !',
       url: `${PAGE}?coupe=anubis`,
@@ -1214,6 +1222,7 @@ export async function advanceTournament(id: string): Promise<void> {
     if (!match?.id) continue;
     if (isCup(tournament.kind)) await openMatchVoice(match, tournament.name).catch((caught) => console.warn('[tournoi] salons vocaux impossibles', (caught as Error).message));
     await pushToUsers([...match.roster_a, ...match.roster_b], {
+      category: 'coupes',
       title: `🏆 ${double ? roundNameDouble(entry.round, tournament.size) : tournament.kind === 'playin' ? 'Play-in' : isThirdPlace(entry, rounds) ? 'Petite finale' : roundName(entry.round, rounds)} : à vous de jouer`,
       body: `${tournament.name} · BO${bestOf}. Ouvre la feuille de match.`,
       url: `/cod/equipes/match/${match.id}`,
@@ -1296,6 +1305,7 @@ async function completeTournament(tournament: TournamentRow, winner: string | nu
   const names = winner ? ((unwrap(await supabase.from('teams').select('id, name, tag').in('id', [winner, finalist].filter(Boolean) as string[])) ?? []) as { id: string; name: string; tag: string }[]) : [];
   const winnerTeam = names.find((team) => team.id === winner);
   await pushToUsers(participants.flatMap((p) => p.frozen_roster), {
+    category: 'coupes',
     title: `🏆 ${tournament.name} : ${winnerTeam ? `victoire de ${winnerTeam.name}` : 'terminé'}`,
     body: 'Le tableau final est en ligne.',
     url: PAGE,
@@ -1406,6 +1416,7 @@ async function completeCup(tournament: TournamentRow, winner: string | null, fin
     return team ? `[${team.tag}] ${team.name}` : '—';
   };
   await pushToUsers(participants.flatMap((p) => p.match_roster ?? p.frozen_roster), {
+    category: 'coupes',
     title: `🏆 ${tournament.name} : victoire de ${label(winner)}`,
     body: 'Le tableau final et les trophées sont en ligne.',
     url: PAGE,
@@ -1456,6 +1467,7 @@ async function rewardAnubis(tournament: TournamentRow, winner: string | null, fi
     if (error) console.error('[anubis] médailles impossibles', error.message);
   }
   await pushToUsers(participants.flatMap((p) => p.frozen_roster), {
+    category: 'coupes',
     title: `𓂀 ${tournament.name} : victoire de ${label(winner)}`,
     body: 'Le tableau final et les médailles sont en ligne.',
     url: `${PAGE}?coupe=anubis`,

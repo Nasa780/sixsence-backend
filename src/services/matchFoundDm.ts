@@ -1,3 +1,4 @@
+import { recipientsFor } from './notificationPrefs.js';
 import { config } from '../config.js';
 import type { CodMatch, ReadyCheckFailure } from '../events.js';
 import { supabase } from '../supabase.js';
@@ -160,7 +161,7 @@ function startCountdown(matchId: string): void {
 
 /** ① Match trouvé : un message privé par joueur, identifiants gardés pour les mises à jour. */
 export async function sendMatchFound(match: CodMatch): Promise<void> {
-  const ids = await discordIds([...match.team_a, ...match.team_b]);
+  const ids = await discordIds(await recipientsFor([...match.team_a, ...match.team_b], 'match_trouve', 'dm'));
   const sent: Record<string, string> = {};
   for (const [userId, discordId] of ids) {
     try {

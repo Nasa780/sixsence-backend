@@ -102,6 +102,7 @@ async function announceCards(userId: string, cards: CardDef[]): Promise<void> {
   if (cards.length === 0) return;
   const url = '/cod/profile?cartes=1';
   await pushToUsers([userId], {
+    category: 'cartes',
     title: cards.length === 1 ? '🎴 Nouvelle carte de visite' : `🎴 ${cards.length} nouvelles cartes de visite`,
     body:
       cards.length === 1
@@ -114,7 +115,7 @@ async function announceCards(userId: string, cards: CardDef[]): Promise<void> {
   if (rare.length > 0) {
     await dm(
       [userId],
-      `${rare.map((card) => `🎴 **Carte ${RARITY_LABEL[card.rarity]} débloquée : ${card.name}** — ${card.condition}.`).join('\n')}\nÉquipe-la depuis ton profil : ${config.siteUrl}${url}`,
+      `${rare.map((card) => `🎴 **Carte ${RARITY_LABEL[card.rarity]} débloquée : ${card.name}** — ${card.condition}.`).join('\n')}\nÉquipe-la depuis ton profil : ${config.siteUrl}${url}`, 'cartes'
     );
   }
 }

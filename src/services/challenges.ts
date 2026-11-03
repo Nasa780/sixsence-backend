@@ -58,8 +58,8 @@ async function myLeaderTeam(userId: string): Promise<string> {
 }
 
 async function notify(userIds: string[], title: string, body: string) {
-  await pushToUsers(userIds, { title, body, url: PAGE, tag: 'defi' });
-  await dm(userIds, `**${title}**\n${body}\n${config.siteUrl}${PAGE}`).catch(() => {});
+  await pushToUsers(userIds, { category: 'equipe', title, body, url: PAGE, tag: 'defi' });
+  await dm(userIds, `**${title}**\n${body}\n${config.siteUrl}${PAGE}`, 'equipe').catch(() => {});
 }
 
 /** Un défi officiel par équipe sur 7 jours glissants (en attente, accepté ou joué) ; les amicaux sont illimités. */

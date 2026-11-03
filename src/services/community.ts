@@ -369,6 +369,7 @@ async function pushToGtaPlayers(event: EventInfo): Promise<void> {
     const { data } = await supabase.from('gta_registrations').select('user_id').limit(5000);
     const userIds = [...new Set(((data ?? []) as { user_id: string }[]).map((row) => row.user_id))];
     await pushToUsers(userIds, {
+      category: 'gta',
       title: `🌴 Nouvel événement GTA 6`,
       body: `${event.title} — ${eventDate(event.starts_at)}. Inscris-toi !`,
       url: `/gta6/events/${event.id}`,
@@ -413,6 +414,7 @@ export async function sendEventReminders(): Promise<void> {
     const userIds = ((registrations ?? []) as { user_id: string }[]).map((row) => row.user_id);
     const minutes = Math.max(1, Math.round((new Date(event.starts_at).getTime() - now) / 60_000));
     await pushToUsers(userIds, {
+      category: 'gta',
       title: `⏰ ${event.title}`,
       body: `Commence dans ${minutes} min. Tu es inscrit.`,
       url: `/gta6/events/${event.id}`,
@@ -421,7 +423,7 @@ export async function sendEventReminders(): Promise<void> {
     if (!discordEnabled) continue;
     await dm(
       userIds,
-      `⏰ **${event.title}** commence dans ${minutes} min (${eventDate(event.starts_at)})${event.location ? ` · 📍 ${event.location}` : ''}.\nTu es inscrit : ${site}/gta6/events/${event.id}`,
+      `⏰ **${event.title}** commence dans ${minutes} min (${eventDate(event.starts_at)})${event.location ? ` · 📍 ${event.location}` : ''}.\nTu es inscrit : ${site}/gta6/events/${event.id}`, 'gta'
     );
     await announce(gtaChannelId, `⏰ **${event.title}** commence dans ${minutes} min ! ${userIds.length} inscrit(s). ${site}/gta6/events/${event.id}`, 'gta');
   }

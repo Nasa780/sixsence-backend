@@ -1,3 +1,4 @@
+import { type NotificationCategory, recipientsFor } from './notificationPrefs.js';
 import webpush from 'web-push';
 import { config } from '../config.js';
 import { HttpError, unwrap } from '../errors.js';
@@ -108,14 +109,19 @@ export interface PushMessage {
   urgent?: boolean;
   /** Match trouvé : bouton « Accepter » de la notification (adresse de l'API et jeton signé de ce joueur). */
   ready?: { url: string; token: string };
+  /** Catégorie que le joueur peut couper (notificationPrefs) ; sans catégorie, toujours envoyée. Pas transmise à l'appareil. */
+  category?: NotificationCategory;
 }
 
 /** Envoie une notification à tous les appareils des joueurs donnés (au mieux, sans erreur). */
 export async function pushToUsers(userIds: string[], message: PushMessage): Promise<void> {
   if (userIds.length === 0 || !(await pushPublicKey())) return;
-  const { data } = await supabase.from('push_subscriptions').select('id, endpoint, p256dh, auth').in('user_id', userIds);
+  const { category, ...notification } = message;
+  const recipients = await recipientsFor(userIds, category, 'push');
+  if (recipients.length === 0) return;
+  const { data } = await supabase.from('push_subscriptions').select('id, endpoint, p256dh, auth').in('user_id', recipients);
   const subscriptions = (data ?? []) as { id: number; endpoint: string; p256dh: string; auth: string }[];
-  const payload = JSON.stringify(message);
+  const payload = JSON.stringify(notification);
 
   await Promise.all(
     subscriptions.map(async (subscription) => {
