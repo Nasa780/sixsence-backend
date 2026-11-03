@@ -1,3 +1,4 @@
+import { clipOfWeek, recentClipsForFeed } from './clips.js';
 import { supabase } from '../supabase.js';
 import { anubisCapacity } from './tournamentPolicy.js';
 
@@ -46,13 +47,15 @@ const person = (users: Map<string, User>, id: string) => {
 export async function highlights() {
   if (highlightsCache && Date.now() - highlightsCache.at < TTL) return highlightsCache.data;
   const since = new Date(Date.now() - WEEK).toISOString();
-  const [week, recentCod, recentTeam, newTeams, cups, joined] = await Promise.all([
+  const [week, recentCod, recentTeam, newTeams, cups, joined, clips, topClip] = await Promise.all([
     supabase.from('cod_matches').select('id, team_a, team_b, winner, map, format, team_size, points_changes, completed_at').eq('status', 'completed').gte('completed_at', since).limit(2000),
     supabase.from('cod_matches').select('id, team_a, team_b, winner, map, format, team_size, points_changes, completed_at').eq('status', 'completed').order('completed_at', { ascending: false }).limit(12),
     supabase.from('team_matches').select('id, team_a, team_b, winner, scores, tournament_id, completed_at').eq('status', 'completed').order('completed_at', { ascending: false }).limit(10),
     supabase.from('teams').select('id, name, tag, color, logo_url, created_at').is('cup_tournament', null).order('created_at', { ascending: false }).limit(6),
     supabase.from('tournaments').select('id, kind, name, winner_team, completed_at').eq('status', 'completed').neq('kind', 'playin').order('completed_at', { ascending: false }).limit(6),
     supabase.from('users').select('id, username, avatar_url, created_at').order('created_at', { ascending: false }).limit(6),
+    recentClipsForFeed(6).catch(() => []),
+    clipOfWeek().catch(() => null),
   ]);
 
   // Joueur de la semaine.
@@ -129,6 +132,7 @@ export async function highlights() {
       team: { id: t.id, name: t.name, tag: t.tag, color: t.color, logoUrl: t.logo_url },
     })),
     ...((joined.data ?? []) as (User & { created_at: string })[]).map((u) => ({ id: `u-${u.id}`, type: 'arrivee', at: u.created_at, href: `/cod/profile/${u.id}`, text: `${u.username} rejoint SixSence`, avatar: u.avatar_url })),
+    ...clips.map((clip) => ({ id: `k-${clip.id}`, type: 'clip', at: clip.createdAt, href: `/clips?c=${clip.id}`, text: `${clip.author.username} a posté un clip : ${clip.title}`, avatar: clip.author.avatarUrl })),
   ]
     .filter((e) => e.at)
     .sort((a, b) => b.at.localeCompare(a.at))
@@ -151,6 +155,8 @@ export async function highlights() {
           teamB: clash.m.team_b.map((id) => ({ ...person(users, id), points: level.get(id) ?? 0 })),
         }
       : null,
+    // Clip le plus voté des 7 derniers jours (Renommée, accueil).
+    clipOfWeek: topClip,
     feed,
   };
   highlightsCache = { at: Date.now(), data };
