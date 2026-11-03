@@ -289,7 +289,7 @@ export async function joinByInviteLink(userId: string, code: unknown) {
   unwrap(await supabase.rpc('team_add_member', { p_team: team.id, p_user: userId }));
   addTeamRole(team.id, userId);
   const joiner = unwrap(await supabase.from('users').select('username').eq('id', userId).single()) as { username: string };
-  await pushToUsers(await leadersOf(team.id), { title: `✅ ${joiner.username} a rejoint ${team.name}`, body: 'Arrivée par le lien d’invitation.', url: '/cod/equipe', tag: `equipe-${team.id}` });
+  await pushToUsers(await leadersOf(team.id), { category: 'equipe', title: `✅ ${joiner.username} a rejoint ${team.name}`, body: 'Arrivée par le lien d’invitation.', url: '/cod/equipe', tag: `equipe-${team.id}` });
   return { ok: true, teamId: team.id };
 }
 
@@ -484,8 +484,8 @@ export async function invitePlayer(userId: string, teamId: string, body: unknown
   if ((await pendingCount(teamId)) >= TEAM_LIMITS.maxPendingInvites) throw new HttpError(409, 'TOO_MANY_INVITES', 'Trop d’invitations en attente : annule-en avant d’en envoyer d’autres.');
 
   unwrap(await supabase.from('team_invites').insert({ team_id: teamId, user_id: targetId, kind: 'invite', created_by: userId }));
-  await pushToUsers([targetId], { title: `🛡️ Invitation de ${team.name}`, body: `[${team.tag}] t’invite à rejoindre son équipe.`, url: '/cod/equipe', tag: `equipe-${teamId}` });
-  if (discordEnabled && config.teams.discord) await dm([targetId], `**[${team.tag}] ${team.name}** t’invite à rejoindre son équipe sur SixSence : ${config.siteUrl}/cod/equipe`);
+  await pushToUsers([targetId], { category: 'equipe', title: `🛡️ Invitation de ${team.name}`, body: `[${team.tag}] t’invite à rejoindre son équipe.`, url: '/cod/equipe', tag: `equipe-${teamId}` });
+  if (discordEnabled && config.teams.discord) await dm([targetId], `**[${team.tag}] ${team.name}** t’invite à rejoindre son équipe sur SixSence : ${config.siteUrl}/cod/equipe`, 'equipe');
   return { ok: true };
 }
 
@@ -504,7 +504,7 @@ export async function requestToJoin(userId: string, teamId: string) {
 
   unwrap(await supabase.from('team_invites').insert({ team_id: teamId, user_id: userId, kind: 'request', created_by: userId }));
   const username = (unwrap(await supabase.from('users').select('username').eq('id', userId).single()) as { username: string }).username;
-  await pushToUsers(await leadersOf(teamId), { title: '🛡️ Nouvelle candidature', body: `${username} veut rejoindre ${team.name}.`, url: '/cod/equipe', tag: `candidature-${teamId}` });
+  await pushToUsers(await leadersOf(teamId), { category: 'equipe', title: '🛡️ Nouvelle candidature', body: `${username} veut rejoindre ${team.name}.`, url: '/cod/equipe', tag: `candidature-${teamId}` });
   return { ok: true };
 }
 
@@ -543,10 +543,10 @@ export async function answerInvite(userId: string, inviteId: unknown, body: unkn
 
   const team = await teamRow(invite.team_id);
   if (invite.kind === 'request') {
-    await pushToUsers([invite.user_id], { title: `✅ Bienvenue dans ${team.name}`, body: 'Ta candidature a été acceptée.', url: teamUrl(team.id), tag: `equipe-${team.id}` });
-    if (discordEnabled && config.teams.discord) await dm([invite.user_id], `✅ Ta candidature chez **[${team.tag}] ${team.name}** a été acceptée : ${config.siteUrl}${teamUrl(team.id)}`);
+    await pushToUsers([invite.user_id], { category: 'equipe', title: `✅ Bienvenue dans ${team.name}`, body: 'Ta candidature a été acceptée.', url: teamUrl(team.id), tag: `equipe-${team.id}` });
+    if (discordEnabled && config.teams.discord) await dm([invite.user_id], `✅ Ta candidature chez **[${team.tag}] ${team.name}** a été acceptée : ${config.siteUrl}${teamUrl(team.id)}`, 'equipe');
   } else {
-    await pushToUsers(await leadersOf(team.id), { title: `✅ ${joiner.username} a rejoint ${team.name}`, body: 'Invitation acceptée.', url: '/cod/equipe', tag: `equipe-${team.id}` });
+    await pushToUsers(await leadersOf(team.id), { category: 'equipe', title: `✅ ${joiner.username} a rejoint ${team.name}`, body: 'Invitation acceptée.', url: '/cod/equipe', tag: `equipe-${team.id}` });
   }
   return { ok: true, teamId: team.id };
 }
@@ -640,7 +640,7 @@ export async function transferCrown(userId: string, teamId: string, body: unknow
   if (!canDo(actor, 'transfer')) forbid('Seul le Leader à la couronne peut la transmettre.');
   unwrap(await supabase.rpc('team_transfer', { p_team: teamId, p_owner: userId, p_target: targetId }));
   const team = await teamRow(teamId);
-  await pushToUsers([targetId], { title: `👑 Tu portes la couronne de ${team.name}`, body: 'Tu gères maintenant l’équipe.', url: '/cod/equipe', tag: `equipe-${teamId}` });
+  await pushToUsers([targetId], { category: 'equipe', title: `👑 Tu portes la couronne de ${team.name}`, body: 'Tu gères maintenant l’équipe.', url: '/cod/equipe', tag: `equipe-${teamId}` });
   return getTeam(teamId);
 }
 

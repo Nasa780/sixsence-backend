@@ -237,6 +237,7 @@ export async function setGameCode(matchId: string, userId: string, body: unknown
   await pushToUsers(
     [...match.team_a, ...match.team_b].filter((id) => id !== userId),
     {
+      category: 'match',
       title: before ? 'Code de la partie modifié' : 'Code de la partie disponible',
       body: "L'hôte a donné le code : rejoins la partie privée.",
       url: `${config.siteUrl}/cod/match/${matchId}`,
@@ -253,6 +254,7 @@ export async function voteCancel(matchId: string, userId: string, vote: boolean)
   announceIfClosed(match);
   if (match.status === 'cancelled') {
     await pushToUsers([...match.team_a, ...match.team_b], {
+      category: 'match',
       title: 'Match annulé',
       body: 'Les joueurs ont voté l’annulation : aucun point perdu.',
       url: `${config.siteUrl}/cod/match/${matchId}`,

@@ -325,6 +325,7 @@ export async function onTeamMatchCreated(match: TeamMatch): Promise<void> {
   const b = teams.get(match.team_b)!;
   const players = [...match.roster_a, ...match.roster_b];
   await pushToUsers(players, {
+    category: 'match_trouve',
     title: `⚔️ Division : [${a.tag}] vs [${b.tag}]`,
     body: `BO3 · ${match.maps.map((map) => map.map).join(' puis ')}. Ouvre la feuille de match.`,
     url: matchUrl(match.id),
@@ -365,8 +366,8 @@ export async function openMatchVoice(match: Pick<TeamMatch, 'id' | 'team_a' | 't
     await supabase.from('team_matches').update({ discord_channels: created }).eq('id', match.id);
     const link = (id: string) => `https://discord.com/channels/${guildId}/${id}`;
     const sheet = `${config.siteUrl}${matchUrl(match.id)}`;
-    await dm(audience.teamA, `**${label} : [${a.tag}] vs [${b.tag}]** — vocal de ton équipe : ${link(created.teamA!)}\nFeuille de match : ${sheet}`);
-    await dm(audience.teamB, `**${label} : [${a.tag}] vs [${b.tag}]** — vocal de ton équipe : ${link(created.teamB!)}\nFeuille de match : ${sheet}`);
+    await dm(audience.teamA, `**${label} : [${a.tag}] vs [${b.tag}]** — vocal de ton équipe : ${link(created.teamA!)}\nFeuille de match : ${sheet}`, 'match_trouve');
+    await dm(audience.teamB, `**${label} : [${a.tag}] vs [${b.tag}]** — vocal de ton équipe : ${link(created.teamB!)}\nFeuille de match : ${sheet}`, 'match_trouve');
   } catch (caught) {
     console.warn('[team-match] salons vocaux impossibles', (caught as Error).message);
     for (const id of Object.values(created)) await discord(`/channels/${id}`, { method: 'DELETE' }).catch(() => {});
@@ -557,6 +558,7 @@ export async function setTeamGameCode(userId: string, matchId: string, body: unk
   await supabase.from('team_matches').update({ activity_at: now }).eq('id', matchId);
   const guestTeam = side === 'A' ? match.team_b : match.team_a;
   await pushToUsers([...(side === 'A' ? match.roster_b : match.roster_a), ...(await leadersOf(guestTeam))], {
+    category: 'match',
     title: before ? 'Code de la partie modifié' : 'Code de la partie disponible',
     body: 'L’équipe hôte a donné le code : rejoins la partie privée.',
     url: matchUrl(matchId),
@@ -614,6 +616,7 @@ export async function claimTeamForfeit(userId: string, matchId: string, body: un
   if (!updated) throw new HttpError(409, 'MATCH_CHANGED', 'Le match vient de changer : recharge la page.');
   const opponentTeam = side === 'A' ? match.team_b : match.team_a;
   await pushToUsers([...(side === 'A' ? match.roster_b : match.roster_a), ...(await leadersOf(opponentTeam))], {
+    category: 'match',
     title: 'Forfait déclaré contre ton équipe',
     body: `Valide ou conteste sous ${FORFEIT_ANSWER_MINUTES} min, sinon un arbitre tranchera.`,
     url: matchUrl(matchId),
@@ -755,6 +758,7 @@ export async function reportTeamScores(userId: string, matchId: string, body: un
   const teams = await teamsById([match.team_a, match.team_b]);
   const reporter = teams.get(side === 'A' ? match.team_a : match.team_b)!;
   await pushToUsers([...(side === 'A' ? match.roster_b : match.roster_a), ...(await leadersOf(side === 'A' ? match.team_b : match.team_a))], {
+    category: 'match',
     title: `Scores déclarés par [${reporter.tag}]`,
     body: `Confirme ou conteste sous ${config.cod.confirmMinutes} min, sinon ils seront validés.`,
     url: matchUrl(matchId),
@@ -829,7 +833,7 @@ export async function pickTeamMap3(userId: string, matchId: string, body: unknow
       .maybeSingle(),
   );
   if (!updated) throw new HttpError(409, 'MAP3_CLOSED', 'La map décisive vient d’être choisie : recharge la page.');
-  await pushToUsers([...match.roster_a, ...match.roster_b], { title: `Map décisive : ${map}`, body: 'Bonne chance pour la manche décisive.', url: matchUrl(matchId), tag: `team-match-${matchId}` });
+  await pushToUsers([...match.roster_a, ...match.roster_b], { category: 'match', title: `Map décisive : ${map}`, body: 'Bonne chance pour la manche décisive.', url: matchUrl(matchId), tag: `team-match-${matchId}` });
   return getTeamMatch(matchId, userId);
 }
 
@@ -920,6 +924,7 @@ export async function correctTeamMatch(staffId: string, matchId: string, body: u
   );
   if (winner) await applyTournamentCorrection(match, winner);
   await pushToUsers([...match.roster_a, ...match.roster_b], {
+    category: 'match',
     title: match.tournament_id ? 'Résultat du match de tournoi corrigé' : 'Résultat du match de Division corrigé',
     body: match.tournament_id
       ? 'L’équipe SixSence a corrigé les scores du match : le tableau est à jour.'
@@ -1087,6 +1092,7 @@ async function sweepTeamDiscord(): Promise<void> {
     await supabase.from('team_matches').update({ discord_done: true }).eq('id', match.id);
     if (match.status === 'completed' && !match.corrected_at) {
       await pushToUsers([...match.roster_a, ...match.roster_b], {
+        category: 'match',
         title: match.tournament_id ? 'Match de coupe terminé' : 'Match de Division terminé',
         body: `Victoire de l’équipe ${match.winner === 'A' ? '1' : '2'} · ${match.scores.map(([x, y]) => `${x}-${y}`).join(' · ')}`,
         url: matchUrl(match.id),

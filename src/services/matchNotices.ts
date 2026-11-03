@@ -38,8 +38,8 @@ export async function noticeResultReported(match: CodMatch): Promise<void> {
   const minutes = config.cod.confirmMinutes;
   const text = `${name} déclare la victoire de l'${teamLabel(match.reported_winner)}. Confirme ou conteste dans les ${minutes} min, sinon le résultat sera validé.`;
   await Promise.all([
-    pushToUsers(opponents, { title: 'Résultat déclaré', body: text, url: `/cod/match/${match.id}`, tag: `match-${match.id}`, urgent: true }),
-    dm(opponents, `**Résultat déclaré** — ${title(match)}\n${text}\n${matchUrl(match)}`),
+    pushToUsers(opponents, { category: 'match', title: 'Résultat déclaré', body: text, url: `/cod/match/${match.id}`, tag: `match-${match.id}`, urgent: true }),
+    dm(opponents, `**Résultat déclaré** — ${title(match)}\n${text}\n${matchUrl(match)}`, 'match'),
   ]);
 }
 
@@ -54,6 +54,7 @@ export async function noticeResultDisputed(match: CodMatch, contesterId: string)
         `${matchUrl(match)} · ${config.siteUrl}/admin?onglet=disputes`,
     ),
     pushToUsers(reporters, {
+      category: 'match',
       title: 'Résultat contesté',
       body: `${name} conteste le résultat. Un arbitre SixSence va trancher : aucun point ne bouge d'ici là.`,
       url: `/cod/match/${match.id}`,
@@ -67,14 +68,14 @@ export async function noticeMatchResolved(match: CodMatch): Promise<void> {
   if (match.status === 'cancelled') {
     const text = "Le match a été annulé par l'équipe SixSence : aucun point ne bouge.";
     await Promise.all([
-      pushToUsers(players(match), { title: 'Match annulé', body: text, url: `/cod/match/${match.id}`, tag: `match-${match.id}` }),
-      dm(players(match), `**Décision de l'équipe SixSence** — ${title(match)}\n${text}\n${matchUrl(match)}`),
+      pushToUsers(players(match), { category: 'match', title: 'Match annulé', body: text, url: `/cod/match/${match.id}`, tag: `match-${match.id}` }),
+      dm(players(match), `**Décision de l'équipe SixSence** — ${title(match)}\n${text}\n${matchUrl(match)}`, 'match'),
     ]);
     return;
   }
   if (match.status !== 'completed' || !match.winner) return;
   // Les points arrivent juste après par la notification de fin de match : ici, message Discord seulement.
-  await dm(players(match), `**Décision de l'équipe SixSence** — ${title(match)}\nVictoire attribuée à l'${teamLabel(match.winner)}.\n${matchUrl(match)}`);
+  await dm(players(match), `**Décision de l'équipe SixSence** — ${title(match)}\nVictoire attribuée à l'${teamLabel(match.winner)}.\n${matchUrl(match)}`, 'match');
 }
 
 /** Match non accepté à temps : le joueur absent sait ce que ça lui coûte. */
@@ -86,8 +87,8 @@ export async function noticeMatchMissed(userId: string, bannedUntil: string | nu
       : `Tu n'as pas accepté le match : il est annulé et tu es exclu de la file jusqu'à ${hour(bannedUntil)}.`
     : "Tu n'as pas accepté le match : il est annulé. Avertissement : au prochain oubli dans les 24 h, tu seras exclu 15 min.";
   await Promise.all([
-    pushToUsers([userId], { title: 'Match annulé', body: text, url: '/cod/ranked', tag: 'file' }),
-    dm([userId], `**Match annulé** — ${text}\nRèglement : ${config.siteUrl}/reglement`),
+    pushToUsers([userId], { category: 'match', title: 'Match annulé', body: text, url: '/cod/ranked', tag: 'file' }),
+    dm([userId], `**Match annulé** — ${text}\nRèglement : ${config.siteUrl}/reglement`, 'match'),
   ]);
 }
 
@@ -96,8 +97,8 @@ export async function noticeMatchAbandoned(match: CodMatch): Promise<void> {
   const hours = Math.round(config.cod.cancelMinutes / 60);
   const text = `Aucun résultat n'a été déclaré dans les ${hours} h : le match est annulé, aucun point ne bouge.`;
   await Promise.all([
-    pushToUsers(players(match), { title: 'Match annulé', body: text, url: `/cod/match/${match.id}`, tag: `match-${match.id}` }),
-    dm(players(match), `**Match annulé** — ${title(match)}\n${text}\n${matchUrl(match)}`),
+    pushToUsers(players(match), { category: 'match', title: 'Match annulé', body: text, url: `/cod/match/${match.id}`, tag: `match-${match.id}` }),
+    dm(players(match), `**Match annulé** — ${title(match)}\n${text}\n${matchUrl(match)}`, 'match'),
   ]);
 }
 
@@ -116,9 +117,9 @@ export async function noticeMatchCorrected(match: CodMatch, staffId: string): Pr
   const motif = reason ? `\nMotif : ${reason}` : '';
   await Promise.all([
     match.correction_action === 'cancel'
-      ? pushToUsers(players(match), { title: 'Résultat corrigé', body: `${title(match)} · match annulé, points rendus`, url: `/cod/match/${match.id}`, tag: `match-${match.id}` })
+      ? pushToUsers(players(match), { category: 'match', title: 'Résultat corrigé', body: `${title(match)} · match annulé, points rendus`, url: `/cod/match/${match.id}`, tag: `match-${match.id}` })
       : Promise.resolve(),
-    dm(players(match), `🛡️ **Résultat corrigé par l'équipe SixSence** — ${title(match)}\n${decision}${motif}\n${matchUrl(match)}`),
+    dm(players(match), `🛡️ **Résultat corrigé par l'équipe SixSence** — ${title(match)}\n${decision}${motif}\n${matchUrl(match)}`, 'match'),
     notifyStaff(`🛠️ **Match corrigé** par ${staff} — ${title(match)}\n${decision}${motif}\n${matchUrl(match)}`),
   ]);
 }
@@ -134,6 +135,7 @@ export async function noticeMatchFinished(match: CodMatch): Promise<void> {
       const change = match.points_changes?.[userId] ?? 0;
       const total = totals.get(userId);
       return pushToUsers([userId], {
+        category: 'match',
         title: winners.has(userId) ? '🏆 Victoire' : 'Défaite',
         body: `${title(match)} · ${change >= 0 ? '+' : '−'}${Math.abs(change)} pts${total !== undefined ? ` · ${total.toLocaleString('fr-FR')} pts au total` : ''}`,
         url: `/cod/match/${match.id}`,

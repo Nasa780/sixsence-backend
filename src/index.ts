@@ -62,6 +62,7 @@ const hub = new QueueHub({
     const removed = await leaveQueue(userId, 'Un membre du groupe a quitté le site : recherche annulée.');
     if (removed.length === 0) return;
     void pushToUsers([userId], {
+      category: 'file',
       title: 'Recherche arrêtée',
       body: `Tu n'es plus sur SixSence depuis ${config.cod.mobileGraceMinutes} min : ta recherche est arrêtée. Touche ici pour la relancer.`,
       url: '/cod/ranked',
@@ -70,6 +71,7 @@ const hub = new QueueHub({
     void pushToUsers(
       removed.filter((member) => member !== userId),
       {
+        category: 'file',
         title: 'Recherche du groupe arrêtée',
         body: "Un membre de ton groupe n'est plus sur SixSence : votre recherche est arrêtée. Touche ici pour la relancer.",
         url: '/cod/ranked',
@@ -111,6 +113,7 @@ bus.on('queue:user', async (userId) => {
 // Durée maximale de recherche : « Toujours là ? » puis arrêt, avec notification.
 bus.on('queue:warned', (userIds) => {
   void pushToUsers(userIds, {
+    category: 'file',
     title: 'Toujours là ?',
     body: `Aucun match pour l'instant : ta recherche s'arrête dans ${config.cod.queueWarnMinutes} min. Touche ici pour rester en file.`,
     url: '/cod/ranked',
@@ -120,6 +123,7 @@ bus.on('queue:warned', (userIds) => {
 });
 bus.on('queue:expired', (userIds) => {
   void pushToUsers(userIds, {
+    category: 'file',
     title: 'Recherche arrêtée',
     body: `Aucun match trouvé en ${config.cod.queueMaxMinutes} min. Touche ici pour relancer une recherche.`,
     url: '/cod/ranked',
@@ -153,6 +157,7 @@ bus.on('match:found', async (match) => {
   // (jeton signé propre à chaque joueur : la notification n'a pas sa session).
   for (const userId of [...match.team_a, ...match.team_b]) {
     void pushToUsers([userId], {
+      category: 'match_trouve',
       title: '⚡ Match trouvé !',
       body: config.cod.readyRequired ? `${match.format ?? ''} · ${match.map} — accepte dans la minute.` : `${match.format ?? ''} · ${match.map} — lancement dans 1 min.`,
       url: `/cod/match/${match.id}`,

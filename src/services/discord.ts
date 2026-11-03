@@ -1,3 +1,4 @@
+import { type NotificationCategory, recipientsFor } from './notificationPrefs.js';
 import { config } from '../config.js';
 import { bus, type CodMatch } from '../events.js';
 import { supabase } from '../supabase.js';
@@ -88,9 +89,12 @@ async function usernames(userIds: string[]): Promise<Map<string, string>> {
   return new Map(((data ?? []) as { id: string; username: string }[]).map((row) => [row.id, row.username]));
 }
 
-/** Envoie un message privé à chaque joueur ; ignore ceux qui refusent les DM. */
-export async function dm(userIds: string[], content: string): Promise<void> {
-  const ids = await discordIds(userIds);
+/**
+ * Envoie un message privé à chaque joueur ; ignore ceux qui refusent les DM. `category` : catégorie que le joueur
+ * peut couper (notificationPrefs) ; sans catégorie, toujours envoyé.
+ */
+export async function dm(userIds: string[], content: string, category?: NotificationCategory): Promise<void> {
+  const ids = await discordIds(await recipientsFor(userIds, category, 'dm'));
   for (const discordId of ids.values()) {
     try {
       const channel = (await discord('/users/@me/channels', { method: 'POST', body: { recipient_id: discordId } })) as { id: string };
@@ -159,8 +163,8 @@ export async function onMatchStart(match: CodMatch): Promise<void> {
     const link = (channelId: string) => `https://discord.com/channels/${guildId}/${channelId}`;
     // Le message « Match trouvé » passe à « C'est parti » avec le bouton du vocal ; message privé classique à défaut.
     const missed = new Set(await updateStarted(match, { teamA: teamA.id, teamB: teamB.id }));
-    await dm(match.team_a.filter((id) => missed.has(id)), `**Le match démarre** — rejoins le vocal de l'Équipe 1 : ${link(teamA.id)}\nSalon de match : ${matchUrl(match)}`);
-    await dm(match.team_b.filter((id) => missed.has(id)), `**Le match démarre** — rejoins le vocal de l'Équipe 2 : ${link(teamB.id)}\nSalon de match : ${matchUrl(match)}`);
+    await dm(match.team_a.filter((id) => missed.has(id)), `**Le match démarre** — rejoins le vocal de l'Équipe 1 : ${link(teamA.id)}\nSalon de match : ${matchUrl(match)}`, 'match');
+    await dm(match.team_b.filter((id) => missed.has(id)), `**Le match démarre** — rejoins le vocal de l'Équipe 2 : ${link(teamB.id)}\nSalon de match : ${matchUrl(match)}`, 'match');
   } catch (error) {
     console.warn('[discord] création des salons vocaux impossible', (error as Error).message);
     for (const channelId of created) await discord(`/channels/${channelId}`, { method: 'DELETE' }).catch(() => {});
