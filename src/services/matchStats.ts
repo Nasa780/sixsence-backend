@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { HttpError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { dm, notifyStaff } from './discord.js';
+import { roundsToWin } from './teamMatchPolicy.js';
 import { STATS_WINDOW_MS, captureReminderWindow, coversMatch, parseRows, summarizeStats, type MatchKind, type SeasonStatLine } from './matchStatsPolicy.js';
 
 /**
@@ -26,6 +27,10 @@ interface MatchInfo {
   sides: [string[], string[]];
   maps: number;
   mapNames: string[];
+  /** Manches à gagner sur une map : 8 en BO1, 6 en BO3 et BO5. */
+  roundsToWin: number;
+  /** Score de chaque map, déjà connu en Division une fois le match terminé. */
+  mapScores: [number, number][];
 }
 
 async function matchInfo(kind: MatchKind, id: string): Promise<MatchInfo> {
@@ -33,13 +38,13 @@ async function matchInfo(kind: MatchKind, id: string): Promise<MatchInfo> {
     const { data } = await supabase.from('cod_matches').select('status, completed_at, team_a, team_b, map').eq('id', id).maybeSingle();
     const match = data as { status: string; completed_at: string | null; team_a: string[]; team_b: string[]; map: string | null } | null;
     if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
-    return { status: match.status, completedAt: match.completed_at, sides: [match.team_a, match.team_b], maps: 1, mapNames: [match.map ?? ''] };
+    return { status: match.status, completedAt: match.completed_at, sides: [match.team_a, match.team_b], maps: 1, mapNames: [match.map ?? ''], roundsToWin: roundsToWin(1), mapScores: [] };
   }
   const { data } = await supabase.from('team_matches').select('status, completed_at, roster_a, roster_b, scores, maps, best_of').eq('id', id).maybeSingle();
-  const match = data as { status: string; completed_at: string | null; roster_a: string[]; roster_b: string[]; scores: unknown[] | null; maps: { map: string }[] | null; best_of: number | null } | null;
+  const match = data as { status: string; completed_at: string | null; roster_a: string[]; roster_b: string[]; scores: [number, number][] | null; maps: { map: string }[] | null; best_of: number | null } | null;
   if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
   const played = match.status === 'completed' ? (match.scores?.length ?? 1) : (match.best_of ?? 3);
-  return { status: match.status, completedAt: match.completed_at, sides: [match.roster_a, match.roster_b], maps: Math.max(1, played), mapNames: (match.maps ?? []).map((item) => item.map) };
+  return { status: match.status, completedAt: match.completed_at, sides: [match.roster_a, match.roster_b], maps: Math.max(1, played), mapNames: (match.maps ?? []).map((item) => item.map), roundsToWin: roundsToWin(match.best_of ?? 3), mapScores: match.scores ?? [] };
 }
 
 /** Joueurs du match avec l'identifiant Activision (le site s'en sert pour reconnaître les lignes de la capture). */
@@ -72,6 +77,8 @@ export async function matchStats(kind: MatchKind, id: string, viewerId: string |
     completed,
     maps: info.maps,
     mapNames: info.mapNames,
+    roundsToWin: info.roundsToWin,
+    mapScores: info.mapScores,
     players,
     // Les stats s'affichent à la fin du match ; avant, on sait seulement quelles maps ont leur capture.
     rows: completed ? rows.map((row) => ({ mapNo: row.map_no, userId: row.user_id, score: row.score, kills: row.kills, plants: row.plants, defuses: row.defuses })) : [],
