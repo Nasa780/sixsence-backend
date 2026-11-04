@@ -50,7 +50,7 @@ async function teamCard(teamId: string) {
   return data as { id: string; name: string; tag: string; color: string; logo_url: string | null; points: number; disbanded_at: string | null; cup_tournament: string | null } | null;
 }
 
-async function myLeaderTeam(userId: string): Promise<string> {
+export async function myLeaderTeam(userId: string): Promise<string> {
   const member = await membershipOf(userId);
   if (!member) throw new HttpError(409, 'NOT_IN_TEAM', 'Tu ne fais partie d’aucune équipe.');
   if (!(member.role === 'leader' || member.isOwner)) throw new HttpError(403, 'TEAM_FORBIDDEN', 'Seul un Leader peut gérer les défis.');
