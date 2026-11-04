@@ -4,6 +4,8 @@ import { config } from '../config.js';
 import { ROLES, rolesFor, type Role } from '../roles.js';
 import { HttpError, asyncHandler, unwrap, uuidParam } from '../errors.js';
 import { STAFF_BADGES, listCorrections, overview, parseBadges, parseEventPatch, parseFounder, parsePartner, recentMatches, recentTeamMatches, searchPlayers } from '../services/admin.js';
+import { activityReport } from '../services/activity.js';
+import { parsePeriod } from '../services/activityPolicy.js';
 import { createEvent, parseNewEvent } from '../services/gtaEvents.js';
 import { listDisputes, resolveMatch } from '../services/matches.js';
 import { closeCase, listForAdmin } from '../services/moderation.js';
@@ -49,6 +51,7 @@ import { activateLeagues, prepareLeagueMoves } from '../services/leagues.js';
  *   admin   : tout
  *
  *   GET    /admin/overview                 chiffres du tableau de bord
+ *   GET    /admin/activity?days=7|30       activité du site, jour par jour et comparée à la période précédente (admin)
  *   GET    /admin/disputes                 matchs contestés
  *   GET    /admin/team-disputes            matchs d'équipe contestés (arbitrage sur la feuille de match)
  *   GET    /admin/matches?q=               matchs récents classés et de Division (recherche par pseudo, nom ou tag d'équipe)
@@ -114,6 +117,7 @@ export function adminRouter(): Router {
   }));
 
   // --- Matchs ----------------------------------------------------------------
+  router.get('/activity', asyncHandler(async (req, res) => void res.json(await activityReport(parsePeriod(req.query.days)))));
   router.get('/disputes', asyncHandler(async (_req, res) => {
     res.json({ matches: await listDisputes() });
   }));
