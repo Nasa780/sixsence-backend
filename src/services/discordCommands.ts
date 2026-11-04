@@ -3,6 +3,8 @@ import { config } from '../config.js';
 import { supabase } from '../supabase.js';
 import { RANK_ROLES } from './community.js';
 import { discord, discordEnabled } from './discord.js';
+import { defiCommand, defiSelected, rappelCommand } from './discordActions.js';
+import { parseDefiAction } from './discordActionPolicy.js';
 import { getQueueSummaries } from './queue.js';
 import { teamStatus } from './teamMatches.js';
 import { handleTicketInteraction, type TicketInteraction } from './tickets.js';
@@ -12,7 +14,7 @@ import { acceptReady, userIdFromDiscord } from './readyAccept.js';
  * Commandes Discord du bot (« /profil », « /classement », « /equipe », « /trophees », « /file », « /match »,
  * « /site ») : Discord appelle POST /discord/interactions (adresse à déclarer dans le portail développeur,
  * champ « Interactions Endpoint URL ») ; chaque requête est signée (ed25519, DISCORD_PUBLIC_KEY).
- * Lecture seule : rien ne se modifie depuis Discord (sauf les tickets, boutons et fenêtres traités par services/tickets.ts). Réponse différée (Discord exige une réponse en 3 s),
+ * Lecture seule, sauf les tickets (services/tickets.ts), /defi et /rappel (services/discordActions.ts). Réponse différée (Discord exige une réponse en 3 s),
  * puis message complété. Commandes enregistrées sur le serveur DISCORD_GUILD_ID au démarrage.
  */
 
@@ -61,6 +63,39 @@ const COMMANDS = [
   { name: 'file', description: 'Joueurs et équipes en recherche, matchs en cours' },
   { name: 'match', description: 'Ton match en cours (visible de toi seul)' },
   { name: 'site', description: 'Liens utiles de SixSence' },
+  {
+    name: 'defi',
+    description: 'Défier une équipe (Leaders)',
+    options: [
+      { type: 3, name: 'tag', description: 'Tag de l’équipe à défier (ex. SIX)', required: true },
+      {
+        type: 3,
+        name: 'type',
+        description: 'Amical sans points, ou officiel avec les points de Division',
+        required: false,
+        choices: [
+          { name: 'Amical', value: 'amical' },
+          { name: 'Officiel', value: 'officiel' },
+        ],
+      },
+    ],
+  },
+  {
+    name: 'rappel',
+    description: 'Message privé 2 h avant la prochaine coupe (refais la commande pour l’annuler)',
+    options: [
+      {
+        type: 3,
+        name: 'coupe',
+        description: 'Quelle coupe (sans choix : la plus proche)',
+        required: false,
+        choices: [
+          { name: 'Coupe Horus', value: 'horus' },
+          { name: 'Coupe Anubis', value: 'anubis' },
+        ],
+      },
+    ],
+  },
 ];
 
 /** Enregistre les commandes sur le serveur (instantané, contrairement aux commandes globales). */
@@ -112,13 +147,15 @@ export function handleInteraction(interaction: Interaction): { type: number; dat
   if (interaction.type === 1) return { type: 1 };
   // Bouton « Je suis prêt » du message privé « Match trouvé ».
   if (interaction.type === 3 && /^ready:[0-9a-f-]{36}$/.test((interaction.data as { custom_id?: string } | undefined)?.custom_id ?? '')) return readyButton(interaction);
+  // Menu des joueurs de /defi (services/discordActions.ts).
+  if (interaction.type === 3 && parseDefiAction((interaction.data as { custom_id?: string } | undefined)?.custom_id)) return defiMenu(interaction);
   // Boutons et fenêtres des tickets (services/tickets.ts).
   if (interaction.type === 3 || interaction.type === 5) return handleTicketInteraction(interaction as unknown as TicketInteraction) ?? { type: 4, data: { flags: EPHEMERAL, content: 'Action inconnue.' } };
   if (interaction.type !== 2 || !interaction.data) return { type: 4, data: { flags: EPHEMERAL } };
   const name = interaction.data.name;
   const option = (key: string) => interaction.data?.options?.find((o) => o.name === key)?.value?.trim() ?? '';
   const discordId = interaction.member?.user?.id ?? interaction.user?.id ?? '';
-  const ephemeral = name === 'match';
+  const ephemeral = name === 'match' || name === 'defi' || name === 'rappel';
   void (async () => {
     let reply: Reply;
     try {
@@ -134,6 +171,27 @@ export function handleInteraction(interaction: Interaction): { type: number; dat
     }).catch((caught) => console.warn('[discord] réponse impossible', (caught as Error).message));
   })();
   return { type: 5, data: { flags: ephemeral ? EPHEMERAL : 0 } };
+}
+
+/** Joueurs choisis dans le menu de /defi : le défi part, le message du menu est remplacé par le résultat. */
+function defiMenu(interaction: Interaction): { type: number } {
+  const data = interaction.data as { custom_id?: string; values?: string[] } | undefined;
+  const discordId = interaction.member?.user?.id ?? interaction.user?.id ?? '';
+  void (async () => {
+    let content: string;
+    try {
+      content = (await defiSelected(data?.custom_id, data?.values, discordId)) ?? 'Action inconnue.';
+    } catch (caught) {
+      console.warn('[discord] défi impossible', (caught as Error).message);
+      content = 'Oups, impossible d’envoyer le défi pour le moment. Réessaie dans un instant.';
+    }
+    await fetch(`https://discord.com/api/v10/webhooks/${interaction.application_id}/${interaction.token}/messages/@original`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, components: [], allowed_mentions: { parse: [] } }),
+    }).catch((caught) => console.warn('[discord] réponse du défi impossible', (caught as Error).message));
+  })();
+  return { type: 6 };
 }
 
 /**
@@ -183,6 +241,10 @@ async function answer(name: string, option: (key: string) => string, discordId: 
       return queue();
     case 'match':
       return myMatch(discordId);
+    case 'defi':
+      return defiCommand(option('tag'), option('type'), discordId);
+    case 'rappel':
+      return rappelCommand(option('coupe'), discordId);
     default:
       return links();
   }

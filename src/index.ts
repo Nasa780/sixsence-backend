@@ -33,6 +33,7 @@ import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, syncTeamAndBadgeRoles, welcomeNewPlayers } from './services/community.js';
 import { remindSeasonEnd } from './services/announcements.js';
 import { sweepScheduledAnnouncements } from './services/scheduledAnnouncements.js';
+import { sendCupReminders } from './services/discordActions.js';
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
 import { calendarEvents, calendarIcs } from './services/calendar.js';
@@ -391,6 +392,7 @@ const reminderTimer = live
   ? setInterval(() => {
       void sendEventReminders();
       void welcomeNewPlayers();
+      void sendCupReminders().catch((error) => console.warn('[rappels]', (error as Error).message));
     }, 5 * 60_000)
   : undefined;
 // Cartes de visite : attribution rétroactive une seule fois (sans notification), puis
