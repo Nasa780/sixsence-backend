@@ -11,6 +11,9 @@ import { chunkChannels, pickStreams, type HelixStream, type LivePlayer, type Liv
 const STALE_MS = 10 * 60_000; // Twitch injoignable plus longtemps : on n'affiche plus de directs périmés
 let streams: LiveStream[] = [];
 let refreshedAt = 0;
+let lastError: string | null = null;
+let channelCount = 0;
+let seen: { channel: string; game: string }[] = [];
 let token: { value: string; expiresAt: number } | null = null;
 
 export const twitchEnabled = Boolean(config.twitch.clientId && config.twitch.clientSecret);
@@ -67,9 +70,18 @@ export async function sweepTwitch(): Promise<void> {
     for (const chunk of chunkChannels(players.map((player) => player.twitch))) found.push(...(await fetchStreams(chunk)));
     streams = pickStreams(found, players);
     refreshedAt = Date.now();
+    channelCount = players.length;
+    seen = found.map((stream) => ({ channel: stream.user_login, game: stream.game_name ?? '' }));
+    lastError = null;
   } catch (error) {
-    console.warn('[twitch]', (error as Error).message);
+    lastError = (error as Error).message;
+    console.warn('[twitch]', lastError);
   }
+}
+
+/** État du suivi pour GET /health : jamais de clé, seulement ce que Twitch montre déjà publiquement. */
+export function twitchStatus() {
+  return { enabled: twitchEnabled, channels: channelCount, checkedAt: refreshedAt ? new Date(refreshedAt).toISOString() : null, error: lastError, seen, shown: streams.length };
 }
 
 /** Directs du moment, les plus regardés d'abord (vide si Twitch ne répond plus depuis 10 minutes). */
