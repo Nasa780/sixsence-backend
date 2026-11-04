@@ -343,6 +343,8 @@ export function adminRouter(): Router {
     const archived = unwrap(await supabase.rpc('cod_close_season', { p_next_name: typeof nextName === 'string' ? nextName : '' })) as number;
     // Équipes : classement final archivé, points remis à 1 000.
     if (closing) unwrap(await supabase.rpc('team_close_season', { p_season: closing.id }));
+    // Pass de saison : l'XP repart de zéro pour la saison suivante.
+    unwrap(await supabase.rpc('pass_reset_season'));
     if (closing) await applyLeagues(closing.id).catch((caught: Error) => console.error('[ligues] fin de saison impossible', caught.message));
     void announceSeasonClosed(archived, String(nextName).trim());
     // Points remis à zéro : les rangs Discord suivent ; cartes de la saison attribuées.

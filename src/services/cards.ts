@@ -6,7 +6,9 @@ import {
   eligibleKeys,
   findCard,
   longestStreak,
+  missingPassBadges,
   mvpOf,
+  passLevel,
   revokedKeys,
   seasonCards,
   type CardDef,
@@ -37,7 +39,7 @@ interface MatchRow {
 /** Statistiques de toute la carrière d'un joueur (toutes saisons). */
 export async function computeStats(userId: string): Promise<CardStats & { calling_card: string }> {
   const [profile, user, matches, seasons, mvpMonths, registrations] = await Promise.all([
-    supabase.from('cod_profiles').select('peak_points, points, badges, calling_card').eq('user_id', userId).maybeSingle(),
+    supabase.from('cod_profiles').select('peak_points, points, badges, calling_card, xp, pass_xp_base').eq('user_id', userId).maybeSingle(),
     supabase.from('users').select('role').eq('id', userId).maybeSingle(),
     supabase
       .from('cod_matches')
@@ -71,7 +73,7 @@ export async function computeStats(userId: string): Promise<CardStats & { callin
   const gtaEvents = ((registrations.data ?? []) as unknown as { gta_events: { starts_at: string; ends_at: string | null; status: string } | null }[]).filter(
     (row) => row.gta_events && row.gta_events.status !== 'cancelled' && new Date(row.gta_events.ends_at ?? row.gta_events.starts_at).getTime() < now,
   ).length;
-  const p = (profile.data ?? {}) as { peak_points?: number; points?: number; badges?: string[]; calling_card?: string };
+  const p = (profile.data ?? {}) as { peak_points?: number; points?: number; badges?: string[]; calling_card?: string; xp?: number; pass_xp_base?: number };
   const role = (user.data as { role?: string } | null)?.role ?? 'member';
   const { active } = await seasonIds();
 
@@ -91,6 +93,7 @@ export async function computeStats(userId: string): Promise<CardStats & { callin
     badges: p.badges ?? [],
     team: role === 'admin' || role === 'staff' || role === 'arbitre',
     gtaEvents,
+    passLevel: passLevel((p.xp ?? 0) - (p.pass_xp_base ?? 0)),
     calling_card: p.calling_card ?? DEFAULT_CARD,
   };
 }
@@ -163,6 +166,14 @@ export async function syncCards(userId: string, { silent = false } = {}): Promis
       await supabase.from('cod_profiles').update({ calling_card: DEFAULT_CARD }).eq('user_id', userId);
       stats.calling_card = DEFAULT_CARD;
     }
+  }
+
+  // Badges du pass de saison : gagnés une fois, gardés même si une correction retire de l'XP.
+  const passBadges = missingPassBadges(stats);
+  if (passBadges.length > 0) {
+    stats.badges = [...stats.badges, ...passBadges];
+    unwrap(await supabase.from('cod_profiles').update({ badges: stats.badges }).eq('user_id', userId));
+    if (!silent) void pushToUsers([userId], { category: 'cartes', title: '🏅 Nouveau badge du pass de saison', body: 'Il s’affiche sur ton profil.', url: '/cod/pass', tag: 'cartes' }).catch(() => {});
   }
 
   if (!silent && added.length > 0) {

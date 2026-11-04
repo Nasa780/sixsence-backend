@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DEFAULT_CARD, MVP_MONTH_CARD, STATIC_CARDS, canEquip, eligibleKeys, longestStreak, mvpOf, revokedKeys, seasonCards, seasonPeak, type CardStats } from './cards.js';
+import { DEFAULT_CARD, MVP_MONTH_CARD, STATIC_CARDS, canEquip, eligibleKeys, longestStreak, mvpOf, revokedKeys, seasonCards, seasonPeak, type CardStats, missingPassBadges, passLevel } from './cards.js';
 
 const base: CardStats = {
   peak: 0,
@@ -17,13 +17,14 @@ const base: CardStats = {
   badges: [],
   team: false,
   gtaEvents: 0,
+  passLevel: 0,
 };
 const stats = (patch: Partial<CardStats>): CardStats => ({ ...base, ...patch });
 
 describe('cartes de visite', () => {
-  it('catalogue : 26 cartes permanentes (case MVP du mois comprise) + 3 par saison = 29', () => {
-    assert.equal(STATIC_CARDS.length, 26);
-    assert.equal(STATIC_CARDS.length + seasonCards(1).length, 29);
+  it('catalogue : 30 cartes permanentes (case MVP du mois et pass compris) + 3 par saison = 33', () => {
+    assert.equal(STATIC_CARDS.length, 30);
+    assert.equal(STATIC_CARDS.length + seasonCards(1).length, 33);
     assert.ok(STATIC_CARDS.some((card) => card.key === MVP_MONTH_CARD));
     assert.equal(new Set(STATIC_CARDS.map((card) => card.key)).size, STATIC_CARDS.length);
   });
@@ -106,5 +107,24 @@ describe('cartes de visite', () => {
       ]),
       ['b'],
     );
+  });
+});
+
+describe('pass de saison', () => {
+  it('un palier tous les 500 XP, 30 au plus', () => {
+    assert.equal(passLevel(0), 0);
+    assert.equal(passLevel(499), 0);
+    assert.equal(passLevel(500), 1);
+    assert.equal(passLevel(99999), 30);
+    assert.equal(passLevel(-100), 0);
+  });
+  it('donne les cartes et les badges au bon palier, seulement pendant la saison du pass', () => {
+    const s = (passLevel: number, id: number | null = 1) => stats({ passLevel, currentSeason: { id, peak: 0 } });
+    assert.equal(eligibleKeys(s(4)).includes('pass-s1-eclaireur'), false);
+    assert.equal(eligibleKeys(s(5)).includes('pass-s1-eclaireur'), true);
+    assert.equal(eligibleKeys(s(30, 2)).includes('pass-s1-pharaon'), false);
+    assert.deepEqual(missingPassBadges(s(10)), ['s1-pass-bronze']);
+    assert.deepEqual(missingPassBadges({ ...s(30), badges: ['s1-pass-bronze'] }), ['s1-pass-argent', 's1-pass-or']);
+    assert.deepEqual(missingPassBadges(s(30, 2)), []);
   });
 });
