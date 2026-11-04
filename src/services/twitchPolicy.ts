@@ -34,6 +34,12 @@ export interface LiveStream {
   player: { id: string; username: string; avatarUrl: string | null };
 }
 
+/** Miniature renvoyée par Twitch, seulement si elle vient bien de ses serveurs d'images. */
+export function safeThumbnail(url: unknown): string | null {
+  if (typeof url !== 'string') return null;
+  return /^https:\/\/[\w.-]+\.(twitch\.tv|jtvnw\.net)\//i.test(url) ? url : null;
+}
+
 /** Découpe la liste des chaînes en paquets (doublons et casse retirés). */
 export function chunkChannels(channels: string[]): string[][] {
   const unique = [...new Set(channels.map((channel) => channel.toLowerCase()))];
