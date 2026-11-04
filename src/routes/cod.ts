@@ -12,6 +12,7 @@ import { supabase } from '../supabase.js';
 import { addProof, confirmMatch, correctMatch, getMatch, postMessage, reportMatch, resolveMatch, setGameCode, voteCancel } from '../services/matches.js';
 import { acceptReady, acceptWithToken } from '../services/readyAccept.js';
 import { equipCard, markCardsSeen, myCards } from '../services/cards.js';
+import { pendingFor } from '../services/pending.js';
 import { createParty, getPartyOf, joinParty, kickMember, leaveParty, previewInvite, setPartyFormat } from '../services/parties.js';
 import { getQueueState, getQueueSummaries, joinQueue, leaveQueue, stayInQueue } from '../services/queue.js';
 import { getSiteStats } from '../services/stats.js';
@@ -364,6 +365,15 @@ export function codRouter(hub: QueueHub): Router {
           `${config.siteUrl}/cod/match/${matchId} · ${config.siteUrl}/admin?onglet=arbitrages`,
       );
       res.status(201).json({ request });
+    }),
+  );
+
+  // Pastilles du menu du site.
+  router.get(
+    '/pending',
+    requireAuth,
+    asyncHandler(async (_req, res) => {
+      res.json(await pendingFor(currentUser(res).id));
     }),
   );
 
