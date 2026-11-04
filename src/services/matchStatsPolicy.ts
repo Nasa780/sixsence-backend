@@ -56,3 +56,20 @@ export function summarizeStats(rows: SeasonStatLine[]) {
     bestScore: rows.reduce((best, row) => Math.max(best, row.score), 0),
   };
 }
+
+/**
+ * Une capture doit montrer ce match : au moins la moitié de chaque équipe (au moins un joueur de chacune).
+ * Écarte les captures d'un autre match, sauf si les mêmes joueurs ont rejoué ensemble.
+ */
+export function coversMatch(rows: { userId: string }[], sides: [string[], string[]]): boolean {
+  const ids = new Set(rows.map((row) => row.userId));
+  return sides.every((side) => {
+    const found = side.filter((id) => ids.has(id)).length;
+    return found >= 1 && found * 2 >= side.length;
+  });
+}
+
+/** Rappel de capture : matchs terminés depuis 10 minutes à 1 heure (au-delà, on ne relance plus). */
+export function captureReminderWindow(now: number): { from: string; to: string } {
+  return { from: new Date(now - 60 * 60_000).toISOString(), to: new Date(now - 10 * 60_000).toISOString() };
+}
