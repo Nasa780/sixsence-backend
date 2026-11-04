@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { supabase } from '../supabase.js';
 import { highlights } from './highlights.js';
+import { liveStreams } from './twitchLive.js';
 import { CHECKIN_MINUTES, REVEAL_MINUTES, anubisCapacity } from './tournamentPolicy.js';
 
 /**
@@ -166,5 +167,6 @@ export async function liveActivity(memory: { online: number; inQueue: number }) 
     online: memory.online,
     classe: active ? { ...classe, inQueue: memory.inQueue } : null,
     ...rest,
+    streams: liveStreams(),
   };
 }

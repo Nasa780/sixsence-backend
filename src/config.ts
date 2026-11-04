@@ -193,6 +193,12 @@ export const config = {
   },
 
   /** Adresse publique du site (liens envoyés sur Discord). */
+  /** Application Twitch (dev.twitch.tv) : sans ces deux valeurs, pas de « En direct sur Twitch ». */
+  twitch: {
+    clientId: process.env.TWITCH_CLIENT_ID?.trim() || '',
+    clientSecret: process.env.TWITCH_CLIENT_SECRET?.trim() || '',
+  },
+
   siteUrl: (process.env.SITE_URL?.trim() || 'https://www.sixsence.fr').replace(/\/$/, ''),
 } as const;
 
