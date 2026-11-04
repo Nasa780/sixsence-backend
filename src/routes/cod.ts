@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { seasonPass } from '../services/seasonPass.js';
+import { matchStats, parseKind, playerStats, removeStats, reportStats, submitStats } from '../services/matchStats.js';
 import { MATCH_REFEREES, codMatchPlayers, currentUser, optionalAuth, refuseOwnMatch, requireAuth, requireRoles, roleOf, viewerOf } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, asyncHandler, uuidParam } from '../errors.js';
@@ -56,6 +57,12 @@ export function codRouter(hub: QueueHub): Router {
   // Score de fiabilité (public) et contrôle anti-smurf (niveau du compte lu sur une capture).
   router.get('/players/:id/reliability', asyncHandler(async (req, res) => void res.json(await reliability(uuidParam(req, 'id')))));
   // Analyse du profil : places sur le site, ratio 30 j, adversaires, coéquipiers, activité, équipes ; face à face si connecté.
+  // Stats lues sur la capture de fin de match (kind : classe ou division).
+  router.get('/stats/:kind/:id', optionalAuth, asyncHandler(async (req, res) => void res.json(await matchStats(parseKind(req.params.kind), uuidParam(req, 'id'), viewerOf(res)?.id ?? null))));
+  router.post('/stats/:kind/:id', requireAuth, asyncHandler(async (req, res) => void res.json(await submitStats(parseKind(req.params.kind), uuidParam(req, 'id'), currentUser(res).id, req.body))));
+  router.post('/stats/:kind/:id/report', requireAuth, asyncHandler(async (req, res) => void res.json(await reportStats(parseKind(req.params.kind), uuidParam(req, 'id'), currentUser(res).id))));
+  router.delete('/stats/:kind/:id/:mapNo', requireAuth, asyncHandler(async (req, res) => void res.json(await removeStats(parseKind(req.params.kind), uuidParam(req, 'id'), Number(req.params.mapNo), currentUser(res).id))));
+  router.get('/players/:id/stats', asyncHandler(async (req, res) => void res.json(await playerStats(uuidParam(req, 'id')))));
   router.get('/pass', optionalAuth, asyncHandler(async (_req, res) => void res.json(await seasonPass(viewerOf(res)?.id ?? null))));
   router.get('/players/:id/insights', optionalAuth, asyncHandler(async (req, res) => void res.json(await playerInsights(uuidParam(req, 'id'), viewerOf(res)?.id ?? null))));
   router.post('/smurf-check', requireAuth, asyncHandler(async (req, res) => void res.json(await smurfCheck(currentUser(res).id, req.body))));
