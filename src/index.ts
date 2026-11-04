@@ -41,7 +41,7 @@ import { globalSearch } from './services/search.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
 import { noticeMatchAbandoned, noticeMatchFinished, noticeMatchMissed, remindStaff } from './services/matchNotices.js';
 import { syncAllCards, syncCards } from './services/cards.js';
-import { sweepTwitch, twitchEnabled } from './services/twitchLive.js';
+import { sweepTwitch, twitchEnabled, twitchStatus } from './services/twitchLive.js';
 import { supabase } from './supabase.js';
 import { QueueHub } from './ws/hub.js';
 
@@ -244,7 +244,7 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
 
 // Sonde de santé : utilisée par Render pour savoir si le service est vivant.
 app.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok', uptime: Math.round(process.uptime()) });
+  res.json({ status: 'ok', uptime: Math.round(process.uptime()), twitch: twitchStatus() });
 });
 
 app.use(rateLimit(120, 60_000));
@@ -427,7 +427,7 @@ if (live) setTimeout(
 server.listen(config.port, () => {
   console.log(`[boot] SixSence API en écoute sur le port ${config.port}`);
   console.log(`[boot] files : ${config.cod.formats.map((format) => format.label).join(', ')} · origines : ${config.corsOrigins.join(', ')}`);
-  console.log(`[boot] vérification « Prêt ? » : ${config.cod.readySeconds} s · Discord : ${discordEnabled ? 'activé' : 'désactivé'}`);
+  console.log(`[boot] vérification « Prêt ? » : ${config.cod.readySeconds} s · Discord : ${discordEnabled ? 'activé' : 'désactivé'} · Twitch : ${twitchEnabled ? 'activé' : 'désactivé'}`);
   if (config.localSafe) console.log('[boot] MODE LOCAL SANS RISQUE : tâches du classé coupées, file et groupes du classé fermés');
   if (!config.localSafe) void registerCommands();
 });
