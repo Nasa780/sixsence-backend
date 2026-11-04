@@ -1,6 +1,6 @@
 import { config } from '../config.js';
 import { supabase } from '../supabase.js';
-import { chunkChannels, pickStreams, type HelixStream, type LivePlayer, type LiveStream } from './twitchPolicy.js';
+import { chunkChannels, pickStreams, safeThumbnail, type HelixStream, type LivePlayer, type LiveStream } from './twitchPolicy.js';
 
 /**
  * « En direct sur Twitch » : toutes les 2 minutes, le serveur demande à Twitch lesquelles des chaînes liées aux
@@ -29,15 +29,32 @@ async function appToken(): Promise<string> {
   return token.value;
 }
 
-async function fetchStreams(channels: string[]): Promise<HelixStream[]> {
-  const query = channels.map((channel) => `user_login=${encodeURIComponent(channel)}`).join('&');
-  const res = await fetch(`https://api.twitch.tv/helix/streams?first=100&${query}`, {
+/** Appel à l'API Twitch avec le jeton d'application. */
+async function helix<T>(path: string): Promise<T[]> {
+  const res = await fetch(`https://api.twitch.tv/helix/${path}`, {
     headers: { 'Client-Id': config.twitch.clientId, Authorization: `Bearer ${await appToken()}` },
     signal: AbortSignal.timeout(10_000),
   });
   if (res.status === 401) token = null; // jeton révoqué : redemandé au prochain passage
   if (!res.ok) throw new Error(`recherche refusée (${res.status})`);
-  return ((await res.json()) as { data: HelixStream[] }).data;
+  return ((await res.json()) as { data: T[] }).data;
+}
+
+const fetchStreams = (channels: string[]) => helix<HelixStream>(`streams?first=100&${channels.map((channel) => `user_login=${encodeURIComponent(channel)}`).join('&')}`);
+
+const THUMB_TTL = 24 * 60 * 60_000;
+const thumbnails = new Map<string, { url: string | null; at: number }>();
+
+/** Miniature d'un clip Twitch, gardée 24 h en mémoire (null si le clip est introuvable ou sans clés). */
+export async function twitchClipThumbnail(clipId: string): Promise<string | null> {
+  if (!twitchEnabled) return null;
+  const known = thumbnails.get(clipId);
+  if (known && Date.now() - known.at < THUMB_TTL) return known.url;
+  const [clip] = await helix<{ thumbnail_url?: string }>(`clips?id=${encodeURIComponent(clipId)}`);
+  const url = safeThumbnail(clip?.thumbnail_url);
+  if (thumbnails.size >= 1000) thumbnails.clear();
+  thumbnails.set(clipId, { url, at: Date.now() });
+  return url;
 }
 
 /** Joueurs avec une chaîne liée, sans ceux exclus en ce moment. */

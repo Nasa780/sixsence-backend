@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { CHANNELS_PER_CALL, chunkChannels, pickStreams } from './twitchPolicy.js';
+import { CHANNELS_PER_CALL, chunkChannels, pickStreams, safeThumbnail } from './twitchPolicy.js';
 
 const player = (twitch: string) => ({ id: `id-${twitch}`, username: twitch.toUpperCase(), avatarUrl: null, twitch });
 
@@ -35,6 +35,16 @@ describe('Twitch : directs affichés', () => {
     const picked = pickStreams(streams, [player('alpha'), player('bravo')]);
     assert.equal(picked.length, 1);
     assert.equal(picked[0]?.thumbnail, 'https://x/live_bravo-640x360.jpg');
+  });
+});
+
+describe('Twitch : miniatures de clips', () => {
+  it('accepte seulement les images de Twitch', () => {
+    assert.equal(safeThumbnail('https://clips-media-assets2.twitch.tv/a-preview-480x272.jpg'), 'https://clips-media-assets2.twitch.tv/a-preview-480x272.jpg');
+    assert.equal(safeThumbnail('https://static-cdn.jtvnw.net/twitch-clips-thumbnails-prod/a/preview.jpg')?.includes('jtvnw'), true);
+    assert.equal(safeThumbnail('https://exemple.com/twitch.tv/a.jpg'), null);
+    assert.equal(safeThumbnail('http://clips-media-assets2.twitch.tv/a.jpg'), null);
+    assert.equal(safeThumbnail(undefined), null);
   });
 });
 

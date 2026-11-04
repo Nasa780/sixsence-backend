@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { MODERATORS, type Role } from '../roles.js';
 import { supabase } from '../supabase.js';
+import { twitchClipThumbnail } from './twitchLive.js';
 import { CLIPS_MAX, CLIPS_PER_DAY, cleanTitle, parseClipUrl, type ClipProvider } from './clipPolicy.js';
 import { notifyStaff } from './discord.js';
 import { MAP_CATALOG } from './maps.js';
@@ -83,6 +84,13 @@ export async function listClips(query: Record<string, unknown>, viewerId: string
 }
 
 /** Clip le plus voté des 7 derniers jours (une voix au moins), pour la Renommée et l'accueil. */
+/** Miniature d'un clip Twitch publié sur le site : les autres identifiants ne sont pas demandés à Twitch. */
+export async function twitchThumbnail(videoId: string): Promise<string | null> {
+  if (!/^[\w-]{1,120}$/.test(videoId)) return null;
+  const { data } = await supabase.from('clips').select('id').eq('provider', 'twitch').eq('video_id', videoId).is('removed_at', null).limit(1).maybeSingle();
+  return data ? twitchClipThumbnail(videoId) : null;
+}
+
 export async function clipOfWeek() {
   const { clips } = await listClips({ sort: 'top' }, null);
   return clips[0] && clips[0].votes > 0 ? clips[0] : null;
