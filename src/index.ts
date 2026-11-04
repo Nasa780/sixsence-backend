@@ -32,6 +32,7 @@ import { sweepTeamSchedules } from './services/teamSchedules.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
 import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, postWeeklyTop, sendEventReminders, syncAllRankRoles, syncRankRoles, syncTeamAndBadgeRoles, welcomeNewPlayers } from './services/community.js';
 import { remindSeasonEnd } from './services/announcements.js';
+import { sweepScheduledAnnouncements } from './services/scheduledAnnouncements.js';
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
 import { calendarEvents, calendarIcs } from './services/calendar.js';
@@ -402,6 +403,9 @@ if (live) setTimeout(() => {
   })().catch((error) => console.warn('[cartes]', (error as Error).message));
 }, 30_000);
 const cardsTimer = live ? setInterval(() => void syncAllCards().catch(() => {}), 60 * 60_000) : undefined;
+// Annonces Discord programmées : vérifiées chaque minute, et au démarrage (retard d'une mise en veille).
+const scheduledTimer = live ? setInterval(() => void sweepScheduledAnnouncements().catch((error) => console.warn('[annonces]', (error as Error).message)), 60_000) : undefined;
+if (live) void sweepScheduledAnnouncements().catch((error) => console.warn('[annonces]', (error as Error).message));
 // Joueurs en direct sur Twitch, toutes les 2 minutes (rien sans application Twitch).
 const twitchTimer = twitchEnabled ? setInterval(() => void sweepTwitch(), 2 * 60_000) : undefined;
 void sweepTwitch();
@@ -441,6 +445,7 @@ function shutdown(signal: string): void {
   clearInterval(weeklyTimer);
   clearInterval(cardsTimer);
   clearInterval(twitchTimer);
+  clearInterval(scheduledTimer);
   clearInterval(readyTimer);
   clearInterval(queueTimer);
   clearInterval(discordTimer);

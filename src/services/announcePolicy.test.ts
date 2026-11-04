@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { queueLevel, shouldAnnounce } from './announcePolicy.js';
+import { queueLevel, shouldAnnounce, dueAction, parsePostAt } from './announcePolicy.js';
 
 describe('annonces de file', () => {
   it('paliers 5v5 : rien, moitié, plus qu’une place', () => {
@@ -29,5 +29,22 @@ describe('annonces de file', () => {
     assert.equal(shouldAnnounce(state, '5v5', 1, t + 13 * 60_000), false); // moins de 10 min après la dernière
     assert.equal(shouldAnnounce(state, '5v5', 1, t + 22 * 60_000), true);
     assert.equal(shouldAnnounce(state, '2v2', 1, t + 22 * 60_000), true); // chaque file a son propre rythme
+  });
+});
+
+describe('Annonces programmées', () => {
+  const now = Date.UTC(2026, 10, 4, 12);
+  it('accepte une date entre 2 minutes et 60 jours', () => {
+    assert.equal(parsePostAt(new Date(now + 3_600_000).toISOString(), now), new Date(now + 3_600_000).toISOString());
+    assert.equal(parsePostAt(new Date(now + 60_000).toISOString(), now), null);
+    assert.equal(parsePostAt(new Date(now + 61 * 86_400_000).toISOString(), now), null);
+    assert.equal(parsePostAt('pas une date', now), null);
+    assert.equal(parsePostAt(undefined, now), null);
+  });
+  it('attend, publie, ou abandonne après 6 h de retard', () => {
+    assert.equal(dueAction(new Date(now + 1000).toISOString(), now), 'wait');
+    assert.equal(dueAction(new Date(now).toISOString(), now), 'post');
+    assert.equal(dueAction(new Date(now - 5 * 3_600_000).toISOString(), now), 'post');
+    assert.equal(dueAction(new Date(now - 7 * 3_600_000).toISOString(), now), 'too_late');
   });
 });

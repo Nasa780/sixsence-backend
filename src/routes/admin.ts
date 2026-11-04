@@ -16,6 +16,7 @@ import { publishRules } from '../services/discordRules.js';
 import { setMapPools } from '../services/maps.js';
 import { publishTicketPanel } from '../services/tickets.js';
 import { announceSettings, createOnboardingRoles, giveMemberRoleToAll, manualAnnouncement, setDisabledTypes } from '../services/announcements.js';
+import { cancelScheduled, listScheduled, scheduleAnnouncement } from '../services/scheduledAnnouncements.js';
 import { syncTeamRole } from '../services/teamDiscord.js';
 import { listTeamDisputes } from '../services/teamMatches.js';
 import {
@@ -100,6 +101,9 @@ import { activateLeagues, prepareLeagueMoves } from '../services/leagues.js';
  *   GET    /admin/discord/announce         annonces illustrées : salon configuré, types coupés, rôles d'Intégration
  *   POST   /admin/discord/announce         publier une annonce libre ou les nouveautés { type, title, text, url }
  *   POST   /admin/discord/announce/settings  types d'annonces coupés { disabled: [...] }
+ *   GET    /admin/discord/scheduled        annonces programmées : à venir et 5 dernières
+ *   POST   /admin/discord/scheduled        programmer { type, title, text, url, postAt }
+ *   DELETE /admin/discord/scheduled/:id    annuler une annonce pas encore partie
  *   POST   /admin/discord/member-role      donner le rôle « Membre » à tous les membres actuels du serveur (tâche de fond)
  *   POST   /admin/discord/onboarding-roles créer les rôles d'Intégration qui manquent (notifications, plateformes, Membre)
  *   POST   /admin/discord/tickets-panel    publier ou mettre à jour le panneau des tickets (DISCORD_TICKETS_CHANNEL_ID)
@@ -360,6 +364,15 @@ export function adminRouter(): Router {
   }));
   router.post('/discord/announce/settings', asyncHandler(async (req, res) => {
     res.json(await setDisabledTypes(req.body));
+  }));
+  router.get('/discord/scheduled', asyncHandler(async (_req, res) => {
+    res.json(await listScheduled());
+  }));
+  router.post('/discord/scheduled', asyncHandler(async (req, res) => {
+    res.json(await scheduleAnnouncement(currentUser(res).id, req.body));
+  }));
+  router.delete('/discord/scheduled/:id', asyncHandler(async (req, res) => {
+    res.json(await cancelScheduled(uuidParam(req, 'id')));
   }));
   router.post('/discord/member-role', asyncHandler(async (_req, res) => {
     res.json(await giveMemberRoleToAll());

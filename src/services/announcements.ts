@@ -188,8 +188,8 @@ export async function createOnboardingRoles() {
   return announceSettings();
 }
 
-/** Annonce publiée à la main depuis l'admin (annonce libre ou nouveautés). */
-export async function manualAnnouncement(body: unknown) {
+/** Vérifie une annonce libre ou de nouveautés saisie dans l'admin. */
+export function parseAnnouncement(body: unknown): Announcement {
   const input = (body ?? {}) as { type?: unknown; title?: unknown; text?: unknown; url?: unknown };
   const type = input.type === 'nouveautes' ? 'nouveautes' : 'annonce';
   const title = typeof input.title === 'string' ? input.title.trim() : '';
@@ -198,7 +198,12 @@ export async function manualAnnouncement(body: unknown) {
   if (title.length < 3 || title.length > 120) throw new HttpError(400, 'INVALID_ANNOUNCE', 'Titre de 3 à 120 caractères.');
   if (text.length < 3 || text.length > 3500) throw new HttpError(400, 'INVALID_ANNOUNCE', 'Texte de 3 à 3 500 caractères.');
   if (url && !/^(https:\/\/|\/)/.test(url)) throw new HttpError(400, 'INVALID_ANNOUNCE', 'Lien : adresse https:// ou chemin du site (/…).');
-  await postAnnouncement({ type, title, text, url }, true);
+  return { type, title, text, url };
+}
+
+/** Annonce publiée à la main depuis l'admin (annonce libre ou nouveautés). */
+export async function manualAnnouncement(body: unknown) {
+  await postAnnouncement(parseAnnouncement(body), true);
   return { posted: true };
 }
 
