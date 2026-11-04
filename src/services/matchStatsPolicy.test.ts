@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { parseRows, summarizeStats, validRow } from './matchStatsPolicy.js';
+import { captureReminderWindow, coversMatch, parseRows, summarizeStats, validRow } from './matchStatsPolicy.js';
 
 const row = (userId: string, score = 1570, kills = 10) => ({ userId, score, kills, plants: 1, defuses: 0 });
 
@@ -36,5 +36,32 @@ describe('stats de capture : bilan', () => {
 
   it('reste à zéro sans map', () => {
     assert.equal(summarizeStats([]).avgKills, 0);
+  });
+});
+
+describe('stats de capture : capture du bon match', () => {
+  const sides: [string[], string[]] = [['a', 'b', 'c', 'd'], ['e', 'f', 'g', 'h']];
+  const rows = (...ids: string[]) => ids.map((userId) => ({ userId }));
+
+  it('accepte quand la moitié de chaque équipe est reconnue', () => {
+    assert.equal(coversMatch(rows('a', 'b', 'e', 'f'), sides), true);
+    assert.equal(coversMatch(rows('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'), sides), true);
+  });
+
+  it('refuse une capture sans l’équipe adverse ou trop incomplète', () => {
+    assert.equal(coversMatch(rows('a', 'b', 'c', 'd'), sides), false);
+    assert.equal(coversMatch(rows('a', 'e', 'f', 'g'), sides), false);
+  });
+
+  it('en 1v1, il faut les deux joueurs', () => {
+    assert.equal(coversMatch(rows('a', 'e'), [['a'], ['e']]), true);
+    assert.equal(coversMatch(rows('a'), [['a'], ['e']]), false);
+  });
+});
+
+describe('stats de capture : rappel', () => {
+  it('vise les matchs terminés depuis 10 minutes à 1 heure', () => {
+    const now = Date.UTC(2026, 10, 5, 12);
+    assert.deepEqual(captureReminderWindow(now), { from: '2026-11-05T11:00:00.000Z', to: '2026-11-05T11:50:00.000Z' });
   });
 });
