@@ -33,6 +33,8 @@ export interface CardStats {
   team: boolean;
   /** Inscriptions à des événements GTA 6 terminés. */
   gtaEvents: number;
+  /** Palier du pass de la saison en cours. */
+  passLevel: number;
 }
 
 export interface CardDef {
@@ -84,6 +86,36 @@ const count = (value: (stats: CardStats) => number, goal: number) => ({
   progress: (stats: CardStats): [number, number] => [Math.min(value(stats), goal), goal],
 });
 
+/**
+ * Pass de saison gratuit : 30 paliers de 500 XP (victoire +500, défaite +150, environ 46 matchs à 50 % de victoires).
+ * Il se termine avec la saison ; ses cartes et ses badges sont propres à cette saison (exclusifs).
+ */
+export const PASS_SEASON = 1;
+export const PASS_TIERS = 30;
+export const PASS_TIER_XP = 500;
+export const PASS_CARDS: { level: number; key: string; name: string; rarity: Rarity }[] = [
+  { level: 5, key: 'pass-s1-eclaireur', name: 'Éclaireur', rarity: 'commune' },
+  { level: 15, key: 'pass-s1-sentinelle', name: 'Sentinelle', rarity: 'rare' },
+  { level: 25, key: 'pass-s1-gardien', name: 'Gardien', rarity: 'epique' },
+  { level: 30, key: 'pass-s1-pharaon', name: 'Pharaon', rarity: 'legendaire' },
+];
+export const PASS_BADGES: { level: number; key: string; name: string }[] = [
+  { level: 10, key: 's1-pass-bronze', name: 'Pass Bronze' },
+  { level: 20, key: 's1-pass-argent', name: 'Pass Argent' },
+  { level: 30, key: 's1-pass-or', name: 'Pass Or' },
+];
+
+/** Palier atteint avec l'XP de la saison. */
+export function passLevel(xp: number): number {
+  return Math.min(PASS_TIERS, Math.floor(Math.max(0, xp) / PASS_TIER_XP));
+}
+
+/** Badges du pass mérités par un joueur et qu'il n'a pas encore. */
+export function missingPassBadges(stats: Pick<CardStats, 'passLevel' | 'currentSeason' | 'badges'>): string[] {
+  if (stats.currentSeason.id !== PASS_SEASON) return [];
+  return PASS_BADGES.filter((badge) => stats.passLevel >= badge.level && !stats.badges.includes(badge.key)).map((badge) => badge.key);
+}
+
 /** Cartes permanentes du catalogue (hors cartes de saison et mois MVP, générées). */
 export const STATIC_CARDS: CardDef[] = [
   { key: DEFAULT_CARD, family: 'Par défaut', name: 'SixSence', condition: 'Carte de départ', rarity: 'commune', eligible: () => true },
@@ -95,6 +127,15 @@ export const STATIC_CARDS: CardDef[] = [
     rarity: rank.rarity,
     exclusive: true,
     ...count((stats) => seasonPeak(stats, RANK_CARDS_SEASON), rank.min),
+  })),
+  ...PASS_CARDS.map((card) => ({
+    key: card.key,
+    family: 'Pass de saison',
+    name: card.name,
+    condition: `Palier ${card.level} du pass de la saison ${PASS_SEASON}`,
+    rarity: card.rarity,
+    exclusive: true,
+    ...count((stats) => (stats.currentSeason.id === PASS_SEASON ? stats.passLevel : 0), card.level),
   })),
   { key: 'premier-sang', family: 'Succès', name: 'Premier sang', condition: '1re victoire', rarity: 'commune', ...count((s) => s.wins, 1) },
   { key: 'domination', family: 'Succès', name: 'Domination', condition: '10 victoires', rarity: 'commune', ...count((s) => s.wins, 10) },

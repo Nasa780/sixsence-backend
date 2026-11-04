@@ -122,7 +122,7 @@ export function parseEventPatch(body: unknown) {
 
 /** Badges attribuables à la main (les badges de saison s<id>-… sont posés par la clôture). */
 export const STAFF_BADGES = ['founder', 'beta', 'partner', 'staff', 'mvp'];
-const BADGE_PATTERN = /^(founder|beta|partner|staff|mvp|s\d+-(top10|champion)|mvp-\d{4}-\d{2})$/;
+const BADGE_PATTERN = /^(founder|beta|partner|staff|mvp|s\d+-(top10|champion|pass-(bronze|argent|or))|mvp-\d{4}-\d{2})$/;
 
 export function parseBadges(body: unknown): string[] {
   const badges = (body as { badges?: unknown } | null)?.badges;

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { seasonPass } from '../services/seasonPass.js';
 import { MATCH_REFEREES, codMatchPlayers, currentUser, optionalAuth, refuseOwnMatch, requireAuth, requireRoles, roleOf, viewerOf } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, asyncHandler, uuidParam } from '../errors.js';
@@ -55,6 +56,7 @@ export function codRouter(hub: QueueHub): Router {
   // Score de fiabilité (public) et contrôle anti-smurf (niveau du compte lu sur une capture).
   router.get('/players/:id/reliability', asyncHandler(async (req, res) => void res.json(await reliability(uuidParam(req, 'id')))));
   // Analyse du profil : places sur le site, ratio 30 j, adversaires, coéquipiers, activité, équipes ; face à face si connecté.
+  router.get('/pass', optionalAuth, asyncHandler(async (_req, res) => void res.json(await seasonPass(viewerOf(res)?.id ?? null))));
   router.get('/players/:id/insights', optionalAuth, asyncHandler(async (req, res) => void res.json(await playerInsights(uuidParam(req, 'id'), viewerOf(res)?.id ?? null))));
   router.post('/smurf-check', requireAuth, asyncHandler(async (req, res) => void res.json(await smurfCheck(currentUser(res).id, req.body))));
 
