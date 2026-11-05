@@ -233,7 +233,8 @@ export async function myCards(userId: string) {
     previousSeasons: previous,
     ownedCount: [...current, ...previous].filter((card) => card.owned).length,
     total: current.length,
-    newCount: [...current, ...previous].filter((card) => card.isNew).length,
+    // Toutes les lignes non vues, comme la pastille du menu : une carte retirée du catalogue compte aussi.
+    newCount: [...owned.values()].filter((row) => !row.seen_at).length,
   };
 }
 
