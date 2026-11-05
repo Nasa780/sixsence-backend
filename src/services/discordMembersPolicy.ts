@@ -45,7 +45,7 @@ export function diffMembers(known: KnownMember[], current: GuildMember[], now: n
 
 /** Pseudo sans mise en forme Discord (étoiles, tirets, mentions…), jamais vide. */
 export function plainName(name: string | null | undefined): string {
-  const clean = (name ?? '').replace(/[\\*_~`|>#@:[\]()]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  const clean = (name ?? '').replace(/[\\*_~`|>#@:[\]()]/g, '').replace(/\s+/g, ' ').trim();
   return [...clean].slice(0, 40).join('').trim() || 'Un membre';
 }
 
