@@ -45,14 +45,15 @@ describe('arrivées et départs Discord', () => {
     assert.equal(goodbyeText(null), '**Un membre** a quitté SixSence. Bonne continuation, la porte reste ouverte. 👋');
   });
 
-  it('mentionne le membre et le salon du règlement', () => {
-    const text = welcomeText('42', '99', 'https://www.sixsence.fr');
+  it('mentionne le membre, sans renvoyer au règlement déjà validé', () => {
+    const text = welcomeText('42');
     assert.match(text, /<@42>/);
-    assert.match(text, /<#99>/);
+    assert.doesNotMatch(text, /règlement/i);
   });
 
   it('encode le pseudo dans l’adresse de l’image', () => {
     assert.equal(welcomeImageUrl('https://s.fr', '42', 'abc', 'Le Boss'), 'https://s.fr/api/og/bienvenue?id=42&name=Le+Boss&a=abc');
     assert.equal(welcomeImageUrl('https://s.fr', '42', null, 'x'), 'https://s.fr/api/og/bienvenue?id=42&name=x');
+    assert.equal(welcomeImageUrl('https://s.fr', '42', null, 'x', 130), 'https://s.fr/api/og/bienvenue?id=42&name=x&n=130');
   });
 });

@@ -10,7 +10,7 @@ import { logToDiscord } from './siteLog.js';
  * même pendant un redéploiement où deux instances écoutent. Après une coupure, syncMembers rattrape ce qui a été manqué.
  */
 
-const { guildId, welcomeChannelId, goodbyeChannelId, rulesChannelId } = config.discord;
+const { guildId, welcomeChannelId, goodbyeChannelId } = config.discord;
 
 /** Salons renseignés : sans eux, aucune connexion permanente et DraftBot reste seul. */
 export const memberMessagesEnabled = Boolean(welcomeChannelId && goodbyeChannelId);
@@ -31,13 +31,20 @@ export interface MemberEvent {
 
 const nameOf = (member: MemberEvent) => member.nick || member.user.global_name || member.user.username || null;
 
+/** Rang du membre sur le serveur : membres présents, lui compris. */
+async function memberNumber(): Promise<number> {
+  const { count } = await supabase.from('discord_members').select('user_id', { count: 'exact', head: true }).eq('present', true);
+  return count ?? 0;
+}
+
 async function sendWelcome(member: MemberEvent): Promise<void> {
   const { id, avatar } = member.user;
   await discord(`/channels/${welcomeChannelId}/messages`, {
     method: 'POST',
     body: {
-      content: welcomeText(id, rulesChannelId, config.siteUrl),
-      embeds: [{ color: 0xd4af37, image: { url: welcomeImageUrl(config.siteUrl, id, avatar, nameOf(member)) } }],
+      content: welcomeText(id),
+      embeds: [{ color: 0xd4af37, image: { url: welcomeImageUrl(config.siteUrl, id, avatar, nameOf(member), await memberNumber()) } }],
+      components: [{ type: 1, components: [{ type: 2, style: 5, label: 'Jouer sur SixSence', url: `${config.siteUrl}/cod` }] }],
       allowed_mentions: { users: [id] },
     },
   });

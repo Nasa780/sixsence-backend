@@ -49,12 +49,10 @@ export function plainName(name: string | null | undefined): string {
   return [...clean].slice(0, 40).join('').trim() || 'Un membre';
 }
 
-export function welcomeText(userId: string, rulesChannelId: string, siteUrl: string): string {
+export function welcomeText(userId: string): string {
   return [
     `👁️ Bienvenue sur SixSence, <@${userId}> !`,
-    'Tu rejoins la communauté Call of Duty Hardcore : classé, Division et coupes t’attendent.',
-    `Lis le ${rulesChannelId ? `<#${rulesChannelId}>` : 'règlement'}, puis connecte-toi sur ${siteUrl} pour jouer ton premier match.`,
-    'Bon jeu, soldat. 🎯',
+    'Classé, Division et coupes t’attendent. Bon jeu, soldat. 🎯',
   ].join('\n');
 }
 
@@ -62,9 +60,10 @@ export function goodbyeText(name: string | null | undefined): string {
   return `**${plainName(name)}** a quitté SixSence. Bonne continuation, la porte reste ouverte. 👋`;
 }
 
-/** Image de bienvenue du site : avatar Discord et pseudo sur le fond SixSence. */
-export function welcomeImageUrl(siteUrl: string, userId: string, avatar: string | null | undefined, name: string | null | undefined): string {
+/** Image de bienvenue du site : avatar Discord, pseudo et numéro de membre sur le fond SixSence. */
+export function welcomeImageUrl(siteUrl: string, userId: string, avatar: string | null | undefined, name: string | null | undefined, memberNumber = 0): string {
   const query = new URLSearchParams({ id: userId, name: plainName(name) });
   if (avatar) query.set('a', avatar);
+  if (memberNumber > 0) query.set('n', String(memberNumber));
   return `${siteUrl}/api/og/bienvenue?${query.toString()}`;
 }
