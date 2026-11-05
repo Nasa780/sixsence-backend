@@ -2,9 +2,12 @@
  * Règles du « En direct sur Twitch », sans accès au réseau ni à la base (testées dans twitchPolicy.test.ts).
  * Seuls les jeux de SixSence sont affichés : un joueur en direct sur un autre jeu ne remonte pas sur le site.
  */
+import { plainName } from './discordMembersPolicy.js';
+
 export const GAME_PATTERN = /call of duty|grand theft auto/i;
 /** La recherche Helix accepte 100 chaînes par appel. */
 export const CHANNELS_PER_CALL = 100;
+const GOLD = 0xd4af37;
 
 /** Une chaîne en direct, telle que renvoyée par l'API Twitch (GET /helix/streams). */
 export interface HelixStream {
@@ -66,4 +69,31 @@ export function pickStreams(streams: HelixStream[], players: LivePlayer[]): Live
     });
   }
   return picked.sort((a, b) => b.viewers - a.viewers);
+}
+
+/** Jour du lancement à Paris : une annonce Discord par chaîne et par jour. */
+export function liveClaimDay(stream: LiveStream): string {
+  const started = stream.startedAt ? new Date(stream.startedAt) : new Date();
+  return started.toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' });
+}
+
+/** Annonce Discord d'un direct : texte de Twitch sans mise en forme, aucune mention, bouton vers la chaîne. */
+export function liveMessage(stream: LiveStream) {
+  const url = `https://www.twitch.tv/${encodeURIComponent(stream.channel)}`;
+  const title = stream.title.replace(/[\\*_~`|>#@[\]]/g, '').replace(/\s+/g, ' ').trim();
+  const thumbnail = safeThumbnail(stream.thumbnail);
+  return {
+    embeds: [
+      {
+        title: `🔴 ${plainName(stream.player.username)} est en direct`,
+        url,
+        ...(title ? { description: title } : {}),
+        fields: [{ name: 'Jeu', value: stream.game, inline: true }],
+        ...(thumbnail ? { image: { url: `${thumbnail}?v=${encodeURIComponent(stream.startedAt ?? '')}` } } : {}),
+        color: GOLD,
+      },
+    ],
+    components: [{ type: 1, components: [{ type: 2, style: 5, label: 'Regarder sur Twitch', url }] }],
+    allowed_mentions: { parse: [] },
+  };
 }

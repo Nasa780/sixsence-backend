@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { CHANNELS_PER_CALL, chunkChannels, pickStreams, safeThumbnail } from './twitchPolicy.js';
+import { CHANNELS_PER_CALL, chunkChannels, liveClaimDay, liveMessage, pickStreams, safeThumbnail, type LiveStream } from './twitchPolicy.js';
 
 const player = (twitch: string) => ({ id: `id-${twitch}`, username: twitch.toUpperCase(), avatarUrl: null, twitch });
 
@@ -53,5 +53,33 @@ describe('Twitch : paquets de chaînes', () => {
     assert.deepEqual(chunkChannels(['Alpha', 'alpha', 'bravo']), [['alpha', 'bravo']]);
     const many = Array.from({ length: CHANNELS_PER_CALL + 1 }, (_, i) => `chaine${i}`);
     assert.deepEqual(chunkChannels(many).map((chunk) => chunk.length), [CHANNELS_PER_CALL, 1]);
+  });
+});
+
+describe('Twitch : annonce Discord', () => {
+  const stream: LiveStream = {
+    channel: 'alpha',
+    title: '@everyone [clique](https://x.fr) *ranked*',
+    game: 'Call of Duty',
+    viewers: 3,
+    startedAt: '2026-11-05T23:30:00Z',
+    thumbnail: 'https://static-cdn.jtvnw.net/previews-ttv/live_user_alpha-640x360.jpg',
+    player: { id: '1', username: 'Alpha_', avatarUrl: null },
+  };
+
+  it('neutralise le titre de Twitch et ne mentionne personne', () => {
+    const message = liveMessage(stream);
+    assert.equal(message.embeds[0]!.title, '🔴 Alpha est en direct');
+    assert.doesNotMatch(message.embeds[0]!.description ?? '', /[@[\]*]/);
+    assert.deepEqual(message.allowed_mentions, { parse: [] });
+    assert.equal(message.components[0]!.components[0]!.url, 'https://www.twitch.tv/alpha');
+  });
+
+  it('écarte une image qui ne vient pas de Twitch', () => {
+    assert.equal(liveMessage({ ...stream, thumbnail: 'https://exemple.fr/a.jpg' }).embeds[0]!.image, undefined);
+  });
+
+  it('compte le jour de lancement à l’heure de Paris', () => {
+    assert.equal(liveClaimDay(stream), '2026-11-06');
   });
 });
