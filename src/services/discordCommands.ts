@@ -1,3 +1,5 @@
+import { parseNotifyChoice } from './discordNotifyPolicy.js';
+import { handleNotifyInteraction, type NotifyInteraction } from './notifyPanel.js';
 import { createPublicKey, verify } from 'node:crypto';
 import { config } from '../config.js';
 import { supabase } from '../supabase.js';
@@ -149,6 +151,9 @@ export function handleInteraction(interaction: Interaction): { type: number; dat
   if (interaction.type === 3 && /^ready:[0-9a-f-]{36}$/.test((interaction.data as { custom_id?: string } | undefined)?.custom_id ?? '')) return readyButton(interaction);
   // Menu des joueurs de /defi (services/discordActions.ts).
   if (interaction.type === 3 && parseDefiAction((interaction.data as { custom_id?: string } | undefined)?.custom_id)) return defiMenu(interaction);
+  // Panneau des notifications (services/notifyPanel.ts).
+  const notifyChoice = interaction.type === 3 ? parseNotifyChoice((interaction.data as { custom_id?: string } | undefined)?.custom_id) : null;
+  if (notifyChoice) return handleNotifyInteraction(notifyChoice, interaction as unknown as NotifyInteraction);
   // Boutons et fenêtres des tickets (services/tickets.ts).
   if (interaction.type === 3 || interaction.type === 5) return handleTicketInteraction(interaction as unknown as TicketInteraction) ?? { type: 4, data: { flags: EPHEMERAL, content: 'Action inconnue.' } };
   if (interaction.type !== 2 || !interaction.data) return { type: 4, data: { flags: EPHEMERAL } };

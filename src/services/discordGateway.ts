@@ -1,17 +1,20 @@
 import { WebSocket, type RawData } from 'ws';
 import { config } from '../config.js';
+import { checkAuditAccess, onAuditEntry } from './discordModeration.js';
+import type { AuditEntry } from './discordModerationPolicy.js';
 import { onMemberAdd, onMemberRemove, syncMembers, type MemberEvent } from './discordMembers.js';
 import { logToDiscord } from './siteLog.js';
 
 /**
  * Connexion permanente du bot à Discord (Gateway), pour les seuls événements que l'API REST ne donne pas :
- * arrivées et départs du serveur. Reprise de session après une coupure, sinon reconnexion puis rattrapage (syncMembers).
+ * arrivées et départs du serveur, journal de modération. Reprise de session après une coupure, sinon reconnexion puis
+ * rattrapage des membres (syncMembers).
  * Exige « Server Members Intent » dans le portail développeur, onglet Bot.
  */
 
 const GATEWAY = 'wss://gateway.discord.gg/?v=10&encoding=json';
-/** GUILDS + GUILD_MEMBERS. */
-const INTENTS = (1 << 0) | (1 << 1);
+/** GUILDS + GUILD_MEMBERS + GUILD_MODERATION. */
+const INTENTS = (1 << 0) | (1 << 1) | (1 << 2);
 const Op = { Dispatch: 0, Heartbeat: 1, Identify: 2, Resume: 6, Reconnect: 7, InvalidSession: 9, Hello: 10, HeartbeatAck: 11 } as const;
 /** Fermetures sans espoir : jeton, intent ou version refusés. Inutile d'insister. */
 const FATAL = new Set([4004, 4010, 4011, 4012, 4013, 4014]);
@@ -31,6 +34,7 @@ let firstBeat: NodeJS.Timeout | undefined;
 let retry: NodeJS.Timeout | undefined;
 let sequence: number | null = null;
 let sessionId: string | null = null;
+let botId: string | null = null;
 let resumeUrl: string | null = null;
 let acknowledged = true;
 let retryMs = MIN_RETRY_MS;
@@ -56,17 +60,21 @@ function beat(): void {
 function dispatch(type: string | null, data: unknown): void {
   const guard = (task: Promise<void>, label: string) => void task.catch((error) => console.warn(`[discord] ${label}`, (error as Error).message));
   if (type === 'READY') {
-    const ready = data as { session_id: string; resume_gateway_url: string };
+    const ready = data as { session_id: string; resume_gateway_url: string; user: { id: string } };
     sessionId = ready.session_id;
+    botId = ready.user.id;
     resumeUrl = ready.resume_gateway_url;
     retryMs = MIN_RETRY_MS;
     guard(syncMembers(), 'rattrapage des membres');
+    guard(checkAuditAccess(), 'droit du journal de modération');
   } else if (type === 'RESUMED') {
     retryMs = MIN_RETRY_MS;
   } else if (type === 'GUILD_MEMBER_ADD' && (data as { guild_id?: string }).guild_id === config.discord.guildId) {
     guard(onMemberAdd(data as MemberEvent), 'bienvenue');
   } else if (type === 'GUILD_MEMBER_REMOVE' && (data as { guild_id?: string }).guild_id === config.discord.guildId) {
     guard(onMemberRemove((data as MemberEvent).user), 'départ');
+  } else if (type === 'GUILD_AUDIT_LOG_ENTRY_CREATE' && (data as AuditEntry).guild_id === config.discord.guildId) {
+    onAuditEntry(data as AuditEntry, botId);
   }
 }
 

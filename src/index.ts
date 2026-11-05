@@ -46,7 +46,8 @@ import { globalSearch } from './services/search.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
 import { noticeMatchAbandoned, noticeMatchFinished, noticeMatchMissed, remindStaff } from './services/matchNotices.js';
 import { syncAllCards, syncCards } from './services/cards.js';
-import { sweepTwitch, twitchEnabled, twitchStatus } from './services/twitchLive.js';
+import { announceNewStreams } from './services/twitchAnnounce.js';
+import { liveStreams, sweepTwitch, twitchEnabled, twitchStatus } from './services/twitchLive.js';
 import { supabase } from './supabase.js';
 import { QueueHub } from './ws/hub.js';
 
@@ -414,9 +415,13 @@ const cardsTimer = live ? setInterval(() => void syncAllCards().catch(() => {}),
 // Annonces Discord programmées : vérifiées chaque minute, et au démarrage (retard d'une mise en veille).
 const scheduledTimer = live ? setInterval(() => void sweepScheduledAnnouncements().catch((error) => console.warn('[annonces]', (error as Error).message)), 60_000) : undefined;
 if (live) void sweepScheduledAnnouncements().catch((error) => console.warn('[annonces]', (error as Error).message));
-// Joueurs en direct sur Twitch, toutes les 2 minutes (rien sans application Twitch).
-const twitchTimer = twitchEnabled ? setInterval(() => void sweepTwitch(), 2 * 60_000) : undefined;
-void sweepTwitch();
+// Joueurs en direct sur Twitch, toutes les 2 minutes (rien sans application Twitch), annoncés sur Discord.
+const twitchSweep = async () => {
+  await sweepTwitch();
+  if (live) await announceNewStreams(liveStreams()).catch((error) => console.warn('[twitch] annonce impossible', (error as Error).message));
+};
+const twitchTimer = twitchEnabled ? setInterval(() => void twitchSweep(), 2 * 60_000) : undefined;
+void twitchSweep();
 // Top de la semaine (lundi 10 h, heure de Paris) et relance de l'équipe (attente de plus de 2 h), vérifiés toutes les 15 minutes.
 const weeklyTimer = live
   ? setInterval(() => {
