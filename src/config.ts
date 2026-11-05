@@ -196,7 +196,7 @@ export const config = {
     /** Salon des annonces de directs Twitch. */
     liveChannelId: process.env.DISCORD_LIVE_CHANNEL_ID?.trim() || '1567998192359055460',
     /** Salon du panneau « Choisis tes notifications » (publié depuis l'admin). */
-    notifyChannelId: process.env.DISCORD_NOTIFY_CHANNEL_ID?.trim() || '',
+    notifyChannelId: process.env.DISCORD_NOTIFY_CHANNEL_ID?.trim() || '1568000735042478191',
   },
 
   /** Adresse publique du site (liens envoyés sur Discord). */
