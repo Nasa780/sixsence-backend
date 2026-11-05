@@ -51,8 +51,11 @@ export function plainName(name: string | null | undefined): string {
 
 export function welcomeText(userId: string): string {
   return [
-    `👁️ Bienvenue sur SixSence, <@${userId}> !`,
-    'Classé, Division et coupes t’attendent, et bientôt GTA 6. Bon jeu, soldat. 🎯',
+    `Bienvenue sur SixSence, <@${userId}> ! 🦅`,
+    'Prêt à laisser ton empreinte ?',
+    '🎮 COD Hardcore : Partie classée, Division et tournois t’attendent !',
+    '🚘 GTA VI : Événements, rassemblements et sessions dès la sortie du jeu.',
+    'Bon jeu, soldat ! 🫡',
   ].join('\n');
 }
 
