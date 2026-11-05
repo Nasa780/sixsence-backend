@@ -190,9 +190,9 @@ export const config = {
     ticketsCategoryId: process.env.DISCORD_TICKETS_CATEGORY_ID?.trim() || '',
     /** Salon du règlement du serveur (publié par le bot depuis l'admin). */
     rulesChannelId: process.env.DISCORD_RULES_CHANNEL_ID?.trim() || '1561121381578444890',
-    /** Salons des arrivées et des départs : les deux requis, sinon pas de connexion permanente du bot. */
-    welcomeChannelId: process.env.DISCORD_WELCOME_CHANNEL_ID?.trim() || '',
-    goodbyeChannelId: process.env.DISCORD_GOODBYE_CHANNEL_ID?.trim() || '',
+    /** Salon des arrivées, et des départs sauf DISCORD_GOODBYE_CHANNEL_ID. */
+    welcomeChannelId: process.env.DISCORD_WELCOME_CHANNEL_ID?.trim() || '1341103572196261929',
+    goodbyeChannelId: process.env.DISCORD_GOODBYE_CHANNEL_ID?.trim() || process.env.DISCORD_WELCOME_CHANNEL_ID?.trim() || '1341103572196261929',
   },
 
   /** Adresse publique du site (liens envoyés sur Discord). */
