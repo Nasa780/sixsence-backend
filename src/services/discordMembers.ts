@@ -10,7 +10,7 @@ import { logToDiscord } from './siteLog.js';
  * même pendant un redéploiement où deux instances écoutent. Après une coupure, syncMembers rattrape ce qui a été manqué.
  */
 
-const { guildId, welcomeChannelId, goodbyeChannelId } = config.discord;
+const { guildId, welcomeChannelId, goodbyeChannelId, rulesChannelId } = config.discord;
 
 /** Salons renseignés : sans eux, aucune connexion permanente et DraftBot reste seul. */
 export const memberMessagesEnabled = Boolean(welcomeChannelId && goodbyeChannelId);
@@ -45,7 +45,7 @@ async function sendWelcome(member: MemberEvent): Promise<void> {
   await discord(`/channels/${welcomeChannelId}/messages`, {
     method: 'POST',
     body: {
-      content: welcomeText(id),
+      content: welcomeText(id, rulesChannelId, config.siteUrl),
       embeds: [{ color: GOLD, image: { url: welcomeImageUrl(config.siteUrl, id, avatar, nameOf(member), await memberNumber()) } }],
       components: [{ type: 1, components: [{ type: 2, style: 5, label: 'Aller sur SixSence', url: config.siteUrl }] }],
       allowed_mentions: { users: [id] },
