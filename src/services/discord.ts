@@ -5,7 +5,7 @@ import { supabase } from '../supabase.js';
 import { sendMatchFound, updateClosed, updateStarted } from './matchFoundDm.js';
 
 /**
- * Intégration Discord, par l'API REST (pas besoin de connexion permanente du bot) :
+ * Intégration Discord, par l'API REST (connexion permanente seulement pour les arrivées et départs : discordGateway.ts) :
  *   - message privé « Match trouvé » à chaque joueur, avec le lien du salon de match ;
  *   - deux salons vocaux (Équipe 1 / Équipe 2) créés au démarrage du match, supprimés à la fin ;
  *   - résultat publié dans un salon du serveur.
