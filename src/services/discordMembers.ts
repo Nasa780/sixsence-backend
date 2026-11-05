@@ -44,7 +44,7 @@ async function sendWelcome(member: MemberEvent): Promise<void> {
     body: {
       content: welcomeText(id),
       embeds: [{ color: 0xd4af37, image: { url: welcomeImageUrl(config.siteUrl, id, avatar, nameOf(member), await memberNumber()) } }],
-      components: [{ type: 1, components: [{ type: 2, style: 5, label: 'Jouer sur SixSence', url: `${config.siteUrl}/cod` }] }],
+      components: [{ type: 1, components: [{ type: 2, style: 5, label: 'Aller sur SixSence', url: config.siteUrl }] }],
       allowed_mentions: { users: [id] },
     },
   });
