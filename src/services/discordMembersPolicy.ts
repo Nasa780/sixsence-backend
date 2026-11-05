@@ -49,14 +49,17 @@ export function plainName(name: string | null | undefined): string {
   return [...clean].slice(0, 40).join('').trim() || 'Un membre';
 }
 
-export function welcomeText(userId: string, rulesChannelId: string, siteUrl: string): string {
+export function welcomeText(userId: string, siteUrl: string): string {
+  const siteName = new URL(siteUrl).hostname.replace(/^www\./, '');
   return [
-    `👁️ **Bienvenue sur SixSence, <@${userId}> !**`,
+    `👁️ Bienvenue sur SixSence, <@${userId}> !`,
     'Prêt à laisser ton empreinte ?',
-    '🎮 **COD Hardcore** : Partie classée, Division et tournois t’attendent !',
+    '',
     '🚘 **GTA VI** : Événements, rassemblements et sessions dès la sortie du jeu.',
-    `Lis le <#${rulesChannelId}>, puis connecte-toi sur <${siteUrl}/> pour commencer à jouer.`,
-    '*Bon jeu, soldat ! 🫡*',
+    '🎮 **Call of Duty Hardcore** : Partie classée, Division et tournois t’attendent !',
+    '',
+    `Connecte-toi sur [${siteName}](<${siteUrl}/>) pour te lancer.`,
+    'À toi de jouer !',
   ].join('\n');
 }
 
