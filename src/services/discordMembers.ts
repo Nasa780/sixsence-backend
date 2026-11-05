@@ -10,7 +10,7 @@ import { logToDiscord } from './siteLog.js';
  * même pendant un redéploiement où deux instances écoutent. Après une coupure, syncMembers rattrape ce qui a été manqué.
  */
 
-const { guildId, welcomeChannelId, goodbyeChannelId } = config.discord;
+const { guildId, welcomeChannelId, goodbyeChannelId, rulesChannelId } = config.discord;
 
 /** Salons renseignés : sans eux, aucune connexion permanente et DraftBot reste seul. */
 export const memberMessagesEnabled = Boolean(welcomeChannelId && goodbyeChannelId);
@@ -29,6 +29,9 @@ export interface MemberEvent {
   joined_at?: string;
 }
 
+/** Barre verticale dorée des messages d'arrivée et de départ. */
+const GOLD = 0xd4af37;
+
 const nameOf = (member: MemberEvent) => member.nick || member.user.global_name || member.user.username || null;
 
 /** Rang du membre sur le serveur : membres présents, lui compris. */
@@ -42,8 +45,8 @@ async function sendWelcome(member: MemberEvent): Promise<void> {
   await discord(`/channels/${welcomeChannelId}/messages`, {
     method: 'POST',
     body: {
-      content: welcomeText(id),
-      embeds: [{ color: 0xd4af37, image: { url: welcomeImageUrl(config.siteUrl, id, avatar, nameOf(member), await memberNumber()) } }],
+      content: welcomeText(id, rulesChannelId, config.siteUrl),
+      embeds: [{ color: GOLD, image: { url: welcomeImageUrl(config.siteUrl, id, avatar, nameOf(member), await memberNumber()) } }],
       components: [{ type: 1, components: [{ type: 2, style: 5, label: 'Aller sur SixSence', url: config.siteUrl }] }],
       allowed_mentions: { users: [id] },
     },
@@ -76,7 +79,7 @@ export async function onMemberAdd(member: MemberEvent): Promise<void> {
 export async function onMemberRemove(user: DiscordUser): Promise<void> {
   if (user.bot) return;
   const claimed = await claimDeparture(user.id);
-  if (claimed) await discord(`/channels/${goodbyeChannelId}/messages`, { method: 'POST', body: { content: goodbyeText(user.global_name || claimed.username || user.username) } });
+  if (claimed) await discord(`/channels/${goodbyeChannelId}/messages`, { method: 'POST', body: { embeds: [{ color: GOLD, description: goodbyeText(user.global_name || claimed.username || user.username) }] } });
 }
 
 async function allMembers(): Promise<MemberEvent[]> {

@@ -45,11 +45,11 @@ describe('arrivées et départs Discord', () => {
     assert.equal(goodbyeText(null), '**Un membre** a quitté SixSence. Bonne continuation, la porte reste ouverte. 👋');
   });
 
-  it('mentionne le membre, sans renvoyer au règlement déjà validé', () => {
-    const text = welcomeText('42');
+  it('mentionne le membre et le salon du règlement, lien du site sans aperçu', () => {
+    const text = welcomeText('42', '99', 'https://www.sixsence.fr');
     assert.match(text, /<@42>/);
-    assert.match(text, /Grand Theft Auto VI/);
-    assert.doesNotMatch(text, /règlement/i);
+    assert.match(text, /<#99>/);
+    assert.match(text, /<https:\/\/www\.sixsence\.fr\/>/);
   });
 
   it('encode le pseudo dans l’adresse de l’image', () => {
