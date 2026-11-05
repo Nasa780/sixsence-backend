@@ -18,6 +18,8 @@ import { pushRouter } from './routes/push.js';
 import { teamsRouter } from './routes/teams.js';
 import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
+import { startDiscordGateway, stopDiscordGateway } from './services/discordGateway.js';
+import { memberMessagesEnabled } from './services/discordMembers.js';
 import { readyToken } from './services/readyAccept.js';
 import { updateAborted, updateReady } from './services/matchFoundDm.js';
 
@@ -406,6 +408,8 @@ if (live) setTimeout(() => {
     if (added) console.log(`[cartes] ${added} carte(s) attribuée(s)${first ? ' (attribution rétroactive)' : ''}`);
   })().catch((error) => console.warn('[cartes]', (error as Error).message));
 }, 30_000);
+// Arrivées et départs du serveur Discord : connexion permanente, seulement si les salons sont renseignés.
+if (live && discordEnabled && memberMessagesEnabled) startDiscordGateway();
 const cardsTimer = live ? setInterval(() => void syncAllCards().catch(() => {}), 60 * 60_000) : undefined;
 // Annonces Discord programmées : vérifiées chaque minute, et au démarrage (retard d'une mise en veille).
 const scheduledTimer = live ? setInterval(() => void sweepScheduledAnnouncements().catch((error) => console.warn('[annonces]', (error as Error).message)), 60_000) : undefined;
@@ -443,6 +447,7 @@ server.listen(config.port, () => {
 // Arrêt propre : Render envoie SIGTERM à chaque redéploiement.
 function shutdown(signal: string): void {
   console.log(`[boot] ${signal} reçu, arrêt en cours`);
+  stopDiscordGateway();
   clearInterval(sweeper);
   clearInterval(teamTimer);
   clearInterval(teamQueueTimer);
