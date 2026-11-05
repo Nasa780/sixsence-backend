@@ -56,7 +56,7 @@ export function welcomeText(userId: string): string {
     '• Ranked, Divisions & Tournois',
     '**Grand Theft Auto VI**',
     '• Événements, sessions organisées et rassemblements dès la sortie du jeu',
-    'Bon jeu, soldat ! 🫡',
+    '*Bon jeu, soldat ! 🫡*',
   ].join('\n');
 }
 
