@@ -45,10 +45,10 @@ describe('arrivées et départs Discord', () => {
     assert.equal(goodbyeText(null), '**Un membre** a quitté SixSence. Bonne continuation, la porte reste ouverte. 👋');
   });
 
-  it('mentionne le membre, lien du site sans aperçu', () => {
-    const text = welcomeText('42', 'https://www.sixsence.fr');
+  it('mentionne le membre, sans lien écrit', () => {
+    const text = welcomeText('42');
     assert.match(text, /<@42>/);
-    assert.match(text, /\[sixsence\.fr\]\(<https:\/\/www\.sixsence\.fr\/>\)/);
+    assert.doesNotMatch(text, /https?:/);
   });
 
   it('encode le pseudo dans l’adresse de l’image', () => {

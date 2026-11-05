@@ -45,7 +45,7 @@ async function sendWelcome(member: MemberEvent): Promise<void> {
   await discord(`/channels/${welcomeChannelId}/messages`, {
     method: 'POST',
     body: {
-      content: welcomeText(id, config.siteUrl),
+      content: welcomeText(id),
       embeds: [{ color: GOLD, image: { url: welcomeImageUrl(config.siteUrl, id, avatar, nameOf(member), await memberNumber()) } }],
       components: [{ type: 1, components: [{ type: 2, style: 5, label: 'Aller sur SixSence', url: config.siteUrl }] }],
       allowed_mentions: { users: [id] },

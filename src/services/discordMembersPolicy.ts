@@ -49,8 +49,7 @@ export function plainName(name: string | null | undefined): string {
   return [...clean].slice(0, 40).join('').trim() || 'Un membre';
 }
 
-export function welcomeText(userId: string, siteUrl: string): string {
-  const siteName = new URL(siteUrl).hostname.replace(/^www\./, '');
+export function welcomeText(userId: string): string {
   return [
     `👁️ Bienvenue sur SixSence, <@${userId}> !`,
     'Prêt à laisser ton empreinte ?',
@@ -58,7 +57,6 @@ export function welcomeText(userId: string, siteUrl: string): string {
     '🚘 **GTA VI** : Événements, rassemblements et sessions dès la sortie du jeu.',
     '🎮 **Call of Duty Hardcore** : Partie classée, Division et tournois t’attendent !',
     '',
-    `Connecte-toi sur [${siteName}](<${siteUrl}/>) pour te lancer.`,
     'À toi de jouer !',
   ].join('\n');
 }
