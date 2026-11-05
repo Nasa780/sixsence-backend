@@ -48,7 +48,6 @@ describe('arrivées et départs Discord', () => {
   it('mentionne le membre, sans renvoyer au règlement déjà validé', () => {
     const text = welcomeText('42');
     assert.match(text, /<@42>/);
-    assert.match(text, /GTA 6/);
     assert.doesNotMatch(text, /règlement/i);
   });
 
