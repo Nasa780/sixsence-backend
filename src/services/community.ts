@@ -491,15 +491,14 @@ export async function postWeeklyTop(now = new Date()): Promise<void> {
 const divisionAnnounced = new Map<string, number>();
 
 export function announceDivisionSearch(teamId: string, playersPerTeam: number, searching: number): void {
-  const channel = config.discord.divisionChannelId || codChannelId;
-  if (!discordEnabled || !channel || !config.teams.enabled || !config.teams.discord) return;
+  if (!discordEnabled || !codChannelId || !config.teams.enabled || !config.teams.discord) return;
   const now = Date.now();
   for (const [id, at] of divisionAnnounced) if (now - at >= 10 * 60_000) divisionAnnounced.delete(id);
   if (divisionAnnounced.has(teamId)) return;
   divisionAnnounced.set(teamId, now);
   const format = `${playersPerTeam}v${playersPerTeam}`;
   void announce(
-    channel,
+    codChannelId,
     `⚔️ **Division ${format}** : ${searching > 1 ? `**${searching} équipes** cherchent` : 'une équipe cherche'} un adversaire ! Lance une recherche avec la tienne : ${site}/cod/division`,
   );
 }
