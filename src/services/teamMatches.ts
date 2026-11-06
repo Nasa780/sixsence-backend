@@ -1071,7 +1071,7 @@ async function sweepTeamDiscord(): Promise<void> {
         };
         const pointsText = (side: Side) => (points(side) ? ` (${points(side)} pts)` : '');
         const loserSide: Side = match.winner === 'A' ? 'B' : 'A';
-        // Match de coupe : nom de la coupe, tour et rouge des tournois (pas de points d'équipe en jeu).
+        // Match de coupe : nom de la coupe et tour (pas de points d'équipe en jeu).
         let cup: { name: string; round: string | null } | null = null;
         if (match.tournament_id) {
           const { data: entry } = await supabase.from('tournament_bracket').select('round').eq('match_id', match.id).maybeSingle();
@@ -1085,7 +1085,7 @@ async function sweepTeamDiscord(): Promise<void> {
               {
                 author: { name: cup ? `🏆 ${cup.name.toUpperCase()} · BO${match.best_of}` : `⚔️ DIVISION · BO${match.best_of}` },
                 title: `[${a?.tag}] ${a?.name}  vs  [${b?.tag}] ${b?.name}`,
-                color: cup ? 0xe5484d : Number.parseInt((winner?.color ?? '#d4af37').replace('#', ''), 16) || 0xd4af37,
+                color: 0xd4af37,
                 description:
                   `🏆 Victoire de **[${winner?.tag}] ${winner?.name}**${pointsText(match.winner)} ${match.forfeit ? 'par forfait' : `${won} – ${lost}`}\n` +
                   `[${loser?.tag}] ${loser?.name}${pointsText(loserSide)}${match.corrected_at ? '\n_Résultat corrigé par l’équipe SixSence_' : ''}`,
