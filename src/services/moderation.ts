@@ -2,15 +2,17 @@ import { codMatchPlayers, refuseOwnMatch } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
-import { PLAYER_CORRECTION_HOURS, withinWindow } from './correctionPolicy.js';
+import { PLAYER_CORRECTION_HOURS, teamArbitrationOpen, withinWindow } from './correctionPolicy.js';
 import { dm } from './discord.js';
+import { matchInsiders } from './teamMatches.js';
 
 /**
  * Vote du MVP, demandes d'arbitrage et signalements de joueurs.
  *
  *   - MVP : chaque joueur d'un match terminé élit le meilleur joueur (24 h pour voter).
  *     Le plus élu du mois écoulé reçoit le badge « mvp-AAAA-MM » (cod_award_monthly_mvp).
- *   - Arbitrage : pendant un match, un joueur demande l'intervention d'un admin.
+ *   - Arbitrage : pendant un match, ou 24 h après pour une correction, un joueur demande l'intervention d'un arbitre.
+ *     Une demande vise un match classé (match_id) ou d'équipe (team_match_id), Division et coupes.
  *   - Signalement : n'importe quel joueur connecté peut signaler un autre joueur.
  * Arbitrages et signalements sont privés (lus par les admins uniquement).
  */
@@ -91,7 +93,8 @@ export async function awardPreviousMonthMvp(): Promise<{ userId: string; month: 
 
 export interface ArbitrationRequest {
   id: number;
-  match_id: string;
+  match_id: string | null;
+  team_match_id: string | null;
   user_id: string;
   reason: string;
   details: string | null;
@@ -100,12 +103,34 @@ export interface ArbitrationRequest {
   created_at: string;
 }
 
-export async function requestArbitration(matchId: string, userId: string, body: unknown): Promise<ArbitrationRequest> {
+type MatchColumn = 'match_id' | 'team_match_id';
+
+function requestInput(body: unknown): { reason: string; details: string | null } {
   const input = (body ?? {}) as { reason?: unknown; details?: unknown };
   if (typeof input.reason !== 'string' || !ARBITRATION_REASONS[input.reason]) {
     throw new HttpError(400, 'INVALID_REASON', 'Choisis un motif.');
   }
-  const details = cleanDetails(input.details);
+  return { reason: input.reason, details: cleanDetails(input.details) };
+}
+
+/** Une demande en attente par joueur et par match. */
+async function createRequest(column: MatchColumn, matchId: string, userId: string, input: { reason: string; details: string | null }): Promise<ArbitrationRequest> {
+  const { count, error } = await supabase
+    .from('cod_arbitration_requests')
+    .select('id', { count: 'exact', head: true })
+    .eq(column, matchId)
+    .eq('user_id', userId)
+    .eq('status', 'open');
+  if (error) throw fromDbError(error);
+  if ((count ?? 0) >= 1) throw new HttpError(429, 'TOO_MANY_REQUESTS', 'Tu as déjà une demande en attente pour ce match : un arbitre arrive.');
+
+  return unwrap(
+    await supabase.from('cod_arbitration_requests').insert({ [column]: matchId, user_id: userId, reason: input.reason, details: input.details }).select('*').single(),
+  ) as ArbitrationRequest;
+}
+
+export async function requestArbitration(matchId: string, userId: string, body: unknown): Promise<ArbitrationRequest> {
+  const input = requestInput(body);
 
   const match = unwrap(await supabase.from('cod_matches').select('status, team_a, team_b, completed_at').eq('id', matchId).maybeSingle()) as {
     status: string;
@@ -122,18 +147,31 @@ export async function requestArbitration(matchId: string, userId: string, body: 
     throw new HttpError(409, 'MATCH_CLOSED', "Ce match est terminé depuis plus de 24 h : utilise plutôt « Signaler » sur le joueur concerné.");
   }
 
-  const { count, error } = await supabase
-    .from('cod_arbitration_requests')
-    .select('id', { count: 'exact', head: true })
-    .eq('match_id', matchId)
-    .eq('user_id', userId)
-    .eq('status', 'open');
-  if (error) throw fromDbError(error);
-  if ((count ?? 0) >= 1) throw new HttpError(429, 'TOO_MANY_REQUESTS', 'Tu as déjà une demande en attente pour ce match : un arbitre arrive.');
+  return createRequest('match_id', matchId, userId, input);
+}
 
-  return unwrap(
-    await supabase.from('cod_arbitration_requests').insert({ match_id: matchId, user_id: userId, reason: input.reason, details }).select('*').single(),
-  ) as ArbitrationRequest;
+/** Match de Division ou de coupe : joueurs du match seulement, mêmes délais que le Classé. */
+export async function requestTeamArbitration(matchId: string, userId: string, body: unknown): Promise<ArbitrationRequest> {
+  const input = requestInput(body);
+  const match = unwrap(await supabase.from('team_matches').select('status, roster_a, roster_b, completed_at, friendly').eq('id', matchId).maybeSingle()) as {
+    status: string;
+    roster_a: string[];
+    roster_b: string[];
+    completed_at: string | null;
+    friendly: boolean;
+  } | null;
+  if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
+  if (![...match.roster_a, ...match.roster_b].includes(userId)) throw new HttpError(403, 'NOT_A_PLAYER', 'Tu ne participes pas à ce match.');
+  if (!teamArbitrationOpen(match.status, match.completed_at, match.friendly)) {
+    throw new HttpError(409, 'MATCH_CLOSED', 'Ce match ne peut plus être corrigé depuis la feuille : ouvre un ticket sur Discord.');
+  }
+  return createRequest('team_match_id', matchId, userId, input);
+}
+
+export async function myTeamArbitrations(matchId: string, userId: string): Promise<ArbitrationRequest[]> {
+  return (unwrap(
+    await supabase.from('cod_arbitration_requests').select('*').eq('team_match_id', matchId).eq('user_id', userId).order('created_at'),
+  ) ?? []) as ArbitrationRequest[];
 }
 
 export async function myArbitrations(matchId: string, userId: string): Promise<ArbitrationRequest[]> {
@@ -143,8 +181,8 @@ export async function myArbitrations(matchId: string, userId: string): Promise<A
 }
 
 /** Une demande d'arbitrage ouverte sur ce match, quel que soit le joueur qui l'a faite. */
-export async function hasOpenArbitration(matchId: string): Promise<boolean> {
-  const { count } = await supabase.from('cod_arbitration_requests').select('match_id', { count: 'exact', head: true }).eq('match_id', matchId).eq('status', 'open');
+export async function hasOpenArbitration(matchId: string, column: MatchColumn = 'match_id'): Promise<boolean> {
+  const { count } = await supabase.from('cod_arbitration_requests').select('id', { count: 'exact', head: true }).eq(column, matchId).eq('status', 'open');
   return (count ?? 0) > 0;
 }
 
@@ -212,7 +250,7 @@ type Table = 'cod_arbitration_requests' | 'cod_player_reports';
 export async function listForAdmin(table: Table, status: unknown, matchId?: unknown) {
   let query = supabase.from(table).select('*').order('created_at', { ascending: false }).limit(100);
   if (status === 'open' || status === 'resolved' || status === 'rejected') query = query.eq('status', status);
-  if (typeof matchId === 'string' && /^[0-9a-f-]{36}$/i.test(matchId)) query = query.eq('match_id', matchId);
+  if (typeof matchId === 'string' && /^[0-9a-f-]{36}$/i.test(matchId)) query = table === 'cod_arbitration_requests' ? query.or(`match_id.eq.${matchId},team_match_id.eq.${matchId}`) : query.eq('match_id', matchId);
   const rows = (unwrap(await query) ?? []) as Record<string, unknown>[];
   const ids = new Set<string>();
   for (const row of rows) {
@@ -245,8 +283,12 @@ export async function closeCase(table: Table, id: unknown, adminId: string, body
   }
   const resolution = cleanDetails(input.resolution);
   const reopened = input.status === 'open';
-  const current = unwrap(await supabase.from(table).select('*').eq('id', caseId).maybeSingle()) as { match_id?: string | null; target_id?: string | null } | null;
+  const current = unwrap(await supabase.from(table).select('*').eq('id', caseId).maybeSingle()) as { match_id?: string | null; team_match_id?: string | null; target_id?: string | null } | null;
   if (current?.match_id) await refuseOwnMatch(await codMatchPlayers(current.match_id), adminId);
+  if (current?.team_match_id) {
+    const { data: teamMatch } = await supabase.from('team_matches').select('team_a, team_b, roster_a, roster_b').eq('id', current.team_match_id).maybeSingle();
+    if (teamMatch) await refuseOwnMatch(await matchInsiders(teamMatch as Parameters<typeof matchInsiders>[0]), adminId);
+  }
   if (current?.target_id) await refuseOwnMatch([current.target_id], adminId);
   const row = unwrap(
     await supabase
@@ -267,7 +309,7 @@ export async function closeCase(table: Table, id: unknown, adminId: string, body
     void dm(
       [request.user_id],
       `🛡️ **Ta demande d’arbitrage a été traitée** — ${input.status === 'resolved' ? 'Traitée' : 'Sans suite'}` +
-        `${resolution ? `\nNote de l’équipe : ${resolution}` : ''}\n${config.siteUrl}/cod/match/${request.match_id}`,
+        `${resolution ? `\nNote de l’équipe : ${resolution}` : ''}\n${config.siteUrl}/${request.team_match_id ? `cod/equipes/match/${request.team_match_id}` : `cod/match/${request.match_id}`}`,
     );
   }
   return row;
@@ -286,11 +328,11 @@ export async function openCounts(): Promise<{ arbitrations: number; reports: num
  * Après une correction : les demandes d'arbitrage encore ouvertes de ce match sont classées
  * « traitées » avec la décision en note (les joueurs ont déjà reçu le message de correction).
  */
-export async function resolveOpenRequests(matchId: string, staffId: string, resolution: string): Promise<void> {
+export async function resolveOpenRequests(matchId: string, staffId: string, resolution: string, column: MatchColumn = 'match_id'): Promise<void> {
   const { error } = await supabase
     .from('cod_arbitration_requests')
     .update({ status: 'resolved', resolution: resolution.slice(0, 500), resolved_by: staffId, resolved_at: new Date().toISOString() })
-    .eq('match_id', matchId)
+    .eq(column, matchId)
     .eq('status', 'open');
   if (error) console.warn('[arbitrage] clôture des demandes impossible', error.message);
 }

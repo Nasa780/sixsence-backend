@@ -30,6 +30,7 @@ export async function reliability(userId: string) {
       .from('team_matches')
       .select('id, roster_a, roster_b, winner, forfeit, status')
       .eq('status', 'completed')
+      .eq('friendly', false)
       .gte('created_at', since)
       .or(`roster_a.cs.{${userId}},roster_b.cs.{${userId}}`)
       .limit(500),
