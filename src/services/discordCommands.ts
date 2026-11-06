@@ -298,7 +298,7 @@ async function profile(name: string, discordId: string): Promise<Reply> {
     embeds: [
       {
         color: rank.color,
-        author: { name: 'SixSence · Classé' },
+        author: { name: 'SixSence' },
         title: `${user.username} · ${rank.name}`,
         url: `${SITE}/cod/profile/${user.id}`,
         description: card
