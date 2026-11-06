@@ -195,8 +195,8 @@ export const config = {
     goodbyeChannelId: process.env.DISCORD_GOODBYE_CHANNEL_ID?.trim() || process.env.DISCORD_WELCOME_CHANNEL_ID?.trim() || '1341103572196261929',
     /** Salon des annonces de directs Twitch. */
     liveChannelId: process.env.DISCORD_LIVE_CHANNEL_ID?.trim() || '1567998192359055460',
-    /** Salon du panneau « Choisis tes notifications » (publié depuis l'admin). */
-    notifyChannelId: process.env.DISCORD_NOTIFY_CHANNEL_ID?.trim() || '1568000735042478191',
+    /** Salon du panneau « Choisis tes notifications » : vide, panneau retiré pour le moment. */
+    notifyChannelId: process.env.DISCORD_NOTIFY_CHANNEL_ID?.trim() || '',
   },
 
   /** Adresse publique du site (liens envoyés sur Discord). */
