@@ -173,12 +173,10 @@ export const config = {
     staffChannelId: process.env.DISCORD_STAFF_CHANNEL_ID?.trim() || '',
     /** Salon privé des alertes d'erreurs (facultatif, sinon le salon de l'équipe). */
     alertsChannelId: process.env.DISCORD_ALERTS_CHANNEL_ID?.trim() || '',
-    /** Salon des annonces COD : file qui se remplit, MVP du mois, fin de saison (facultatif). */
-    codChannelId: process.env.DISCORD_COD_CHANNEL_ID?.trim() || '',
+    /** Salon des annonces COD, Classé et Division réunis : file qui se remplit, équipe qui cherche un match, MVP du mois, fin de saison (facultatif). */
+    codChannelId: process.env.DISCORD_COD_CHANNEL_ID?.trim() || process.env.DISCORD_DIVISION_CHANNEL_ID?.trim() || '',
     /** Salon des annonces GTA 6 : nouveaux événements, rappels (facultatif). */
     gtaChannelId: process.env.DISCORD_GTA_CHANNEL_ID?.trim() || '',
-    /** Salon des annonces Division : équipe qui cherche un match (facultatif, sinon le salon COD). */
-    divisionChannelId: process.env.DISCORD_DIVISION_CHANNEL_ID?.trim() || '',
     /** Salon privé du journal : inscrits, équipes créées, bilan quotidien (facultatif, sinon le salon de l'équipe). */
     logsChannelId: process.env.DISCORD_LOGS_CHANNEL_ID?.trim() || '',
     /** Salon des annonces illustrées (coupes, événements GTA, fin de saison, nouveautés ; facultatif). */

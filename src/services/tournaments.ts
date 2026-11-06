@@ -1342,9 +1342,9 @@ async function giveWinnerRole(tournament: TournamentRow, roster: string[]): Prom
  * déjà ce moment dans le salon des annonces, le message texte n'est alors pas publié (pas de doublon).
  */
 async function announce(content: string, kind: Kind = 'saison', illustrated = false): Promise<void> {
-  const { announceChannelId, codAnnounceChannelId, divisionChannelId, codChannelId, resultsChannelId } = config.discord;
+  const { announceChannelId, codAnnounceChannelId, codChannelId, resultsChannelId } = config.discord;
   if (illustrated && (codAnnounceChannelId || announceChannelId)) return;
-  const channel = codAnnounceChannelId || announceChannelId || (isCup(kind) && divisionChannelId) || codChannelId || resultsChannelId;
+  const channel = codAnnounceChannelId || announceChannelId || codChannelId || resultsChannelId;
   if (!discordEnabled || !config.teams.discord || !channel) return;
   await discord(`/channels/${channel}/messages`, { method: 'POST', body: { content, flags: SUPPRESS_EMBEDS } }).catch((caught) =>
     console.warn('[tournoi] annonce impossible', (caught as Error).message),
