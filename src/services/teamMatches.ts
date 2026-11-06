@@ -1,7 +1,7 @@
 import { isReferee, refuseOwnMatch, roleOf } from '../auth.js';
 import { mayArbitrateOwnMatch } from '../roles.js';
 import { config } from '../config.js';
-import { resultCardUrl } from './resultCardPolicy.js';
+import { resultCardUrl, signedPoints } from './resultCardPolicy.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { discord, discordEnabled, dm, matchVoiceOverwrites, notifyStaff } from './discord.js';
@@ -1062,38 +1062,36 @@ async function sweepTeamDiscord(): Promise<void> {
         const a = teams.get(match.team_a);
         const b = teams.get(match.team_b);
         const winner = match.winner === 'A' ? a : b;
-        const loser = match.winner === 'A' ? b : a;
         const state = seriesState(match.scores, match.best_of);
-        const [won, lost] = match.winner === 'A' ? [state.mapsA, state.mapsB] : [state.mapsB, state.mapsA];
         const points = (side: Side) => {
           const value = match.points_changes?.[side];
-          return typeof value === 'number' ? ` (${value >= 0 ? '+' : ''}${value} pts)` : '';
+          return typeof value === 'number' ? signedPoints(value) : null;
         };
-        const loserSide: Side = match.winner === 'A' ? 'B' : 'A';
-        // Match de coupe : nom de la coupe et rouge des tournois (pas de points d'équipe en jeu).
-        const cup = match.tournament_id
-          ? ((unwrap(await supabase.from('tournaments').select('name').eq('id', match.tournament_id).maybeSingle()) as { name: string } | null) ?? { name: 'Tournoi' })
-          : null;
+        // Match de coupe : nom de la coupe, tour et rouge des tournois (pas de points d'équipe en jeu).
+        let cup: { name: string; round: string | null } | null = null;
+        if (match.tournament_id) {
+          const { data: entry } = await supabase.from('tournament_bracket').select('round').eq('match_id', match.id).maybeSingle();
+          cup = (await tournamentLabel(match.tournament_id, (entry as { round: number } | null)?.round ?? null, match.id)) ?? { name: 'Tournoi', round: null };
+        }
         const posted = (await discord(`/channels/${resultsChannelId}/messages`, {
           method: 'POST',
           body: {
             allowed_mentions: { parse: [] },
             embeds: [
               {
-                author: { name: cup ? `🏆 ${cup.name.toUpperCase()} · BO${match.best_of}` : `⚔️ DIVISION · BO${match.best_of}` },
-                title: `[${a?.tag}] ${a?.name}  vs  [${b?.tag}] ${b?.name}`,
+                title: 'Voir la feuille de match',
                 url: `${config.siteUrl}${matchUrl(match.id)}`,
                 color: cup ? 0xe5484d : Number.parseInt((winner?.color ?? '#d4af37').replace('#', ''), 16) || 0xd4af37,
-                description:
-                  `🏆 Victoire de **[${winner?.tag}] ${winner?.name}**${points(match.winner)} ${match.forfeit ? 'par forfait' : `${won} – ${lost}`}\n` +
-                  `[${loser?.tag}] ${loser?.name}${points(loserSide)}${match.corrected_at ? '\n_Résultat corrigé par l’équipe SixSence_' : ''}`,
-                fields: match.forfeit
-                  ? []
-                  : match.scores.map(([x, y], i) => ({ name: `Map ${i + 1} · ${match.maps[i]?.map ?? '?'}`, value: `[${a?.tag}] ${x} – ${y} [${b?.tag}]`, inline: true })),
+                description: match.corrected_at ? '_Résultat corrigé par l’équipe SixSence_' : undefined,
                 image: {
                   url: resultCardUrl(config.siteUrl, {
                     kind: cup ? 'tournoi' : 'division',
                     label: `${cup ? cup.name : 'Division'} · BO${match.best_of}`,
+                    phase: cup?.round,
+                    pointsA: points('A'),
+                    pointsB: points('B'),
+                    logoA: a?.logo_url,
+                    logoB: b?.logo_url,
                     map: match.maps[match.scores.length - 1]?.map ?? match.maps[0]?.map,
                     a: `[${a?.tag}] ${a?.name}`,
                     b: `[${b?.tag}] ${b?.name}`,
@@ -1103,7 +1101,6 @@ async function sweepTeamDiscord(): Promise<void> {
                     forfeit: match.forfeit,
                   }),
                 },
-                footer: { text: cup ? `${cup.name} · coupe` : 'Division · matchs d’équipe' },
                 timestamp: match.completed_at ?? undefined,
               },
             ],
@@ -1113,6 +1110,8 @@ async function sweepTeamDiscord(): Promise<void> {
       }
     }
     await supabase.from('team_matches').update({ discord_done: true, discord_result_message: resultMessage }).eq('id', match.id);
+    // Capture envoyée avant la validation : la carte reprend le meilleur joueur (chargé à la demande, dépendance circulaire).
+    if (resultMessage) void import('./matchStats.js').then(({ refreshResultCard }) => refreshResultCard('division', match.id)).catch((caught) => console.warn('[team-match] carte de résultat', (caught as Error).message));
     if (match.status === 'completed' && !match.corrected_at) {
       await pushToUsers([...match.roster_a, ...match.roster_b], {
         category: 'match',

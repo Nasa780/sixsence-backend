@@ -239,25 +239,16 @@ async function sweepOnce(): Promise<void> {
     if (match.status === 'completed' && match.winner && resultsChannelId && recent) {
       try {
         const names = await usernames([...match.team_a, ...match.team_b]);
-        const team = (ids: string[]) =>
-          ids.map((id) => `${names.get(id) ?? 'Joueur'} (${(match.points_changes?.[id] ?? 0) >= 0 ? '+' : ''}${match.points_changes?.[id] ?? 0})`).join(', ');
-        const winners = match.winner === 'A' ? match.team_a : match.team_b;
-        const losers = match.winner === 'A' ? match.team_b : match.team_a;
         const posted = (await discord(`/channels/${resultsChannelId}/messages`, {
           method: 'POST',
           body: {
             allowed_mentions: { parse: [] },
             embeds: [
               {
-                author: { name: `🎯 CLASSÉ · ${match.team_size}v${match.team_size}` },
-                title: `${match.map} · ${match.mode}`,
+                title: 'Voir la feuille de match',
                 url: matchUrl(match),
-                color: 0xd4af37,
-                description: `🏆 Victoire de l'Équipe ${match.winner === 'A' ? '1' : '2'}${match.corrected_at ? '\n_Résultat corrigé par l’équipe SixSence_' : ''}`,
-                fields: [
-                  { name: 'Gagnants', value: team(winners).slice(0, 1000) || '—' },
-                  { name: 'Perdants', value: team(losers).slice(0, 1000) || '—' },
-                ],
+                color: 0x34d399,
+                description: match.corrected_at ? '_Résultat corrigé par l’équipe SixSence_' : undefined,
                 image: {
                   url: resultCardUrl(config.siteUrl, {
                     kind: 'classe',
@@ -270,7 +261,6 @@ async function sweepOnce(): Promise<void> {
                     winner: match.winner,
                   }),
                 },
-                footer: { text: 'Classé solo' },
                 timestamp: match.completed_at ?? undefined,
               },
             ],
@@ -283,6 +273,8 @@ async function sweepOnce(): Promise<void> {
     }
 
     await supabase.from('cod_matches').update({ discord_done: true, discord_result_message: resultMessage }).eq('id', match.id);
+    // Capture envoyée avant la validation : la carte reprend le meilleur joueur et le score (chargé à la demande, dépendance circulaire).
+    if (resultMessage) void import('./matchStats.js').then(({ refreshResultCard }) => refreshResultCard('classe', match.id)).catch((caught) => console.warn('[discord] carte de résultat', (caught as Error).message));
     if (match.status === 'completed') bus.emit('match:finalized', match);
     if (match.status === 'cancelled' && match.cancel_reason === 'abandoned' && recent) bus.emit('match:abandoned', match);
   }

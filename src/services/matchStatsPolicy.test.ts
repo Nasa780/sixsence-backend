@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { captureReminderText, coversMatch, cupBest, maxRounds, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsBoard, statsByMatch, summarizeStats, validRow } from './matchStatsPolicy.js';
+import { captureReminderText, coversMatch, cupBest, maxRounds, objectiveLeader, openMaps, validRounds, parseRows, plausibleRows, sameCapture, statsBoard, statsByMatch, summarizeStats, validRow } from './matchStatsPolicy.js';
 
 const row = (userId: string, score = 1570, kills = 10) => ({ userId, score, kills, plants: 1, defuses: 0 });
 
@@ -142,5 +142,18 @@ describe('stats de capture : coupes et classements', () => {
   it('calcule les moyennes des joueurs assez présents', () => {
     const rows = [line('a', 1000, 5, 1, 0), line('a', 2000, 10, 1, 1), line('b', 9000, 30)];
     assert.deepEqual(statsBoard(rows, 2), [{ userId: 'a', maps: 2, score: 3000, kills: 15, plants: 2, defuses: 1, avgKills: 7.5, avgScore: 1500, avgObjectives: 1.5 }]);
+  });
+});
+
+describe('stats de capture : score de manches', () => {
+  it('garde un score de fin de partie', () => {
+    assert.deepEqual(validRounds([8, 5], 8), [8, 5]);
+    assert.deepEqual(validRounds([2, 6], 6), [2, 6]);
+  });
+  it('écarte le reste', () => {
+    assert.equal(validRounds([8, 8], 8), null);
+    assert.equal(validRounds([5, 5], 8), null);
+    assert.equal(validRounds([9, 5], 8), null);
+    assert.equal(validRounds(undefined, 8), null);
   });
 });
