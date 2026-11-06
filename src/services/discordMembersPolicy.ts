@@ -65,6 +65,25 @@ export function goodbyeText(name: string | null | undefined): string {
   return `**${plainName(name)}** a quitté SixSence. Bonne continuation, la porte reste ouverte. 👋`;
 }
 
+/** Identifiant Discord d'une mention (<@123> ou <@!123>), null pour un pseudo écrit. */
+export function mentionedId(text: string): string | null {
+  return text.trim().match(/^<@!?(\d{15,22})>$/)?.[1] ?? null;
+}
+
+/** Trophées d'un joueur sur /profil : Coupe Horus et Coupe Anubis, métal par métal, sans les métaux à zéro. */
+export function trophiesText(medals: { kind: string; place: string }[]): string {
+  const cups: [string, string][] = [['horus', 'Coupe Horus'], ['anubis', 'Coupe Anubis']];
+  const lines = cups.flatMap(([kind, label]) => {
+    const won = medals.filter((medal) => medal.kind === kind);
+    const metals = ['or', 'argent', 'bronze'].flatMap((place) => {
+      const count = won.filter((medal) => medal.place === place).length;
+      return count ? [`${count} ${place}`] : [];
+    });
+    return metals.length ? [`${label} : ${metals.join(' · ')}`] : [];
+  });
+  return lines.join('\n') || 'Aucun';
+}
+
 /** Nom du salon compteur. */
 export function memberCountName(count: number): string {
   return `👥 Membres : ${count}`;

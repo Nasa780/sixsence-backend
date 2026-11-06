@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { MAX_CATCH_UP, diffMembers, goodbyeText, plainName, welcomeImageUrl, welcomeText, memberCountName, playerCardUrl } from './discordMembersPolicy.js';
+import { MAX_CATCH_UP, diffMembers, goodbyeText, plainName, welcomeImageUrl, welcomeText, memberCountName, mentionedId, playerCardUrl, trophiesText } from './discordMembersPolicy.js';
 
 const now = 1_800_000_000_000;
 const hour = 3600_000;
@@ -71,5 +71,22 @@ describe('compteur et carte de joueur', () => {
 
   it('prend la carte de visite par défaut', () => {
     assert.match(playerCardUrl('https://s.fr', 'abc', { points: 0, wins: 0, losses: 0, calling_card: null }), /v=0-0-0-sixsence$/);
+  });
+});
+
+describe('/profil', () => {
+  it('reconnaît une mention Discord', () => {
+    assert.equal(mentionedId('<@123456789012345678>'), '123456789012345678');
+    assert.equal(mentionedId(' <@!123456789012345678> '), '123456789012345678');
+    assert.equal(mentionedId('baj7min14.'), null);
+  });
+
+  it('sépare les trophées des deux coupes et cache les métaux à zéro', () => {
+    assert.equal(trophiesText([]), 'Aucun');
+    assert.equal(trophiesText([{ kind: 'horus', place: 'or' }]), 'Coupe Horus : 1 or');
+    assert.equal(
+      trophiesText([{ kind: 'horus', place: 'or' }, { kind: 'horus', place: 'or' }, { kind: 'anubis', place: 'bronze' }, { kind: 'horus', place: 'argent' }]),
+      'Coupe Horus : 2 or · 1 argent\nCoupe Anubis : 1 bronze',
+    );
   });
 });
