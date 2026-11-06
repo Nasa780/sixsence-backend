@@ -2,6 +2,7 @@ import { type NotificationCategory, recipientsFor } from './notificationPrefs.js
 import { config } from '../config.js';
 import { bus, type CodMatch } from '../events.js';
 import { supabase } from '../supabase.js';
+import { resultCardUrl } from './resultCardPolicy.js';
 import { sendMatchFound, updateClosed, updateStarted } from './matchFoundDm.js';
 
 /**
@@ -257,6 +258,18 @@ async function sweepOnce(): Promise<void> {
                   { name: 'Gagnants', value: team(winners).slice(0, 1000) || '—' },
                   { name: 'Perdants', value: team(losers).slice(0, 1000) || '—' },
                 ],
+                image: {
+                  url: resultCardUrl(config.siteUrl, {
+                    kind: 'classe',
+                    label: `Classé ${match.team_size}v${match.team_size}`,
+                    map: match.map,
+                    a: 'Équipe 1',
+                    b: 'Équipe 2',
+                    playersA: match.team_a.map((id) => names.get(id) ?? 'Joueur'),
+                    playersB: match.team_b.map((id) => names.get(id) ?? 'Joueur'),
+                    winner: match.winner,
+                  }),
+                },
                 footer: { text: 'Classé solo' },
                 timestamp: match.completed_at ?? undefined,
               },
