@@ -1,6 +1,7 @@
 import { isReferee, refuseOwnMatch, roleOf } from '../auth.js';
 import { mayArbitrateOwnMatch } from '../roles.js';
 import { config } from '../config.js';
+import { resultCardUrl } from './resultCardPolicy.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { discord, discordEnabled, dm, matchVoiceOverwrites, notifyStaff } from './discord.js';
@@ -1045,6 +1046,7 @@ export async function sweepTeamMatches(): Promise<void> {
 async function sweepTeamDiscord(): Promise<void> {
   const rows = (unwrap(await supabase.from('team_matches').select('*').in('status', ['completed', 'cancelled']).eq('discord_done', false).limit(20)) ?? []) as TeamMatch[];
   for (const match of rows) {
+    let resultMessage: string | null = null;
     if (discordEnabled && config.teams.discord) {
       for (const id of Object.values(match.discord_channels ?? {})) await discord(`/channels/${id}`, { method: 'DELETE' }).catch(() => {});
       const { resultsChannelId } = config.discord;
@@ -1065,7 +1067,7 @@ async function sweepTeamDiscord(): Promise<void> {
         const cup = match.tournament_id
           ? ((unwrap(await supabase.from('tournaments').select('name').eq('id', match.tournament_id).maybeSingle()) as { name: string } | null) ?? { name: 'Tournoi' })
           : null;
-        await discord(`/channels/${resultsChannelId}/messages`, {
+        const posted = (await discord(`/channels/${resultsChannelId}/messages`, {
           method: 'POST',
           body: {
             allowed_mentions: { parse: [] },
@@ -1081,15 +1083,29 @@ async function sweepTeamDiscord(): Promise<void> {
                 fields: match.forfeit
                   ? []
                   : match.scores.map(([x, y], i) => ({ name: `Map ${i + 1} · ${match.maps[i]?.map ?? '?'}`, value: `[${a?.tag}] ${x} – ${y} [${b?.tag}]`, inline: true })),
+                image: {
+                  url: resultCardUrl(config.siteUrl, {
+                    kind: cup ? 'tournoi' : 'division',
+                    label: `${cup ? cup.name : 'Division'} · BO${match.best_of}`,
+                    map: match.maps[match.scores.length - 1]?.map ?? match.maps[0]?.map,
+                    a: `[${a?.tag}] ${a?.name}`,
+                    b: `[${b?.tag}] ${b?.name}`,
+                    winner: match.winner,
+                    series: [state.mapsA, state.mapsB],
+                    maps: match.forfeit ? [] : match.scores.map(([x, y], i) => ({ name: match.maps[i]?.map ?? '?', score: [x, y] as [number, number] })),
+                    forfeit: match.forfeit,
+                  }),
+                },
                 footer: { text: cup ? `${cup.name} · coupe` : 'Division · matchs d’équipe' },
                 timestamp: match.completed_at ?? undefined,
               },
             ],
           },
-        }).catch((caught) => console.warn('[team-match] résultat Discord impossible', (caught as Error).message));
+        }).catch((caught) => console.warn('[team-match] résultat Discord impossible', (caught as Error).message))) as { id?: string } | null | undefined;
+        resultMessage = posted?.id ?? null;
       }
     }
-    await supabase.from('team_matches').update({ discord_done: true }).eq('id', match.id);
+    await supabase.from('team_matches').update({ discord_done: true, discord_result_message: resultMessage }).eq('id', match.id);
     if (match.status === 'completed' && !match.corrected_at) {
       await pushToUsers([...match.roster_a, ...match.roster_b], {
         category: 'match',

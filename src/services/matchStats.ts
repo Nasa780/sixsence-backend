@@ -2,9 +2,10 @@ import { MATCH_REFEREES, roleOf } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
-import { dm, notifyStaff } from './discord.js';
+import { discord, dm, notifyStaff } from './discord.js';
 import { roundsToWin } from './teamMatchPolicy.js';
 import { logToDiscord } from './siteLog.js';
+import { withBestPlayer } from './resultCardPolicy.js';
 import { STATS_WINDOW_MS, captureReminderText, captureReminderWindow, coversMatch, cupBest, OBJECTIVE_MIN_MAPS, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsBoard, statsByMatch, summarizeStats, validRow, type MatchKind, type SeasonStatLine, type StatRow } from './matchStatsPolicy.js';
 
 /**
@@ -68,6 +69,24 @@ function isOpen(info: MatchInfo): boolean {
   if (PLAYED.includes(info.status)) return true;
   return info.status === 'completed' && Boolean(info.completedAt) && Date.now() - new Date(info.completedAt as string).getTime() < STATS_WINDOW_MS;
 }
+
+/** Carte de résultat sur Discord : le meilleur joueur du match, dès qu'une capture le donne. Sans effet sur la capture si ça échoue. */
+async function refreshResultCard(kind: MatchKind, id: string): Promise<void> {
+  const channel = config.discord.resultsChannelId;
+  if (!channel) return;
+  const { data: match } = await supabase.from(kind === 'classe' ? 'cod_matches' : 'team_matches').select('discord_result_message').eq('id', id).maybeSingle();
+  const messageId = (match as { discord_result_message: string | null } | null)?.discord_result_message;
+  if (!messageId) return;
+  const { data } = await supabase.from('match_player_stats').select('user_id, score, kills, plants, defuses').eq('match_kind', kind).eq('match_id', id);
+  const best = cupBest((data ?? []) as (SeasonStatLine & { user_id: string })[]);
+  const line = best ? { username: await usernameOf(best.userId), score: best.score, kills: best.kills } : null;
+  const message = (await discord(`/channels/${channel}/messages/${messageId}`)) as { embeds?: { image?: { url?: string } }[] } | null;
+  const embed = message?.embeds?.[0];
+  if (!embed?.image?.url) return;
+  await discord(`/channels/${channel}/messages/${messageId}`, { method: 'PATCH', body: { embeds: [{ ...embed, image: { url: withBestPlayer(embed.image.url, line) } }] } });
+}
+
+const updateCardSoon = (kind: MatchKind, id: string) => void refreshResultCard(kind, id).catch((error) => console.warn('[stats] carte de résultat', (error as Error).message));
 
 /** Lignes enregistrées d'une map. */
 async function mapRows(kind: MatchKind, id: string, mapNo: number): Promise<StatRow[]> {
@@ -150,6 +169,7 @@ export async function submitStats(kind: MatchKind, id: string, userId: string, b
       )
       .select('user_id'),
   );
+  updateCardSoon(kind, id);
   return matchStats(kind, id, userId);
 }
 
@@ -190,6 +210,7 @@ export async function correctStats(kind: MatchKind, id: string, mapNo: number, t
   const next = rows.map((row) => (row.userId === targetId ? { userId: targetId, score, kills, plants, defuses } : row));
   if (!plausibleRows(next, info.sides, info.roundsToWin)) throw new HttpError(400, 'IMPOSSIBLE_STATS', 'Ces chiffres sont impossibles pour ce match.');
   unwrap(await supabase.from('match_player_stats').update({ score, kills, plants, defuses, submitted_by: userId }).eq('match_kind', kind).eq('match_id', id).eq('map_no', mapNo).eq('user_id', targetId).select('user_id'));
+  updateCardSoon(kind, id);
   logToDiscord(`📊 ${await usernameOf(userId)} a corrigé les stats de ${await usernameOf(targetId)} (map ${mapNo}) : ${previous.score} pts, ${previous.kills} élim. → ${score} pts, ${kills} élim. ${matchUrl(kind, id)}`);
   return matchStats(kind, id, userId);
 }
@@ -199,6 +220,7 @@ export async function removeStats(kind: MatchKind, id: string, mapNo: number, us
   if (!MATCH_REFEREES.includes(await roleOf(userId))) throw new HttpError(403, 'FORBIDDEN', 'Réservé à l’équipe.');
   unwrap(await supabase.from('match_player_stats').delete().eq('match_kind', kind).eq('match_id', id).eq('map_no', mapNo).select('user_id'));
   await supabase.from('match_captures').delete().eq('match_kind', kind).eq('match_id', id).eq('map_no', mapNo);
+  updateCardSoon(kind, id);
   return matchStats(kind, id, userId);
 }
 
