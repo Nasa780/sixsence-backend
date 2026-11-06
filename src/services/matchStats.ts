@@ -4,14 +4,15 @@ import { HttpError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { dm, notifyStaff } from './discord.js';
 import { roundsToWin } from './teamMatchPolicy.js';
-import { STATS_WINDOW_MS, captureReminderWindow, coversMatch, parseRows, summarizeStats, type MatchKind, type SeasonStatLine } from './matchStatsPolicy.js';
+import { logToDiscord } from './siteLog.js';
+import { STATS_WINDOW_MS, captureReminderText, captureReminderWindow, coversMatch, openMaps, parseRows, plausibleRows, sameCapture, statsByMatch, summarizeStats, validRow, type MatchKind, type SeasonStatLine, type StatRow } from './matchStatsPolicy.js';
 
 /**
- * Capture de fin de match (migrations 0065 et 0066). Le site lit la capture dans le navigateur et envoie Score, Élim.,
- * Poses et Désam. de chaque joueur ; l'image est gardée comme preuve. Une capture par map, envoyée pendant le match ou
- * dans les 24 h après ; les stats ne s'affichent qu'une fois le match terminé, un match annulé ne compte pas.
- * Contrôles : joueurs des deux équipes présents, même image refusée deux fois ; l'équipe adverse peut signaler,
- * un arbitre retire la capture. Aucun effet sur les points.
+ * Capture de fin de match (migrations 0065, 0066 et 0068). Le site lit la capture dans le navigateur et envoie Score,
+ * Élim., Poses et Désam. de chaque joueur ; l'image est gardée comme preuve. Une capture par map, envoyée pendant le match
+ * ou dans les 24 h après, complétée par une autre si des joueurs manquent ; les stats ne s'affichent qu'une fois le match
+ * terminé, un match annulé ne compte pas. Contrôles : joueurs des deux équipes présents, chiffres possibles, même image
+ * refusée sur un autre match ; un joueur signale une ligne, un arbitre la corrige ou retire la capture. Aucun effet sur les points.
  */
 
 export const parseKind = (value: unknown): MatchKind => {
@@ -20,6 +21,9 @@ export const parseKind = (value: unknown): MatchKind => {
 };
 
 const PLAYED = ['in_progress', 'awaiting_confirmation', 'forfeit_claimed', 'disputed'];
+const PROOF_BUCKETS: Record<MatchKind, string> = { classe: 'match-proofs', division: 'team-match-proofs' };
+/** Lien d'une capture : valable une heure. */
+const CAPTURE_URL_SECONDS = 3600;
 
 interface MatchInfo {
   status: string;
@@ -65,6 +69,24 @@ function isOpen(info: MatchInfo): boolean {
   return info.status === 'completed' && Boolean(info.completedAt) && Date.now() - new Date(info.completedAt as string).getTime() < STATS_WINDOW_MS;
 }
 
+/** Lignes enregistrées d'une map. */
+async function mapRows(kind: MatchKind, id: string, mapNo: number): Promise<StatRow[]> {
+  const { data } = await supabase.from('match_player_stats').select('user_id, score, kills, plants, defuses').eq('match_kind', kind).eq('match_id', id).eq('map_no', mapNo);
+  return ((data ?? []) as { user_id: string; score: number; kills: number; plants: number; defuses: number }[]).map(({ user_id: userId, ...stats }) => ({ userId, ...stats }));
+}
+
+/** Images des captures, map par map : vues par les joueurs du match et les arbitres, comme les preuves. */
+async function captureLinks(kind: MatchKind, id: string) {
+  const { data } = await supabase.from('match_captures').select('map_no, proof_path').eq('match_kind', kind).eq('match_id', id).not('proof_path', 'is', null).order('created_at');
+  const rows = (data ?? []) as { map_no: number; proof_path: string }[];
+  if (rows.length === 0) return [];
+  const { data: links } = await supabase.storage.from(PROOF_BUCKETS[kind]).createSignedUrls(rows.map((row) => row.proof_path), CAPTURE_URL_SECONDS);
+  return rows.flatMap((row, index) => {
+    const url = links?.[index]?.signedUrl;
+    return url ? [{ mapNo: row.map_no, url }] : [];
+  });
+}
+
 export async function matchStats(kind: MatchKind, id: string, viewerId: string | null) {
   const info = await matchInfo(kind, id);
   const { data } = await supabase.from('match_player_stats').select('map_no, user_id, score, kills, plants, defuses').eq('match_kind', kind).eq('match_id', id).order('map_no').order('score', { ascending: false });
@@ -83,6 +105,9 @@ export async function matchStats(kind: MatchKind, id: string, viewerId: string |
     // Les stats s'affichent à la fin du match ; avant, on sait seulement quelles maps ont leur capture.
     rows: completed ? rows.map((row) => ({ mapNo: row.map_no, userId: row.user_id, score: row.score, kills: row.kills, plants: row.plants, defuses: row.defuses })) : [],
     sentMaps: [...new Set(rows.map((row) => row.map_no))],
+    // Maps sans capture, ou à compléter parce que des joueurs manquent.
+    openMaps: openMaps(info.maps, rows, players.length),
+    captures: completed && (inMatch || canModerate) ? await captureLinks(kind, id) : [],
     canSubmit: inMatch && isOpen(info),
     canReport: inMatch && completed && rows.length > 0,
     canRemove: canModerate && rows.length > 0,
@@ -101,28 +126,72 @@ export async function submitStats(kind: MatchKind, id: string, userId: string, b
   if (!/^[0-9a-f]{64}$/.test(hash)) throw new HttpError(400, 'INVALID_CAPTURE', 'Capture invalide.');
   const rows = parseRows(input.rows, ids);
   if (!rows) throw new HttpError(400, 'INVALID_STATS', 'Stats illisibles : envoie une capture plus nette.');
-  if (!coversMatch(rows, info.sides)) throw new HttpError(400, 'WRONG_CAPTURE', 'Cette capture ne correspond pas à ce match : on n’y retrouve pas les joueurs des deux équipes.');
-  const { count } = await supabase.from('match_player_stats').select('user_id', { count: 'exact', head: true }).eq('match_kind', kind).eq('match_id', id).eq('map_no', mapNo);
-  if ((count ?? 0) > 0) throw new HttpError(409, 'STATS_EXISTS', 'La capture de cette map a déjà été envoyée.');
-  const { error } = await supabase.from('match_captures').insert({ hash, match_kind: kind, match_id: id, map_no: mapNo, submitted_by: userId });
-  if (error?.code === '23505') throw new HttpError(409, 'CAPTURE_USED', 'Cette capture a déjà été envoyée.');
-  if (error) throw new HttpError(500, 'DB_ERROR', error.message);
+  const existing = await mapRows(kind, id, mapNo);
+  // Map déjà envoyée : la capture ne sert qu'à ajouter les joueurs qui manquent.
+  const added = rows.filter((row) => !existing.some((item) => item.userId === row.userId));
+  if (existing.length === 0 && !coversMatch(rows, info.sides)) throw new HttpError(400, 'WRONG_CAPTURE', 'Cette capture ne correspond pas à ce match : on n’y retrouve pas les joueurs des deux équipes.');
+  if (added.length === 0) throw new HttpError(409, 'STATS_EXISTS', 'La capture de cette map a déjà été envoyée.');
+  if (existing.length > 0 && !sameCapture(existing, rows)) throw new HttpError(400, 'WRONG_CAPTURE', 'Cette capture ne correspond pas à celle déjà envoyée pour cette map.');
+  if (!plausibleRows([...existing, ...added], info.sides, info.roundsToWin)) throw new HttpError(400, 'IMPOSSIBLE_STATS', 'Ces chiffres sont impossibles pour ce match : envoie une capture plus nette.');
+  const { data: used } = await supabase.from('match_captures').select('match_kind, match_id, map_no').eq('hash', hash).maybeSingle();
+  const seen = used as { match_kind: string; match_id: string; map_no: number } | null;
+  if (seen && (seen.match_kind !== kind || seen.match_id !== id || seen.map_no !== mapNo)) throw new HttpError(409, 'CAPTURE_USED', 'Cette capture a déjà été envoyée.');
+  if (!seen) {
+    const { error } = await supabase.from('match_captures').insert({ hash, match_kind: kind, match_id: id, map_no: mapNo, submitted_by: userId });
+    if (error?.code === '23505') throw new HttpError(409, 'CAPTURE_USED', 'Cette capture a déjà été envoyée.');
+    if (error) throw new HttpError(500, 'DB_ERROR', error.message);
+  }
   unwrap(
     await supabase
       .from('match_player_stats')
-      .insert(rows.map((row) => ({ match_kind: kind, match_id: id, map_no: mapNo, user_id: row.userId, score: row.score, kills: row.kills, plants: row.plants, defuses: row.defuses, submitted_by: userId })))
+      .upsert(
+        added.map((row) => ({ match_kind: kind, match_id: id, map_no: mapNo, user_id: row.userId, score: row.score, kills: row.kills, plants: row.plants, defuses: row.defuses, submitted_by: userId })),
+        { onConflict: 'match_kind,match_id,map_no,user_id', ignoreDuplicates: true },
+      )
       .select('user_id'),
   );
   return matchStats(kind, id, userId);
 }
 
-/** Un joueur du match signale une erreur : le staff regarde et peut retirer la capture. */
-export async function reportStats(kind: MatchKind, id: string, userId: string) {
+/** Relie l'image gardée comme preuve à la capture de sa map. */
+export async function attachCaptureProof(kind: MatchKind, id: string, mapNo: number, userId: string, body: unknown) {
+  const path = (body as { path?: unknown } | null)?.path;
+  if (typeof path !== 'string' || !path.startsWith(`${id}/${userId}/`)) throw new HttpError(400, 'INVALID_PROOF', 'Capture invalide.');
+  await supabase.from('match_captures').update({ proof_path: path }).eq('match_kind', kind).eq('match_id', id).eq('map_no', mapNo).eq('submitted_by', userId).is('proof_path', null);
+  return matchStats(kind, id, userId);
+}
+
+const matchUrl = (kind: MatchKind, id: string) => `${config.siteUrl}/${kind === 'classe' ? 'cod/match' : 'cod/equipes/match'}/${id}`;
+const usernameOf = async (id: string) => ((await supabase.from('users').select('username').eq('id', id).maybeSingle()).data as { username: string } | null)?.username ?? 'Joueur';
+
+/** Un joueur du match signale une ligne : l'équipe voit la capture à côté des chiffres. Un signalement par ligne. */
+export async function reportStats(kind: MatchKind, id: string, userId: string, body: unknown) {
   const info = await matchInfo(kind, id);
   if (![...info.sides[0], ...info.sides[1]].includes(userId)) throw new HttpError(403, 'NOT_IN_MATCH', 'Seuls les joueurs du match peuvent signaler.');
-  const { data } = await supabase.rpc('app_claim', { p_key: `stats_report_${kind}_${id}`, p_value: userId });
-  if (data) await notifyStaff(`📊 Stats de capture signalées : ${config.siteUrl}/${kind === 'classe' ? 'cod/match' : 'cod/equipes/match'}/${id}`);
+  const input = (body ?? {}) as { mapNo?: unknown; userId?: unknown };
+  const mapNo = Number(input.mapNo);
+  const line = (await mapRows(kind, id, mapNo)).find((row) => row.userId === input.userId);
+  if (!line) throw new HttpError(400, 'INVALID_STATS', 'Choisis la map et le joueur concernés.');
+  const { data } = await supabase.rpc('app_claim', { p_key: `stats_report_${kind}_${id}_${mapNo}_${line.userId}`, p_value: '1' });
+  if (data) await notifyStaff(`📊 Stats signalées par ${await usernameOf(userId)} : map ${mapNo}, ligne de ${await usernameOf(line.userId)} (${line.score} pts, ${line.kills} élim.) : ${matchUrl(kind, id)}`);
   return { reported: true };
+}
+
+/** Un arbitre corrige une ligne en regardant la capture. */
+export async function correctStats(kind: MatchKind, id: string, mapNo: number, targetId: string, userId: string, body: unknown) {
+  if (!MATCH_REFEREES.includes(await roleOf(userId))) throw new HttpError(403, 'FORBIDDEN', 'Réservé à l’équipe.');
+  const info = await matchInfo(kind, id);
+  const input = (body ?? {}) as Partial<StatRow>;
+  if (!validRow(input)) throw new HttpError(400, 'INVALID_STATS', 'Chiffres invalides : le score est un multiple de 5.');
+  const { score, kills, plants, defuses } = input as StatRow;
+  const rows = await mapRows(kind, id, mapNo);
+  const previous = rows.find((row) => row.userId === targetId);
+  if (!previous) throw new HttpError(404, 'STATS_NOT_FOUND', 'Ligne introuvable.');
+  const next = rows.map((row) => (row.userId === targetId ? { userId: targetId, score, kills, plants, defuses } : row));
+  if (!plausibleRows(next, info.sides, info.roundsToWin)) throw new HttpError(400, 'IMPOSSIBLE_STATS', 'Ces chiffres sont impossibles pour ce match.');
+  unwrap(await supabase.from('match_player_stats').update({ score, kills, plants, defuses, submitted_by: userId }).eq('match_kind', kind).eq('match_id', id).eq('map_no', mapNo).eq('user_id', targetId).select('user_id'));
+  logToDiscord(`📊 ${await usernameOf(userId)} a corrigé les stats de ${await usernameOf(targetId)} (map ${mapNo}) : ${previous.score} pts, ${previous.kills} élim. → ${score} pts, ${kills} élim. ${matchUrl(kind, id)}`);
+  return matchStats(kind, id, userId);
 }
 
 /** Un arbitre retire la capture d'une map : une autre peut être envoyée. */
@@ -133,43 +202,46 @@ export async function removeStats(kind: MatchKind, id: string, mapNo: number, us
   return matchStats(kind, id, userId);
 }
 
-/** Bilan d'un joueur sur la saison en cours (profil) : les matchs annulés ne comptent pas. */
+/** Bilan d'un joueur sur la saison en cours (profil), chiffres de chaque match pour l'historique : les matchs annulés ne comptent pas. */
 export async function playerStats(userId: string) {
   const { data: season } = await supabase.from('seasons').select('starts_at').eq('is_active', true).maybeSingle();
-  let query = supabase.from('match_player_stats').select('match_kind, match_id, score, kills, plants, defuses').eq('user_id', userId).limit(2000);
   const start = (season as { starts_at: string } | null)?.starts_at;
-  if (start) query = query.gte('created_at', start);
-  const { data } = await query;
-  const rows = (data ?? []) as (SeasonStatLine & { match_kind: MatchKind; match_id: string })[];
+  const { data } = await supabase.from('match_player_stats').select('match_kind, match_id, score, kills, plants, defuses, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(2000);
+  const rows = (data ?? []) as (SeasonStatLine & { match_kind: MatchKind; match_id: string; created_at: string })[];
   const idsOf = (kind: MatchKind) => [...new Set(rows.filter((row) => row.match_kind === kind).map((row) => row.match_id))];
   const finished = async (table: string, ids: string[]) => {
-    if (ids.length === 0) return new Set<string>();
-    const { data: found } = await supabase.from(table).select('id').in('id', ids).eq('status', 'completed');
-    return new Set(((found ?? []) as { id: string }[]).map((row) => row.id));
+    const done = new Set<string>();
+    for (let index = 0; index < ids.length; index += 100) {
+      const { data: found } = await supabase.from(table).select('id').in('id', ids.slice(index, index + 100)).eq('status', 'completed');
+      for (const row of (found ?? []) as { id: string }[]) done.add(row.id);
+    }
+    return done;
   };
   const [ranked, division] = await Promise.all([finished('cod_matches', idsOf('classe')), finished('team_matches', idsOf('division'))]);
-  return summarizeStats(rows.filter((row) => (row.match_kind === 'classe' ? ranked : division).has(row.match_id)));
+  const counted = rows.filter((row) => (row.match_kind === 'classe' ? ranked : division).has(row.match_id));
+  return { ...summarizeStats(counted.filter((row) => !start || row.created_at >= start)), matches: statsByMatch(counted) };
 }
 
 /**
  * Rappel unique (index.ts, toutes les 5 minutes) : un message privé aux joueurs d'un match terminé depuis 10 minutes
- * sans capture. Jamais répété, et coupé par la catégorie « Déroulé des matchs ».
+ * à qui il manque une capture, en précisant la map. Jamais répété, et coupé par la catégorie « Déroulé des matchs ».
  */
 export async function remindCaptures(now = Date.now()): Promise<void> {
   const { from, to } = captureReminderWindow(now);
   const [ranked, division] = await Promise.all([
     supabase.from('cod_matches').select('id, team_a, team_b').eq('status', 'completed').gte('completed_at', from).lte('completed_at', to).limit(50),
-    supabase.from('team_matches').select('id, roster_a, roster_b').eq('status', 'completed').gte('completed_at', from).lte('completed_at', to).limit(50),
+    supabase.from('team_matches').select('id, roster_a, roster_b, scores').eq('status', 'completed').gte('completed_at', from).lte('completed_at', to).limit(50),
   ]);
   const matches = [
-    ...((ranked.data ?? []) as { id: string; team_a: string[]; team_b: string[] }[]).map((match) => ({ id: match.id, players: [...match.team_a, ...match.team_b], path: 'cod/match' })),
-    ...((division.data ?? []) as { id: string; roster_a: string[]; roster_b: string[] }[]).map((match) => ({ id: match.id, players: [...match.roster_a, ...match.roster_b], path: 'cod/equipes/match' })),
+    ...((ranked.data ?? []) as { id: string; team_a: string[]; team_b: string[] }[]).map((match) => ({ id: match.id, players: [...match.team_a, ...match.team_b], path: 'cod/match', maps: 1 })),
+    ...((division.data ?? []) as { id: string; roster_a: string[]; roster_b: string[]; scores: unknown[] | null }[]).map((match) => ({ id: match.id, players: [...match.roster_a, ...match.roster_b], path: 'cod/equipes/match', maps: Math.max(1, match.scores?.length ?? 1) })),
   ];
   for (const match of matches) {
-    const { count } = await supabase.from('match_player_stats').select('user_id', { count: 'exact', head: true }).eq('match_id', match.id);
-    if ((count ?? 0) > 0) continue;
+    const { data: sent } = await supabase.from('match_player_stats').select('map_no').eq('match_id', match.id);
+    const open = openMaps(match.maps, (sent ?? []) as { map_no: number }[], match.players.length);
+    if (open.length === 0) continue;
     const { data: first } = await supabase.rpc('app_claim', { p_key: `capture_rappel_${match.id}`, p_value: '1' });
     if (!first) continue;
-    await dm(match.players, `📸 Ajoute ta capture pour tes stats : ${config.siteUrl}/${match.path}/${match.id}`, 'match');
+    await dm(match.players, captureReminderText(`${config.siteUrl}/${match.path}/${match.id}`, open, match.maps), 'match');
   }
 }

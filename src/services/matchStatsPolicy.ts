@@ -73,3 +73,59 @@ export function coversMatch(rows: { userId: string }[], sides: [string[], string
 export function captureReminderWindow(now: number): { from: string; to: string } {
   return { from: new Date(now - 60 * 60_000).toISOString(), to: new Date(now - 10 * 60_000).toISOString() };
 }
+
+/** Un match de Recherche et Destruction s'arrête au plus tard à 2 x manches à gagner - 1. */
+export const maxRounds = (roundsToWin: number): number => 2 * roundsToWin - 1;
+
+/**
+ * Chiffres possibles sur une map : en Recherche et Destruction, on meurt une fois par manche et une seule bombe est posée.
+ * Le site lit la capture, le serveur ne voit que les chiffres : ce contrôle écarte les valeurs impossibles.
+ */
+export function plausibleRows(rows: StatRow[], sides: [string[], string[]], roundsToWin: number): boolean {
+  const rounds = maxRounds(roundsToWin);
+  const total = (list: StatRow[], pick: (row: StatRow) => number) => list.reduce((sum, row) => sum + pick(row), 0);
+  const killsOk = sides.every((side, index) => {
+    const enemies = sides[index === 0 ? 1 : 0].length;
+    return total(rows.filter((row) => side.includes(row.userId)), (row) => row.kills) <= rounds * enemies;
+  });
+  return killsOk && total(rows, (row) => row.plants) <= rounds && total(rows, (row) => row.defuses) <= rounds;
+}
+
+/** Une seconde capture montre la même map : la plupart des joueurs déjà enregistrés doivent y avoir les mêmes chiffres. */
+export function sameCapture(existing: StatRow[], rows: StatRow[]): boolean {
+  const common = rows.flatMap((row) => {
+    const known = existing.find((item) => item.userId === row.userId);
+    return known ? [{ row, known }] : [];
+  });
+  const same = common.filter(({ row, known }) => row.score === known.score && row.kills === known.kills).length;
+  return common.length > 0 && same * 2 >= common.length;
+}
+
+/** Maps sans capture, ou avec des joueurs manquants. */
+export function openMaps(maps: number, rows: { map_no: number }[], players: number): number[] {
+  return Array.from({ length: maps }, (_, index) => index + 1).filter((no) => rows.filter((row) => row.map_no === no).length < players);
+}
+
+/** Texte du rappel de capture : précise la map quand le match en compte plusieurs. */
+export function captureReminderText(url: string, open: number[], maps: number): string {
+  if (maps === 1) return `📸 Ajoute ta capture pour tes stats : ${url}`;
+  const list = open.length > 1 ? `des maps ${open.slice(0, -1).join(', ')} et ${open[open.length - 1]}` : `de la map ${open[0]}`;
+  return `📸 Il manque la capture ${list} pour tes stats : ${url}`;
+}
+
+export interface MatchLine extends SeasonStatLine {
+  match_id: string;
+}
+
+/** Chiffres d'un joueur par match, toutes maps additionnées : historique du profil. */
+export function statsByMatch(rows: MatchLine[]): Record<string, SeasonStatLine> {
+  const matches: Record<string, SeasonStatLine> = {};
+  for (const { match_id: id, score, kills, plants, defuses } of rows) {
+    const line = (matches[id] ??= { score: 0, kills: 0, plants: 0, defuses: 0 });
+    line.score += score;
+    line.kills += kills;
+    line.plants += plants;
+    line.defuses += defuses;
+  }
+  return matches;
+}
