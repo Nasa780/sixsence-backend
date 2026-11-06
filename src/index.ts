@@ -36,7 +36,6 @@ import { announceMonthlyMvp, announcePromotions, onMonthlyMvp, onQueueChanged, p
 import { remindSeasonEnd } from './services/announcements.js';
 import { sweepScheduledAnnouncements } from './services/scheduledAnnouncements.js';
 import { sendCupReminders } from './services/discordActions.js';
-import { remindCaptures } from './services/matchStats.js';
 import { checkQueueTimeouts, clearQueue, expireReadyChecks, getQueueState, getQueueSummaries, leaveQueue } from './services/queue.js';
 import { getSiteStats } from './services/stats.js';
 import { calendarEvents, calendarIcs } from './services/calendar.js';
@@ -397,7 +396,6 @@ const reminderTimer = live
       void sendEventReminders();
       void welcomeNewPlayers();
       void sendCupReminders().catch((error) => console.warn('[rappels]', (error as Error).message));
-      void remindCaptures().catch((error) => console.warn('[rappels]', (error as Error).message));
       void announceCupBestPlayers().catch((error) => console.warn('[coupes]', (error as Error).message));
     }, 5 * 60_000)
   : undefined;

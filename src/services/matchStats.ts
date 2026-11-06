@@ -2,11 +2,11 @@ import { MATCH_REFEREES, roleOf } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
-import { discord, dm, notifyStaff } from './discord.js';
+import { discord, notifyStaff } from './discord.js';
 import { roundsToWin } from './teamMatchPolicy.js';
 import { logToDiscord } from './siteLog.js';
 import { withBestPlayer } from './resultCardPolicy.js';
-import { STATS_WINDOW_MS, captureReminderText, captureReminderWindow, coversMatch, cupBest, OBJECTIVE_MIN_MAPS, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsBoard, statsByMatch, summarizeStats, validRow, type MatchKind, type SeasonStatLine, type StatRow } from './matchStatsPolicy.js';
+import { STATS_WINDOW_MS, captureReminderText, coversMatch, cupBest, OBJECTIVE_MIN_MAPS, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsBoard, statsByMatch, summarizeStats, validRow, type MatchKind, type SeasonStatLine, type StatRow } from './matchStatsPolicy.js';
 
 /**
  * Capture de fin de match (migrations 0065, 0066 et 0068). Le site lit la capture dans le navigateur et envoie Score,
@@ -307,25 +307,22 @@ export async function playerStats(userId: string) {
 }
 
 /**
- * Rappel unique (index.ts, toutes les 5 minutes) : un message privé aux joueurs d'un match terminé depuis 10 minutes
- * à qui il manque une capture, en précisant la map. Jamais répété, et coupé par la catégorie « Déroulé des matchs ».
+ * Rappel sur le site (GET /cod/capture-reminder) : le dernier match terminé du joueur, depuis moins de 24 h, s'il lui
+ * manque une capture. Le site retient les rappels déjà vus, un seul par match.
  */
-export async function remindCaptures(now = Date.now()): Promise<void> {
-  const { from, to } = captureReminderWindow(now);
+export async function captureReminder(userId: string, now = Date.now()) {
+  const since = new Date(now - STATS_WINDOW_MS).toISOString();
   const [ranked, division] = await Promise.all([
-    supabase.from('cod_matches').select('id, team_a, team_b').eq('status', 'completed').gte('completed_at', from).lte('completed_at', to).limit(50),
-    supabase.from('team_matches').select('id, roster_a, roster_b, scores').eq('status', 'completed').gte('completed_at', from).lte('completed_at', to).limit(50),
+    supabase.from('cod_matches').select('id, team_a, team_b, completed_at').eq('status', 'completed').gte('completed_at', since).or(`team_a.cs.{${userId}},team_b.cs.{${userId}}`).order('completed_at', { ascending: false }).limit(1),
+    supabase.from('team_matches').select('id, roster_a, roster_b, scores, completed_at').eq('status', 'completed').gte('completed_at', since).or(`roster_a.cs.{${userId}},roster_b.cs.{${userId}}`).order('completed_at', { ascending: false }).limit(1),
   ]);
   const matches = [
-    ...((ranked.data ?? []) as { id: string; team_a: string[]; team_b: string[] }[]).map((match) => ({ id: match.id, players: [...match.team_a, ...match.team_b], path: 'cod/match', maps: 1 })),
-    ...((division.data ?? []) as { id: string; roster_a: string[]; roster_b: string[]; scores: unknown[] | null }[]).map((match) => ({ id: match.id, players: [...match.roster_a, ...match.roster_b], path: 'cod/equipes/match', maps: Math.max(1, match.scores?.length ?? 1) })),
+    ...((ranked.data ?? []) as { id: string; team_a: string[]; team_b: string[]; completed_at: string }[]).map((match) => ({ kind: 'classe' as const, id: match.id, players: match.team_a.length + match.team_b.length, maps: 1, at: match.completed_at })),
+    ...((division.data ?? []) as { id: string; roster_a: string[]; roster_b: string[]; scores: unknown[] | null; completed_at: string }[]).map((match) => ({ kind: 'division' as const, id: match.id, players: match.roster_a.length + match.roster_b.length, maps: Math.max(1, match.scores?.length ?? 1), at: match.completed_at })),
   ];
-  for (const match of matches) {
-    const { data: sent } = await supabase.from('match_player_stats').select('map_no').eq('match_id', match.id);
-    const open = openMaps(match.maps, (sent ?? []) as { map_no: number }[], match.players.length);
-    if (open.length === 0) continue;
-    const { data: first } = await supabase.rpc('app_claim', { p_key: `capture_rappel_${match.id}`, p_value: '1' });
-    if (!first) continue;
-    await dm(match.players, captureReminderText(`${config.siteUrl}/${match.path}/${match.id}`, open, match.maps), 'match');
-  }
+  const last = matches.sort((a, b) => b.at.localeCompare(a.at))[0];
+  if (!last) return null;
+  const { data } = await supabase.from('match_player_stats').select('map_no').eq('match_kind', last.kind).eq('match_id', last.id);
+  const open = openMaps(last.maps, (data ?? []) as { map_no: number }[], last.players);
+  return open.length ? { kind: last.kind, id: last.id, text: captureReminderText(open, last.maps) } : null;
 }
