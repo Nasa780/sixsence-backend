@@ -69,11 +69,6 @@ export function coversMatch(rows: { userId: string }[], sides: [string[], string
   });
 }
 
-/** Rappel de capture : matchs terminés depuis 10 minutes à 1 heure (au-delà, on ne relance plus). */
-export function captureReminderWindow(now: number): { from: string; to: string } {
-  return { from: new Date(now - 60 * 60_000).toISOString(), to: new Date(now - 10 * 60_000).toISOString() };
-}
-
 /** Un match de Recherche et Destruction s'arrête au plus tard à 2 x manches à gagner - 1. */
 export const maxRounds = (roundsToWin: number): number => 2 * roundsToWin - 1;
 
@@ -107,10 +102,10 @@ export function openMaps(maps: number, rows: { map_no: number }[], players: numb
 }
 
 /** Texte du rappel de capture : précise la map quand le match en compte plusieurs. */
-export function captureReminderText(url: string, open: number[], maps: number): string {
-  if (maps === 1) return `📸 Ajoute ta capture pour tes stats : ${url}`;
+export function captureReminderText(open: number[], maps: number): string {
+  if (maps === 1) return 'Ajoute ta capture pour tes stats';
   const list = open.length > 1 ? `des maps ${open.slice(0, -1).join(', ')} et ${open[open.length - 1]}` : `de la map ${open[0]}`;
-  return `📸 Il manque la capture ${list} pour tes stats : ${url}`;
+  return `Il manque la capture ${list} pour tes stats`;
 }
 
 export interface MatchLine extends SeasonStatLine {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { captureReminderText, captureReminderWindow, coversMatch, cupBest, maxRounds, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsBoard, statsByMatch, summarizeStats, validRow } from './matchStatsPolicy.js';
+import { captureReminderText, coversMatch, cupBest, maxRounds, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsBoard, statsByMatch, summarizeStats, validRow } from './matchStatsPolicy.js';
 
 const row = (userId: string, score = 1570, kills = 10) => ({ userId, score, kills, plants: 1, defuses: 0 });
 
@@ -59,13 +59,6 @@ describe('stats de capture : capture du bon match', () => {
   });
 });
 
-describe('stats de capture : rappel', () => {
-  it('vise les matchs terminés depuis 10 minutes à 1 heure', () => {
-    const now = Date.UTC(2026, 10, 5, 12);
-    assert.deepEqual(captureReminderWindow(now), { from: '2026-11-05T11:00:00.000Z', to: '2026-11-05T11:50:00.000Z' });
-  });
-});
-
 describe('stats de capture : contrôles', () => {
   const sides: [string[], string[]] = [['a', 'b'], ['c', 'd']];
 
@@ -102,9 +95,9 @@ describe('stats de capture : maps à compléter', () => {
   });
 
   it('précise la map du rappel quand il y en a plusieurs', () => {
-    assert.equal(captureReminderText('u', [1], 1), '📸 Ajoute ta capture pour tes stats : u');
-    assert.equal(captureReminderText('u', [2], 3), '📸 Il manque la capture de la map 2 pour tes stats : u');
-    assert.equal(captureReminderText('u', [1, 3], 3), '📸 Il manque la capture des maps 1 et 3 pour tes stats : u');
+    assert.equal(captureReminderText([1], 1), 'Ajoute ta capture pour tes stats');
+    assert.equal(captureReminderText([2], 3), 'Il manque la capture de la map 2 pour tes stats');
+    assert.equal(captureReminderText([1, 3], 3), 'Il manque la capture des maps 1 et 3 pour tes stats');
   });
 });
 
