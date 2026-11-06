@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { MAX_CATCH_UP, diffMembers, goodbyeText, plainName, welcomeImageUrl, welcomeText } from './discordMembersPolicy.js';
+import { MAX_CATCH_UP, diffMembers, goodbyeText, plainName, welcomeImageUrl, welcomeText, memberCountName, playerCardUrl } from './discordMembersPolicy.js';
 
 const now = 1_800_000_000_000;
 const hour = 3600_000;
@@ -55,5 +55,21 @@ describe('arrivées et départs Discord', () => {
     assert.equal(welcomeImageUrl('https://s.fr', '42', 'abc', 'Le Boss'), 'https://s.fr/api/og/bienvenue?id=42&name=Le+Boss&a=abc');
     assert.equal(welcomeImageUrl('https://s.fr', '42', null, 'x'), 'https://s.fr/api/og/bienvenue?id=42&name=x');
     assert.equal(welcomeImageUrl('https://s.fr', '42', null, 'x', 130), 'https://s.fr/api/og/bienvenue?id=42&name=x&n=130');
+  });
+});
+
+describe('compteur et carte de joueur', () => {
+  it('écrit le nombre de membres dans le nom du salon', () => {
+    assert.equal(memberCountName(130), '👥 Membres : 130');
+  });
+
+  it('change l’adresse de la carte quand les stats changent', () => {
+    const stats = { points: 1200, wins: 5, losses: 2, calling_card: 'sixsence' };
+    assert.equal(playerCardUrl('https://s.fr', 'abc', stats), 'https://s.fr/api/og/player?id=abc&v=1200-5-2-sixsence');
+    assert.notEqual(playerCardUrl('https://s.fr', 'abc', stats), playerCardUrl('https://s.fr', 'abc', { ...stats, wins: 6 }));
+  });
+
+  it('prend la carte de visite par défaut', () => {
+    assert.match(playerCardUrl('https://s.fr', 'abc', { points: 0, wins: 0, losses: 0, calling_card: null }), /v=0-0-0-sixsence$/);
   });
 });

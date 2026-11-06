@@ -19,7 +19,7 @@ import { teamsRouter } from './routes/teams.js';
 import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { startDiscordGateway, stopDiscordGateway } from './services/discordGateway.js';
-import { memberMessagesEnabled } from './services/discordMembers.js';
+import { memberMessagesEnabled, updateMemberCounter } from './services/discordMembers.js';
 import { readyToken } from './services/readyAccept.js';
 import { updateAborted, updateReady } from './services/matchFoundDm.js';
 
@@ -411,6 +411,10 @@ if (live) setTimeout(() => {
 }, 30_000);
 // Arrivées et départs du serveur Discord : connexion permanente, seulement si les salons sont renseignés.
 if (live && discordEnabled && memberMessagesEnabled) startDiscordGateway();
+// Nombre de membres dans le nom d'un salon, toutes les 10 minutes.
+const countMembers = () => void updateMemberCounter().catch((error) => console.warn('[discord] compteur de membres', (error as Error).message));
+const memberCountTimer = live && discordEnabled ? setInterval(countMembers, 10 * 60_000) : undefined;
+if (live && discordEnabled) countMembers();
 const cardsTimer = live ? setInterval(() => void syncAllCards().catch(() => {}), 60 * 60_000) : undefined;
 // Annonces Discord programmées : vérifiées chaque minute, et au démarrage (retard d'une mise en veille).
 const scheduledTimer = live ? setInterval(() => void sweepScheduledAnnouncements().catch((error) => console.warn('[annonces]', (error as Error).message)), 60_000) : undefined;
@@ -459,6 +463,7 @@ function shutdown(signal: string): void {
   clearInterval(weeklyTimer);
   clearInterval(cardsTimer);
   clearInterval(twitchTimer);
+  clearInterval(memberCountTimer);
   clearInterval(scheduledTimer);
   clearInterval(readyTimer);
   clearInterval(queueTimer);
