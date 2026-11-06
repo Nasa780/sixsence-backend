@@ -217,6 +217,20 @@ async function countedRows<Row extends { match_kind: MatchKind; match_id: string
   return rows.filter((row) => (row.match_kind === 'classe' ? ranked : division).has(row.match_id));
 }
 
+/**
+ * Records de la Renommée : plus d'élim. et plus gros score sur une map, de tous les temps. À égalité, le premier à l'avoir fait.
+ * Quelques lignes de réserve, car les meilleures peuvent venir d'un match annulé.
+ */
+export async function mapRecords() {
+  const best = async (column: 'kills' | 'score') => {
+    const { data } = await supabase.from('match_player_stats').select('match_kind, match_id, user_id, kills, score').gt(column, 0).order(column, { ascending: false }).order('created_at').limit(50);
+    const [first] = await countedRows((data ?? []) as { match_kind: MatchKind; match_id: string; user_id: string; kills: number; score: number }[]);
+    return first ? { userId: first.user_id, value: first[column], matchPath: `/${first.match_kind === 'classe' ? 'cod/match' : 'cod/equipes/match'}/${first.match_id}` } : null;
+  };
+  const [kills, score] = await Promise.all([best('kills'), best('score')]);
+  return { kills, score };
+}
+
 /** Record de la Renommée : poses + désamorçages par map depuis le début de la saison, tous modes confondus. */
 export async function seasonObjectiveLeader() {
   const { data: season } = await supabase.from('seasons').select('starts_at').eq('is_active', true).maybeSingle();
