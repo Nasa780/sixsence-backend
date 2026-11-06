@@ -1,4 +1,4 @@
-import { seasonObjectiveLeader } from './matchStats.js';
+import { mapRecords, seasonObjectiveLeader } from './matchStats.js';
 import { clipOfWeek, recentClipsForFeed } from './clips.js';
 import { supabase } from '../supabase.js';
 import { anubisCapacity } from './tournamentPolicy.js';
@@ -234,7 +234,7 @@ async function rightNow(weekMatches: CodMatch[], known: Map<string, User>) {
 
 export async function hallOfFame() {
   if (fameCache && Date.now() - fameCache.at < TTL) return fameCache.data;
-  const [seasons, players, teamResults, cups, medals, mvps, records, objectives] = await Promise.all([
+  const [seasons, players, teamResults, cups, medals, mvps, records, objectives, mapBest] = await Promise.all([
     supabase.from('seasons').select('id, name, starts_at, ends_at, is_active').order('id', { ascending: false }),
     supabase.from('season_results').select('season_id, user_id, position, username, points, wins, losses').lte('position', 3),
     supabase.from('team_season_results').select('season_id, team_id, position, name, tag, points, wins, losses').lte('position', 3),
@@ -243,13 +243,14 @@ export async function hallOfFame() {
     supabase.from('cod_monthly_mvp').select('month, user_id, votes').order('month', { ascending: false }).limit(24),
     supabase.from('cod_profiles').select('user_id, best_streak, peak_points, xp, wins').limit(10000),
     seasonObjectiveLeader().catch(() => null),
+    mapRecords().catch(() => ({ kills: null, score: null })),
   ]);
   const recordRows = (records.data ?? []) as { user_id: string; best_streak: number; peak_points: number; xp: number; wins: number }[];
   const top = (key: 'best_streak' | 'peak_points' | 'xp' | 'wins') => [...recordRows].sort((a, b) => b[key] - a[key])[0];
   const recordTop = { streak: top('best_streak'), peak: top('peak_points'), xp: top('xp'), wins: top('wins') };
   const medalRows = (medals.data ?? []) as { tournament_id: string; user_id: string; team_name: string | null }[];
   const mvpRows = (mvps.data ?? []) as { month: string; user_id: string; votes: number }[];
-  const users = await usersById([...medalRows.map((m) => m.user_id), ...mvpRows.map((m) => m.user_id), ...Object.values(recordTop).map((r) => r?.user_id ?? ''), objectives?.userId ?? '']);
+  const users = await usersById([...medalRows.map((m) => m.user_id), ...mvpRows.map((m) => m.user_id), ...Object.values(recordTop).map((r) => r?.user_id ?? ''), objectives?.userId ?? '', mapBest.kills?.userId ?? '', mapBest.score?.userId ?? '']);
   const cupRows = (cups.data ?? []) as { id: string; kind: string; name: string; winner_team: string | null; finalist_team: string | null; completed_at: string }[];
   const teamIds = [...new Set(cupRows.flatMap((c) => [c.winner_team, c.finalist_team]).filter(Boolean) as string[])];
   const { data: teamData } = teamIds.length ? await supabase.from('teams').select('id, name, tag, color, logo_url, cup_tournament').in('id', teamIds) : { data: [] };
@@ -292,6 +293,8 @@ export async function hallOfFame() {
       xp: record(recordTop.xp, recordTop.xp?.xp),
       wins: record(recordTop.wins, recordTop.wins?.wins),
       objectives: objectives ? { ...person(users, objectives.userId), value: objectives.value, maps: objectives.maps } : null,
+      mapKills: mapBest.kills ? { ...person(users, mapBest.kills.userId), value: mapBest.kills.value, matchPath: mapBest.kills.matchPath } : null,
+      mapScore: mapBest.score ? { ...person(users, mapBest.score.userId), value: mapBest.score.value, matchPath: mapBest.score.matchPath } : null,
     },
   };
   fameCache = { at: Date.now(), data };
