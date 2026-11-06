@@ -17,6 +17,14 @@ export function correctionWindowHours(role: Role): number | null {
   return role === 'admin' ? null : STAFF_CORRECTION_HOURS;
 }
 
+const TEAM_PLAYED = ['in_progress', 'awaiting_confirmation', 'forfeit_claimed', 'disputed'];
+
+/** Match de Division ou de coupe : demande d'arbitrage pendant le match, de correction 24 h après (un amical ne se corrige pas). */
+export function teamArbitrationOpen(status: string, completedAt: string | null, friendly: boolean, now = Date.now()): boolean {
+  if (TEAM_PLAYED.includes(status)) return true;
+  return status === 'completed' && !friendly && withinWindow(completedAt, PLAYER_CORRECTION_HOURS, now);
+}
+
 /** Un match terminé à completedAt peut-il encore être corrigé avec ce délai (en heures) ? */
 export function withinWindow(completedAt: string | null, hours: number | null, now = Date.now()): boolean {
   if (hours === null) return true;

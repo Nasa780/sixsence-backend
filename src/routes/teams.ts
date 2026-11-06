@@ -24,6 +24,8 @@ import {
   teamStatus,
 } from '../services/teamMatches.js';
 import { TEAM_REPORT_REASONS } from '../services/teamPolicy.js';
+import { ARBITRATION_REASONS, requestTeamArbitration, usernameOf } from '../services/moderation.js';
+import { notifyStaff } from '../services/discord.js';
 import { getCircuit } from '../services/circuit.js';
 import { cancelTeamSchedule, scheduleSlots, scheduleTeamMatch } from '../services/teamSchedules.js';
 import { answerChallenge, cancelChallenge, createChallenge, myChallenges } from '../services/challenges.js';
@@ -95,6 +97,7 @@ import {
  *   POST   /teams/matches/:matchId/confirm     confirmer ou contester (équipe adverse : joueur du match ou Leader) { accept }
  *   POST   /teams/matches/:matchId/map3        choisir la map 3 (équipe qui a gagné le plus de manches : joueur du match ou Leader) { map }
  *   POST   /teams/matches/:matchId/proofs      enregistrer une capture déjà envoyée (joueur du match) { path }
+ *   POST   /teams/matches/:matchId/arbitration demande d'arbitrage ou de correction (joueur du match) { reason, details }
  *   GET    /teams/tournament                   tournoi prévu ou en cours (sinon le dernier terminé), tableau, droits du visiteur
  *   GET    /teams/tournaments/:id              un tournoi
  *   POST   /teams/tournaments/:id/checkin      check-in d'un joueur de l'équipe (2 h à 15 min avant) { roster: [ids parmi l'effectif figé] }
@@ -146,6 +149,17 @@ export function teamsRouter(): Router {
   router.post('/matches/:matchId/report', requireAuth, asyncHandler(async (req, res) => void res.json(await reportTeamScores(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/confirm', requireAuth, asyncHandler(async (req, res) => void res.json(await confirmTeamScores(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/map3', requireAuth, asyncHandler(async (req, res) => void res.json(await pickTeamMap3(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
+  router.post('/matches/:matchId/arbitration', requireAuth, asyncHandler(async (req, res) => {
+    const user = currentUser(res);
+    const matchId = uuidParam(req, 'matchId');
+    const request = await requestTeamArbitration(matchId, user.id, req.body);
+    void notifyStaff(
+      `🛡️ **Demande d'arbitrage (équipes)** — ${ARBITRATION_REASONS[request.reason]}\n` +
+        `Par ${await usernameOf(user.id)}${request.details ? ` : « ${request.details} »` : ''}\n` +
+        `${config.siteUrl}/cod/equipes/match/${matchId} · ${config.siteUrl}/admin?onglet=arbitrages`,
+    );
+    res.status(201).json({ request });
+  }));
   router.post('/matches/:matchId/proofs', requireAuth, asyncHandler(async (req, res) => void res.json(await addTeamProof(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/correct', requireAuth, asyncHandler(async (req, res) => void res.json(await correctTeamMatch(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));
   router.post('/matches/:matchId/resolve', requireAuth, asyncHandler(async (req, res) => void res.json(await resolveTeamMatch(currentUser(res).id, uuidParam(req, 'matchId'), req.body))));

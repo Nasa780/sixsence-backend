@@ -36,6 +36,8 @@ interface MatchInfo {
   roundsToWin: number;
   /** Score de chaque map, déjà connu en Division une fois le match terminé. */
   mapScores: [number, number][];
+  /** Forfait ou match amical : pas de stats, donc pas de capture demandée. */
+  noStats: boolean;
 }
 
 async function matchInfo(kind: MatchKind, id: string): Promise<MatchInfo> {
@@ -43,13 +45,13 @@ async function matchInfo(kind: MatchKind, id: string): Promise<MatchInfo> {
     const { data } = await supabase.from('cod_matches').select('status, completed_at, team_a, team_b, map').eq('id', id).maybeSingle();
     const match = data as { status: string; completed_at: string | null; team_a: string[]; team_b: string[]; map: string | null } | null;
     if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
-    return { status: match.status, completedAt: match.completed_at, sides: [match.team_a, match.team_b], maps: 1, mapNames: [match.map ?? ''], roundsToWin: roundsToWin(1), mapScores: [] };
+    return { status: match.status, completedAt: match.completed_at, sides: [match.team_a, match.team_b], maps: 1, mapNames: [match.map ?? ''], roundsToWin: roundsToWin(1), mapScores: [], noStats: false };
   }
-  const { data } = await supabase.from('team_matches').select('status, completed_at, roster_a, roster_b, scores, maps, best_of').eq('id', id).maybeSingle();
-  const match = data as { status: string; completed_at: string | null; roster_a: string[]; roster_b: string[]; scores: [number, number][] | null; maps: { map: string }[] | null; best_of: number | null } | null;
+  const { data } = await supabase.from('team_matches').select('status, completed_at, roster_a, roster_b, scores, maps, best_of, forfeit, friendly').eq('id', id).maybeSingle();
+  const match = data as { status: string; completed_at: string | null; roster_a: string[]; roster_b: string[]; scores: [number, number][] | null; maps: { map: string }[] | null; best_of: number | null; forfeit: boolean; friendly: boolean } | null;
   if (!match) throw new HttpError(404, 'MATCH_NOT_FOUND', 'Match introuvable.');
   const played = match.status === 'completed' ? (match.scores?.length ?? 1) : (match.best_of ?? 3);
-  return { status: match.status, completedAt: match.completed_at, sides: [match.roster_a, match.roster_b], maps: Math.max(1, played), mapNames: (match.maps ?? []).map((item) => item.map), roundsToWin: roundsToWin(match.best_of ?? 3), mapScores: match.scores ?? [] };
+  return { status: match.status, completedAt: match.completed_at, sides: [match.roster_a, match.roster_b], maps: Math.max(1, played), mapNames: (match.maps ?? []).map((item) => item.map), roundsToWin: roundsToWin(match.best_of ?? 3), mapScores: match.scores ?? [], noStats: match.forfeit || match.friendly };
 }
 
 /** Joueurs du match avec l'identifiant Activision (le site s'en sert pour reconnaître les lignes de la capture). */
@@ -66,6 +68,7 @@ async function playersOf(sides: [string[], string[]]) {
 
 /** Capture encore acceptée : pendant le match, ou dans les 24 h après sa fin. */
 function isOpen(info: MatchInfo): boolean {
+  if (info.noStats) return false;
   if (PLAYED.includes(info.status)) return true;
   return info.status === 'completed' && Boolean(info.completedAt) && Date.now() - new Date(info.completedAt as string).getTime() < STATS_WINDOW_MS;
 }
@@ -137,6 +140,7 @@ export async function submitStats(kind: MatchKind, id: string, userId: string, b
   const info = await matchInfo(kind, id);
   const ids = [...info.sides[0], ...info.sides[1]];
   if (!ids.includes(userId)) throw new HttpError(403, 'NOT_IN_MATCH', 'Seuls les joueurs du match peuvent envoyer la capture.');
+  if (info.noStats) throw new HttpError(409, 'STATS_CLOSED', 'Un forfait ou un match amical ne compte pas dans les stats perso.');
   if (!isOpen(info)) throw new HttpError(409, 'STATS_CLOSED', 'La capture s’envoie pendant le match ou dans les 24 h après.');
   const input = (body ?? {}) as { mapNo?: unknown; rows?: unknown; hash?: unknown };
   const mapNo = Number(input.mapNo ?? 1);
@@ -224,18 +228,18 @@ export async function removeStats(kind: MatchKind, id: string, mapNo: number, us
   return matchStats(kind, id, userId);
 }
 
-/** Garde les lignes des matchs terminés : un match annulé ne compte pas. */
+/** Garde les lignes des matchs terminés : un match annulé ou amical ne compte pas. */
 async function countedRows<Row extends { match_kind: MatchKind; match_id: string }>(rows: Row[]): Promise<Row[]> {
-  const finished = async (kind: MatchKind, table: string) => {
+  const finished = async (kind: MatchKind, table: string, filter: Record<string, unknown>) => {
     const ids = [...new Set(rows.filter((row) => row.match_kind === kind).map((row) => row.match_id))];
     const done = new Set<string>();
     for (let index = 0; index < ids.length; index += 100) {
-      const { data: found } = await supabase.from(table).select('id').in('id', ids.slice(index, index + 100)).eq('status', 'completed');
+      const { data: found } = await supabase.from(table).select('id').in('id', ids.slice(index, index + 100)).match(filter);
       for (const row of (found ?? []) as { id: string }[]) done.add(row.id);
     }
     return done;
   };
-  const [ranked, division] = await Promise.all([finished('classe', 'cod_matches'), finished('division', 'team_matches')]);
+  const [ranked, division] = await Promise.all([finished('classe', 'cod_matches', { status: 'completed' }), finished('division', 'team_matches', { status: 'completed', friendly: false })]);
   return rows.filter((row) => (row.match_kind === 'classe' ? ranked : division).has(row.match_id));
 }
 
@@ -308,13 +312,13 @@ export async function playerStats(userId: string) {
 
 /**
  * Rappel sur le site (GET /cod/capture-reminder) : le dernier match terminé du joueur, depuis moins de 24 h, s'il lui
- * manque une capture. Le site retient les rappels déjà vus, un seul par match.
+ * manque une capture (ni forfait ni amical). Le site retient les rappels fermés, un seul par match.
  */
 export async function captureReminder(userId: string, now = Date.now()) {
   const since = new Date(now - STATS_WINDOW_MS).toISOString();
   const [ranked, division] = await Promise.all([
     supabase.from('cod_matches').select('id, team_a, team_b, completed_at').eq('status', 'completed').gte('completed_at', since).or(`team_a.cs.{${userId}},team_b.cs.{${userId}}`).order('completed_at', { ascending: false }).limit(1),
-    supabase.from('team_matches').select('id, roster_a, roster_b, scores, completed_at').eq('status', 'completed').gte('completed_at', since).or(`roster_a.cs.{${userId}},roster_b.cs.{${userId}}`).order('completed_at', { ascending: false }).limit(1),
+    supabase.from('team_matches').select('id, roster_a, roster_b, scores, completed_at').eq('status', 'completed').eq('forfeit', false).eq('friendly', false).gte('completed_at', since).or(`roster_a.cs.{${userId}},roster_b.cs.{${userId}}`).order('completed_at', { ascending: false }).limit(1),
   ]);
   const matches = [
     ...((ranked.data ?? []) as { id: string; team_a: string[]; team_b: string[]; completed_at: string }[]).map((match) => ({ kind: 'classe' as const, id: match.id, players: match.team_a.length + match.team_b.length, maps: 1, at: match.completed_at })),

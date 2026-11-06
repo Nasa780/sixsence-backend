@@ -5,7 +5,8 @@ import { resultCardUrl } from './resultCardPolicy.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { discord, discordEnabled, dm, matchVoiceOverwrites, notifyStaff } from './discord.js';
-import { correctionWindowHours, withinWindow } from './correctionPolicy.js';
+import { hasOpenArbitration, myTeamArbitrations, resolveOpenRequests } from './moderation.js';
+import { correctionWindowHours, withinWindow, teamArbitrationOpen } from './correctionPolicy.js';
 import { pushToUsers } from './push.js';
 import { deciderPicker, declarationError, isCompleteSeries, pickMaps, seriesState, type MapScore, type Side } from './teamMatchPolicy.js';
 import { membershipOf } from './teams.js';
@@ -21,7 +22,7 @@ import { mapPool } from './maps.js';
  * Personnes liées au match, qui ne l'arbitrent pas (sauf l'admin) : joueurs du match et tous les membres des deux
  * équipes, même ceux qui ne jouent pas ce soir-là (conflit d'intérêts).
  */
-async function matchInsiders(match: Pick<TeamMatch, 'team_a' | 'team_b' | 'roster_a' | 'roster_b'>): Promise<string[]> {
+export async function matchInsiders(match: Pick<TeamMatch, 'team_a' | 'team_b' | 'roster_a' | 'roster_b'>): Promise<string[]> {
   const members = (unwrap(await supabase.from('team_members').select('user_id').in('team_id', [match.team_a, match.team_b])) ?? []) as { user_id: string }[];
   return [...new Set([...match.roster_a, ...match.roster_b, ...members.map((row) => row.user_id)])];
 }
@@ -183,6 +184,7 @@ export async function forfeitBlockedUntil(teamId: string): Promise<string | null
       .select('team_a, winner, completed_at')
       .eq('status', 'completed')
       .eq('forfeit', true)
+      .eq('friendly', false)
       .gte('completed_at', since)
       .or(`team_a.eq.${teamId},team_b.eq.${teamId}`)
       .order('completed_at', { ascending: false }),
@@ -429,6 +431,10 @@ export async function getTeamMatch(matchId: string, viewerId: string | null) {
       canPickMap3: Boolean(side) && match.status === 'in_progress' && state.phase === 'decider' && match.maps.length === match.best_of - 1 && match.map3_picker === mySide,
       canResolve: referee && (!insider || mayArbitrateOwnMatch(await roleOf(viewerId))) && OPEN.includes(match.status),
       canProve: isPlayer && proofWindowOpen(match),
+      // Demande d'arbitrage, ou de correction pendant 24 h après la validation ; litige ouvert : preuve pour les deux camps.
+      canArbitrate: isPlayer && teamArbitrationOpen(match.status, match.completed_at, match.friendly),
+      arbitrations: isPlayer ? await myTeamArbitrations(match.id, viewerId) : [],
+      disputeOpen: isPlayer && (await hasOpenArbitration(match.id, 'team_match_id')),
       canCorrect: referee && (!insider || mayArbitrateOwnMatch(await roleOf(viewerId))) && match.status === 'completed' && !match.friendly && withinWindow(match.completed_at, correctionWindowHours(await roleOf(viewerId))),
     };
     // Captures : visibles des joueurs du match et des arbitres seulement (liens signés d'une heure).
@@ -924,6 +930,7 @@ export async function correctTeamMatch(staffId: string, matchId: string, body: u
     }),
   );
   if (winner) await applyTournamentCorrection(match, winner);
+  void resolveOpenRequests(matchId, staffId, `Résultat corrigé. ${reason.trim()}`, 'team_match_id');
   await pushToUsers([...match.roster_a, ...match.roster_b], {
     category: 'match',
     title: match.tournament_id ? 'Résultat du match de tournoi corrigé' : 'Résultat du match de Division corrigé',
