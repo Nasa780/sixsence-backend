@@ -1,7 +1,7 @@
 import { isReferee, refuseOwnMatch, roleOf } from '../auth.js';
 import { mayArbitrateOwnMatch } from '../roles.js';
 import { config } from '../config.js';
-import { resultCardUrl, signedPoints } from './resultCardPolicy.js';
+import { matchSheetButton, resultCardUrl, signedPoints } from './resultCardPolicy.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { discord, discordEnabled, dm, matchVoiceOverwrites, notifyStaff } from './discord.js';
@@ -1062,12 +1062,16 @@ async function sweepTeamDiscord(): Promise<void> {
         const a = teams.get(match.team_a);
         const b = teams.get(match.team_b);
         const winner = match.winner === 'A' ? a : b;
+        const loser = match.winner === 'A' ? b : a;
         const state = seriesState(match.scores, match.best_of);
+        const [won, lost] = match.winner === 'A' ? [state.mapsA, state.mapsB] : [state.mapsB, state.mapsA];
         const points = (side: Side) => {
           const value = match.points_changes?.[side];
           return typeof value === 'number' ? signedPoints(value) : null;
         };
-        // Match de coupe : nom de la coupe, tour et rouge des tournois (pas de points d'équipe en jeu).
+        const pointsText = (side: Side) => (points(side) ? ` (${points(side)} pts)` : '');
+        const loserSide: Side = match.winner === 'A' ? 'B' : 'A';
+        // Match de coupe : nom de la coupe et tour (pas de points d'équipe en jeu).
         let cup: { name: string; round: string | null } | null = null;
         if (match.tournament_id) {
           const { data: entry } = await supabase.from('tournament_bracket').select('round').eq('match_id', match.id).maybeSingle();
@@ -1079,10 +1083,15 @@ async function sweepTeamDiscord(): Promise<void> {
             allowed_mentions: { parse: [] },
             embeds: [
               {
-                title: 'Voir la feuille de match',
-                url: `${config.siteUrl}${matchUrl(match.id)}`,
-                color: cup ? 0xe5484d : Number.parseInt((winner?.color ?? '#d4af37').replace('#', ''), 16) || 0xd4af37,
-                description: match.corrected_at ? '_Résultat corrigé par l’équipe SixSence_' : undefined,
+                author: { name: cup ? `🏆 ${cup.name.toUpperCase()} · BO${match.best_of}` : `⚔️ DIVISION · BO${match.best_of}` },
+                title: `[${a?.tag}] ${a?.name}  vs  [${b?.tag}] ${b?.name}`,
+                color: 0xd4af37,
+                description:
+                  `🏆 Victoire de **[${winner?.tag}] ${winner?.name}**${pointsText(match.winner)} ${match.forfeit ? 'par forfait' : `${won} – ${lost}`}\n` +
+                  `[${loser?.tag}] ${loser?.name}${pointsText(loserSide)}${match.corrected_at ? '\n_Résultat corrigé par l’équipe SixSence_' : ''}`,
+                fields: match.forfeit
+                  ? []
+                  : match.scores.map(([x, y], i) => ({ name: `Map ${i + 1} · ${match.maps[i]?.map ?? '?'}`, value: `[${a?.tag}] ${x} – ${y} [${b?.tag}]`, inline: true })),
                 image: {
                   url: resultCardUrl(config.siteUrl, {
                     kind: cup ? 'tournoi' : 'division',
@@ -1101,9 +1110,11 @@ async function sweepTeamDiscord(): Promise<void> {
                     forfeit: match.forfeit,
                   }),
                 },
+                footer: { text: cup ? `${cup.name} · coupe` : 'Division · matchs d’équipe' },
                 timestamp: match.completed_at ?? undefined,
               },
             ],
+            components: matchSheetButton(`${config.siteUrl}${matchUrl(match.id)}`),
           },
         }).catch((caught) => console.warn('[team-match] résultat Discord impossible', (caught as Error).message))) as { id?: string } | null | undefined;
         resultMessage = posted?.id ?? null;

@@ -94,6 +94,8 @@ export async function refreshResultCard(kind: MatchKind, id: string): Promise<vo
     const { data: captures } = await supabase.from('match_captures').select('rounds').eq('match_kind', kind).eq('match_id', id).not('rounds', 'is', null).order('created_at').limit(1);
     url = withRoundScore(url, rows.length ? ((captures ?? []) as { rounds: number[] }[])[0]?.rounds ?? null : null);
   }
+  // Rien de nouveau : pas d'écriture, Discord afficherait « (modifié) » pour rien.
+  if (url === new URL(embed.image.url).toString()) return;
   await discord(`/channels/${channel}/messages/${messageId}`, { method: 'PATCH', body: { embeds: [{ ...embed, image: { url } }] } });
 }
 

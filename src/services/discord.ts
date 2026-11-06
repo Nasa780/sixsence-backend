@@ -2,7 +2,7 @@ import { type NotificationCategory, recipientsFor } from './notificationPrefs.js
 import { config } from '../config.js';
 import { bus, type CodMatch } from '../events.js';
 import { supabase } from '../supabase.js';
-import { resultCardUrl } from './resultCardPolicy.js';
+import { matchSheetButton, resultCardUrl } from './resultCardPolicy.js';
 import { sendMatchFound, updateClosed, updateStarted } from './matchFoundDm.js';
 
 /**
@@ -239,16 +239,24 @@ async function sweepOnce(): Promise<void> {
     if (match.status === 'completed' && match.winner && resultsChannelId && recent) {
       try {
         const names = await usernames([...match.team_a, ...match.team_b]);
+        const team = (ids: string[]) =>
+          ids.map((id) => `${names.get(id) ?? 'Joueur'} (${(match.points_changes?.[id] ?? 0) >= 0 ? '+' : ''}${match.points_changes?.[id] ?? 0})`).join(', ');
+        const winners = match.winner === 'A' ? match.team_a : match.team_b;
+        const losers = match.winner === 'A' ? match.team_b : match.team_a;
         const posted = (await discord(`/channels/${resultsChannelId}/messages`, {
           method: 'POST',
           body: {
             allowed_mentions: { parse: [] },
             embeds: [
               {
-                title: 'Voir la feuille de match',
-                url: matchUrl(match),
-                color: 0x34d399,
-                description: match.corrected_at ? '_Résultat corrigé par l’équipe SixSence_' : undefined,
+                author: { name: `🎯 CLASSÉ · ${match.team_size}v${match.team_size}` },
+                title: `${match.map} · ${match.mode}`,
+                color: 0xd4af37,
+                description: `🏆 Victoire de l'Équipe ${match.winner === 'A' ? '1' : '2'}${match.corrected_at ? '\n_Résultat corrigé par l’équipe SixSence_' : ''}`,
+                fields: [
+                  { name: 'Gagnants', value: team(winners).slice(0, 1000) || '—' },
+                  { name: 'Perdants', value: team(losers).slice(0, 1000) || '—' },
+                ],
                 image: {
                   url: resultCardUrl(config.siteUrl, {
                     kind: 'classe',
@@ -261,9 +269,11 @@ async function sweepOnce(): Promise<void> {
                     winner: match.winner,
                   }),
                 },
+                footer: { text: 'Classé solo' },
                 timestamp: match.completed_at ?? undefined,
               },
             ],
+            components: matchSheetButton(matchUrl(match)),
           },
         })) as { id?: string } | null;
         resultMessage = posted?.id ?? null;
