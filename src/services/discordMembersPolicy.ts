@@ -65,6 +65,17 @@ export function goodbyeText(name: string | null | undefined): string {
   return `**${plainName(name)}** a quitté SixSence. Bonne continuation, la porte reste ouverte. 👋`;
 }
 
+/** Nom du salon compteur. */
+export function memberCountName(count: number): string {
+  return `👥 Membres : ${count}`;
+}
+
+/** Carte de joueur du site ; v change avec les stats pour que Discord ne garde pas une ancienne image. */
+export function playerCardUrl(siteUrl: string, userId: string, stats: { points: number; wins: number; losses: number; calling_card?: string | null }): string {
+  const version = [stats.points, stats.wins, stats.losses, stats.calling_card ?? 'sixsence'].join('-');
+  return `${siteUrl}/api/og/player?${new URLSearchParams({ id: userId, v: version }).toString()}`;
+}
+
 /** Image de bienvenue du site : avatar Discord, pseudo et numéro de membre sur le fond SixSence. */
 export function welcomeImageUrl(siteUrl: string, userId: string, avatar: string | null | undefined, name: string | null | undefined, memberNumber = 0): string {
   const query = new URLSearchParams({ id: userId, name: plainName(name) });

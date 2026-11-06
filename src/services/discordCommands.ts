@@ -10,6 +10,7 @@ import { parseDefiAction } from './discordActionPolicy.js';
 import { getQueueSummaries } from './queue.js';
 import { teamStatus } from './teamMatches.js';
 import { handleTicketInteraction, type TicketInteraction } from './tickets.js';
+import { playerCardUrl } from './discordMembersPolicy.js';
 import { acceptReady, userIdFromDiscord } from './readyAccept.js';
 
 /**
@@ -276,11 +277,11 @@ async function profile(name: string, discordId: string): Promise<Reply> {
   const user = name ? await userByName(name) : await userByDiscord(discordId);
   if (!user) return { content: name ? `Aucun joueur trouvé pour « ${name} ».` : `Ton compte Discord n’est pas encore lié : connecte-toi sur ${SITE}.` };
   const [{ data: p }, membership, medals] = await Promise.all([
-    supabase.from('cod_profiles').select('points, wins, losses, win_streak, best_streak').eq('user_id', user.id).maybeSingle(),
+    supabase.from('cod_profiles').select('points, wins, losses, win_streak, best_streak, calling_card').eq('user_id', user.id).maybeSingle(),
     supabase.from('team_members').select('team_id').eq('user_id', user.id).maybeSingle(),
     supabase.from('cup_medals').select('place').eq('user_id', user.id),
   ]);
-  const stats = (p ?? { points: 0, wins: 0, losses: 0, win_streak: 0, best_streak: 0 }) as { points: number; wins: number; losses: number; win_streak: number; best_streak: number };
+  const stats = (p ?? { points: 0, wins: 0, losses: 0, win_streak: 0, best_streak: 0 }) as { points: number; wins: number; losses: number; win_streak: number; best_streak: number; calling_card?: string | null };
   const { count } = await supabase.from('cod_profiles').select('user_id', { count: 'exact', head: true }).gt('points', stats.points);
   const teamId = (membership.data as { team_id: string } | null)?.team_id;
   const teamRow = teamId ? ((await supabase.from('teams').select('name, tag').eq('id', teamId).maybeSingle()).data as { name: string; tag: string } | null) : null;
@@ -288,6 +289,8 @@ async function profile(name: string, discordId: string): Promise<Reply> {
   const medalText = places.length ? ['or', 'argent', 'bronze'].map((m) => `${places.filter((x) => x === m).length} ${m}`).join(' · ') : 'Aucune';
   const played = stats.wins + stats.losses;
   const rank = rankOf(stats.points);
+  // La carte du site montre déjà rang, points, classement et bilan ; sans profil classé, pas de carte.
+  const card = p ? playerCardUrl(SITE, user.id, stats) : null;
   return {
     embeds: [
       {
@@ -295,10 +298,13 @@ async function profile(name: string, discordId: string): Promise<Reply> {
         author: { name: 'SixSence · Classé' },
         title: `${user.username} · ${rank.name}`,
         url: `${SITE}/cod/profile/${user.id}`,
-        description: `**#${(count ?? 0) + 1}** au classement · **${fr(stats.points)} pts**${stats.win_streak >= 2 ? ` · série de ${stats.win_streak} victoires` : ''}`,
-        thumbnail: user.avatar_url ? { url: user.avatar_url } : undefined,
+        description: card
+          ? stats.win_streak >= 2 ? `Série de ${stats.win_streak} victoires en cours` : undefined
+          : `**#${(count ?? 0) + 1}** au classement · **${fr(stats.points)} pts**`,
+        thumbnail: !card && user.avatar_url ? { url: user.avatar_url } : undefined,
+        image: card ? { url: card } : undefined,
         fields: [
-          { name: 'Bilan', value: `${stats.wins} V · ${stats.losses} D${played ? ` (${Math.round((stats.wins / played) * 100)} %)` : ''}`, inline: true },
+          ...(card ? [] : [{ name: 'Bilan', value: `${stats.wins} V · ${stats.losses} D${played ? ` (${Math.round((stats.wins / played) * 100)} %)` : ''}`, inline: true }]),
           { name: 'Équipe', value: teamRow ? `[${teamRow.tag}] ${teamRow.name}` : 'Sans équipe', inline: true },
           { name: 'Médailles Anubis', value: medalText, inline: true },
         ],

@@ -1,7 +1,7 @@
 import { config } from '../config.js';
 import { supabase } from '../supabase.js';
 import { discord } from './discord.js';
-import { diffMembers, goodbyeText, welcomeImageUrl, welcomeText, type GuildMember, type KnownMember } from './discordMembersPolicy.js';
+import { diffMembers, goodbyeText, memberCountName, welcomeImageUrl, welcomeText, type GuildMember, type KnownMember } from './discordMembersPolicy.js';
 import { logToDiscord } from './siteLog.js';
 
 /**
@@ -69,6 +69,16 @@ async function claimDeparture(id: string): Promise<{ username: string | null } |
   const { data, error } = await supabase.from('discord_members').update({ present: false, left_at: new Date().toISOString() }).eq('user_id', id).eq('present', true).select('username');
   if (error) throw new Error(error.message);
   return (data?.[0] as { username: string | null } | undefined) ?? null;
+}
+
+/** Nom du salon compteur. Appelé toutes les 10 minutes au plus : Discord limite le renommage à 2 fois en 10 minutes. */
+export async function updateMemberCounter(): Promise<void> {
+  const channelId = config.discord.memberCountChannelId;
+  const count = channelId ? await memberNumber() : 0;
+  if (!count) return;
+  const name = memberCountName(count);
+  const channel = (await discord(`/channels/${channelId}`)) as { name?: string };
+  if (channel.name !== name) await discord(`/channels/${channelId}`, { method: 'PATCH', body: { name } });
 }
 
 export async function onMemberAdd(member: MemberEvent): Promise<void> {
