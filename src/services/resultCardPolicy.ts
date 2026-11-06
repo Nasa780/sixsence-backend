@@ -34,6 +34,9 @@ export interface BestLine {
   avatarUrl?: string | null;
 }
 
+/** Bouton « Voir la feuille de match » sous le résultat, sur Discord. */
+export const matchSheetButton = (url: string) => [{ type: 1, components: [{ type: 2, style: 5, label: 'Voir la feuille de match', url }] }];
+
 export const signedPoints = (value: number) => `${value >= 0 ? '+' : ''}${value}`;
 
 export function resultCardUrl(siteUrl: string, card: ResultCard): string {
