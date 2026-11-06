@@ -5,8 +5,8 @@ import { supabase } from '../supabase.js';
 import { discord, notifyStaff } from './discord.js';
 import { roundsToWin } from './teamMatchPolicy.js';
 import { logToDiscord } from './siteLog.js';
-import { withBestPlayer } from './resultCardPolicy.js';
-import { STATS_WINDOW_MS, captureReminderText, coversMatch, cupBest, OBJECTIVE_MIN_MAPS, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsBoard, statsByMatch, summarizeStats, validRow, type MatchKind, type SeasonStatLine, type StatRow } from './matchStatsPolicy.js';
+import { withBestPlayer, withRoundScore } from './resultCardPolicy.js';
+import { STATS_WINDOW_MS, captureReminderText, coversMatch, cupBest, OBJECTIVE_MIN_MAPS, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsBoard, statsByMatch, summarizeStats, validRounds, validRow, type MatchKind, type SeasonStatLine, type StatRow } from './matchStatsPolicy.js';
 
 /**
  * Capture de fin de match (migrations 0065, 0066 et 0068). Le site lit la capture dans le navigateur et envoie Score,
@@ -74,19 +74,27 @@ function isOpen(info: MatchInfo): boolean {
 }
 
 /** Carte de résultat sur Discord : le meilleur joueur du match, dès qu'une capture le donne. Sans effet sur la capture si ça échoue. */
-async function refreshResultCard(kind: MatchKind, id: string): Promise<void> {
+export async function refreshResultCard(kind: MatchKind, id: string): Promise<void> {
   const channel = config.discord.resultsChannelId;
   if (!channel) return;
   const { data: match } = await supabase.from(kind === 'classe' ? 'cod_matches' : 'team_matches').select('discord_result_message').eq('id', id).maybeSingle();
   const messageId = (match as { discord_result_message: string | null } | null)?.discord_result_message;
   if (!messageId) return;
   const { data } = await supabase.from('match_player_stats').select('user_id, score, kills, plants, defuses').eq('match_kind', kind).eq('match_id', id);
-  const best = cupBest((data ?? []) as (SeasonStatLine & { user_id: string })[]);
-  const line = best ? { username: await usernameOf(best.userId), score: best.score, kills: best.kills } : null;
+  const rows = (data ?? []) as (SeasonStatLine & { user_id: string })[];
+  const best = cupBest(rows);
+  const player = best ? await playerCard(best.userId) : null;
+  const line = best && player ? { username: player.username, avatarUrl: player.avatarUrl, score: best.score, kills: best.kills, plants: best.plants, defuses: best.defuses } : null;
   const message = (await discord(`/channels/${channel}/messages/${messageId}`)) as { embeds?: { image?: { url?: string } }[] } | null;
   const embed = message?.embeds?.[0];
   if (!embed?.image?.url) return;
-  await discord(`/channels/${channel}/messages/${messageId}`, { method: 'PATCH', body: { embeds: [{ ...embed, image: { url: withBestPlayer(embed.image.url, line) } }] } });
+  let url = withBestPlayer(embed.image.url, line);
+  // Classé : score de manches lu sur la capture (Division et coupes ont déjà le score de chaque map).
+  if (kind === 'classe') {
+    const { data: captures } = await supabase.from('match_captures').select('rounds').eq('match_kind', kind).eq('match_id', id).not('rounds', 'is', null).order('created_at').limit(1);
+    url = withRoundScore(url, rows.length ? ((captures ?? []) as { rounds: number[] }[])[0]?.rounds ?? null : null);
+  }
+  await discord(`/channels/${channel}/messages/${messageId}`, { method: 'PATCH', body: { embeds: [{ ...embed, image: { url } }] } });
 }
 
 const updateCardSoon = (kind: MatchKind, id: string) => void refreshResultCard(kind, id).catch((error) => console.warn('[stats] carte de résultat', (error as Error).message));
@@ -142,7 +150,7 @@ export async function submitStats(kind: MatchKind, id: string, userId: string, b
   if (!ids.includes(userId)) throw new HttpError(403, 'NOT_IN_MATCH', 'Seuls les joueurs du match peuvent envoyer la capture.');
   if (info.noStats) throw new HttpError(409, 'STATS_CLOSED', 'Un forfait ou un match amical ne compte pas dans les stats perso.');
   if (!isOpen(info)) throw new HttpError(409, 'STATS_CLOSED', 'La capture s’envoie pendant le match ou dans les 24 h après.');
-  const input = (body ?? {}) as { mapNo?: unknown; rows?: unknown; hash?: unknown };
+  const input = (body ?? {}) as { mapNo?: unknown; rows?: unknown; hash?: unknown; rounds?: unknown };
   const mapNo = Number(input.mapNo ?? 1);
   if (!Number.isInteger(mapNo) || mapNo < 1 || mapNo > info.maps) throw new HttpError(400, 'INVALID_MAP', 'Map invalide.');
   const hash = typeof input.hash === 'string' ? input.hash : '';
@@ -160,7 +168,7 @@ export async function submitStats(kind: MatchKind, id: string, userId: string, b
   const seen = used as { match_kind: string; match_id: string; map_no: number } | null;
   if (seen && (seen.match_kind !== kind || seen.match_id !== id || seen.map_no !== mapNo)) throw new HttpError(409, 'CAPTURE_USED', 'Cette capture a déjà été envoyée.');
   if (!seen) {
-    const { error } = await supabase.from('match_captures').insert({ hash, match_kind: kind, match_id: id, map_no: mapNo, submitted_by: userId });
+    const { error } = await supabase.from('match_captures').insert({ hash, match_kind: kind, match_id: id, map_no: mapNo, submitted_by: userId, rounds: validRounds(input.rounds, info.roundsToWin) });
     if (error?.code === '23505') throw new HttpError(409, 'CAPTURE_USED', 'Cette capture a déjà été envoyée.');
     if (error) throw new HttpError(500, 'DB_ERROR', error.message);
   }

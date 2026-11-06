@@ -19,6 +19,13 @@ export function validRow(row: Partial<StatRow>): boolean {
   return count(row.score, 50000) && (row.score as number) % 5 === 0 && count(row.kills, 300) && count(row.plants, 30) && count(row.defuses, 30);
 }
 
+/** Score de manches lu sur la capture : deux nombres, dont un seul atteint les manches à gagner. Null sinon. */
+export function validRounds(input: unknown, roundsToWin: number): number[] | null {
+  if (!Array.isArray(input) || input.length !== 2 || !input.every((value) => count(value, roundsToWin))) return null;
+  const [a, b] = input as [number, number];
+  return Math.max(a, b) === roundsToWin && Math.min(a, b) < roundsToWin ? [a, b] : null;
+}
+
 /** Lignes envoyées par le site : joueurs du match seulement, une fois chacun. Null si quelque chose ne va pas. */
 export function parseRows(input: unknown, players: string[]): StatRow[] | null {
   if (!Array.isArray(input) || input.length === 0 || input.length > players.length) return null;
