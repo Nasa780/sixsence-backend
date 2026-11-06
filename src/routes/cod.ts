@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { seasonPass } from '../services/seasonPass.js';
-import { attachCaptureProof, correctStats, matchStats, parseKind, playerStats, removeStats, reportStats, submitStats } from '../services/matchStats.js';
+import { attachCaptureProof, correctStats, matchStats, statsLeaderboard, parseKind, playerStats, removeStats, reportStats, submitStats } from '../services/matchStats.js';
 import { MATCH_REFEREES, codMatchPlayers, currentUser, optionalAuth, refuseOwnMatch, requireAuth, requireRoles, roleOf, viewerOf } from '../auth.js';
 import { config } from '../config.js';
 import { HttpError, asyncHandler, uuidParam } from '../errors.js';
@@ -65,6 +65,7 @@ export function codRouter(hub: QueueHub): Router {
   router.post('/stats/:kind/:id/:mapNo/proof', requireAuth, asyncHandler(async (req, res) => void res.json(await attachCaptureProof(parseKind(req.params.kind), uuidParam(req, 'id'), Number(req.params.mapNo), currentUser(res).id, req.body))));
   router.patch('/stats/:kind/:id/:mapNo/:userId', requireAuth, asyncHandler(async (req, res) => void res.json(await correctStats(parseKind(req.params.kind), uuidParam(req, 'id'), Number(req.params.mapNo), uuidParam(req, 'userId'), currentUser(res).id, req.body))));
   router.delete('/stats/:kind/:id/:mapNo', requireAuth, asyncHandler(async (req, res) => void res.json(await removeStats(parseKind(req.params.kind), uuidParam(req, 'id'), Number(req.params.mapNo), currentUser(res).id))));
+  router.get('/stats-leaderboard', asyncHandler(async (_req, res) => void res.json(await statsLeaderboard())));
   router.get('/players/:id/stats', asyncHandler(async (req, res) => void res.json(await playerStats(uuidParam(req, 'id')))));
   router.get('/pass', optionalAuth, asyncHandler(async (_req, res) => void res.json(await seasonPass(viewerOf(res)?.id ?? null))));
   router.get('/players/:id/insights', optionalAuth, asyncHandler(async (req, res) => void res.json(await playerInsights(uuidParam(req, 'id'), viewerOf(res)?.id ?? null))));

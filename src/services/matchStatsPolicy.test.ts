@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { captureReminderText, captureReminderWindow, coversMatch, maxRounds, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsByMatch, summarizeStats, validRow } from './matchStatsPolicy.js';
+import { captureReminderText, captureReminderWindow, coversMatch, cupBest, maxRounds, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsBoard, statsByMatch, summarizeStats, validRow } from './matchStatsPolicy.js';
 
 const row = (userId: string, score = 1570, kills = 10) => ({ userId, score, kills, plants: 1, defuses: 0 });
 
@@ -131,5 +131,23 @@ describe('stats de capture : record des objectifs', () => {
 
   it('à égalité, garde le joueur qui a le plus de maps', () => {
     assert.equal(objectiveLeader([...maps('a', 10, 1, 0), ...maps('b', 14, 1, 0)])?.userId, 'b');
+  });
+});
+
+describe('stats de capture : coupes et classements', () => {
+  const line = (id: string, score: number, kills: number, plants = 0, defuses = 0) => ({ user_id: id, score, kills, plants, defuses });
+
+  it('désigne le meilleur score cumulé d’une coupe', () => {
+    assert.deepEqual(cupBest([line('a', 1000, 5), line('a', 1200, 6), line('b', 2000, 20)]), { userId: 'a', maps: 2, score: 2200, kills: 11, plants: 0, defuses: 0 });
+    assert.equal(cupBest([]), null);
+  });
+
+  it('départage une égalité de score par les élim.', () => {
+    assert.equal(cupBest([line('a', 1000, 5), line('b', 1000, 9)])?.userId, 'b');
+  });
+
+  it('calcule les moyennes des joueurs assez présents', () => {
+    const rows = [line('a', 1000, 5, 1, 0), line('a', 2000, 10, 1, 1), line('b', 9000, 30)];
+    assert.deepEqual(statsBoard(rows, 2), [{ userId: 'a', maps: 2, score: 3000, kills: 15, plants: 2, defuses: 1, avgKills: 7.5, avgScore: 1500, avgObjectives: 1.5 }]);
   });
 });

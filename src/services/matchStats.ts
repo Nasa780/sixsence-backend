@@ -5,7 +5,7 @@ import { supabase } from '../supabase.js';
 import { dm, notifyStaff } from './discord.js';
 import { roundsToWin } from './teamMatchPolicy.js';
 import { logToDiscord } from './siteLog.js';
-import { STATS_WINDOW_MS, captureReminderText, captureReminderWindow, coversMatch, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsByMatch, summarizeStats, validRow, type MatchKind, type SeasonStatLine, type StatRow } from './matchStatsPolicy.js';
+import { STATS_WINDOW_MS, captureReminderText, captureReminderWindow, coversMatch, cupBest, OBJECTIVE_MIN_MAPS, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsBoard, statsByMatch, summarizeStats, validRow, type MatchKind, type SeasonStatLine, type StatRow } from './matchStatsPolicy.js';
 
 /**
  * Capture de fin de match (migrations 0065, 0066 et 0068). Le site lit la capture dans le navigateur et envoie Score,
@@ -238,6 +238,40 @@ export async function seasonObjectiveLeader() {
   if (!start) return null;
   const { data } = await supabase.from('match_player_stats').select('match_kind, match_id, user_id, plants, defuses').gte('created_at', start).limit(10000);
   return objectiveLeader(await countedRows((data ?? []) as { match_kind: MatchKind; match_id: string; user_id: string; plants: number; defuses: number }[]));
+}
+
+const playerCard = async (id: string) => {
+  const { data } = await supabase.from('users').select('id, username, avatar_url').eq('id', id).maybeSingle();
+  const user = data as { id: string; username: string; avatar_url: string | null } | null;
+  return { id, username: user?.username ?? 'Joueur', avatarUrl: user?.avatar_url ?? null };
+};
+
+/** Meilleur joueur d'une coupe, d'après les captures de ses matchs terminés. Null sans capture. */
+export async function cupBestPlayer(tournamentId: string) {
+  const { data: matches } = await supabase.from('team_matches').select('id').eq('tournament_id', tournamentId);
+  const ids = ((matches ?? []) as { id: string }[]).map((match) => match.id);
+  if (ids.length === 0) return null;
+  const { data } = await supabase.from('match_player_stats').select('match_kind, match_id, user_id, score, kills, plants, defuses').eq('match_kind', 'division').in('match_id', ids);
+  const best = cupBest(await countedRows((data ?? []) as (SeasonStatLine & { match_kind: MatchKind; match_id: string; user_id: string })[]));
+  return best ? { ...best, ...(await playerCard(best.userId)) } : null;
+}
+
+let boardCache: { at: number; data: unknown } | null = null;
+
+/** Classements de stats de la saison (GET /cod/stats-leaderboard), tous modes confondus : gardés une minute en mémoire. */
+export async function statsLeaderboard() {
+  if (boardCache && Date.now() - boardCache.at < 60_000) return boardCache.data;
+  const { data: season } = await supabase.from('seasons').select('starts_at').eq('is_active', true).maybeSingle();
+  const start = (season as { starts_at: string } | null)?.starts_at;
+  const { data } = start ? await supabase.from('match_player_stats').select('match_kind, match_id, user_id, score, kills, plants, defuses').gte('created_at', start).limit(10000) : { data: [] };
+  const board = statsBoard(await countedRows((data ?? []) as (SeasonStatLine & { match_kind: MatchKind; match_id: string; user_id: string })[]));
+  const ids = board.map((row) => row.userId);
+  const { data: users } = ids.length ? await supabase.from('users').select('id, username, avatar_url').in('id', ids) : { data: [] };
+  const names = new Map(((users ?? []) as { id: string; username: string; avatar_url: string | null }[]).map((user) => [user.id, user]));
+  const players = board.map(({ userId, ...row }) => ({ ...row, id: userId, username: names.get(userId)?.username ?? 'Joueur', avatarUrl: names.get(userId)?.avatar_url ?? null }));
+  const result = { minMaps: OBJECTIVE_MIN_MAPS, players };
+  boardCache = { at: Date.now(), data: result };
+  return result;
 }
 
 /** Bilan d'un joueur sur la saison en cours (profil), chiffres de chaque match pour l'historique : les matchs annulés ne comptent pas. */

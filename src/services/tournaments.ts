@@ -6,6 +6,7 @@ import { parsePosterUrl, posterOf } from './cupPosters.js';
 import { circuitOrder } from './circuit.js';
 import { CIRCUIT_POINTS, finalQualified, finalWithPlayIn, playInPairs } from './circuitPolicy.js';
 import { mapPool } from './maps.js';
+import { cupBestPlayer } from './matchStats.js';
 import { SUPPRESS_EMBEDS, discord, discordEnabled, discordIds, dm, notifyStaff } from './discord.js';
 import { pushToUsers } from './push.js';
 import { openMatchVoice } from './teamMatches.js';
@@ -596,6 +597,7 @@ export async function getTournament(id: string, viewerId: string | null) {
     }
   }
   const people = new Map((await namesOf([...new Set([...rosterOf.values()].flat())])).map((person) => [person.id, person]));
+  const bestPlayer = tournament.status === 'completed' ? await cupBestPlayer(id).catch(() => null) : null;
 
   if (tournament.kind === 'anubis') return { ...publicView(), ...(await anubisView(tournament, participants, card, viewerId)) };
   return { ...publicView(), viewer };
@@ -624,6 +626,7 @@ export async function getTournament(id: string, viewerId: string | null) {
     completedAt: tournament.completed_at,
     winner: card(tournament.winner_team),
     finalist: card(tournament.finalist_team),
+    bestPlayer,
     teams: participants.map((p, index) => ({
       ...card(p.team_id)!,
       checkedIn: Boolean(p.checked_in_at),
@@ -1346,6 +1349,23 @@ async function announce(content: string, kind: Kind = 'saison', illustrated = fa
   await discord(`/channels/${channel}/messages`, { method: 'POST', body: { content, flags: SUPPRESS_EMBEDS } }).catch((caught) =>
     console.warn('[tournoi] annonce impossible', (caught as Error).message),
   );
+}
+
+/**
+ * Meilleur joueur annoncé sur Discord 24 h après la fin d'une coupe : les captures s'envoient jusque-là.
+ * Une seule annonce (index.ts, toutes les 5 minutes), rien sans capture.
+ */
+export async function announceCupBestPlayers(now = Date.now()): Promise<void> {
+  const from = new Date(now - 26 * 3_600_000).toISOString();
+  const to = new Date(now - 24 * 3_600_000).toISOString();
+  const { data } = await supabase.from('tournaments').select('id, name, kind').eq('status', 'completed').neq('kind', 'playin').gte('completed_at', from).lte('completed_at', to);
+  for (const cup of (data ?? []) as { id: string; name: string; kind: Kind }[]) {
+    const best = await cupBestPlayer(cup.id);
+    if (!best) continue;
+    const { data: first } = await supabase.rpc('app_claim', { p_key: `cup_best_${cup.id}`, p_value: '1' });
+    if (!first) continue;
+    await announce(`⭐ **Meilleur joueur de ${cup.name}** : ${best.username}, ${best.score.toLocaleString('fr-FR')} pts et ${best.kills} élim. sur ${best.maps} map${best.maps > 1 ? 's' : ''}.\n${config.siteUrl}${PAGE}?id=${cup.id}`, cup.kind);
+  }
 }
 
 // --- Coupe Horus : fin, récompenses ------------------------------------------------------------

@@ -149,3 +149,45 @@ export function objectiveLeader(rows: { user_id: string; plants: number; defuses
   const first = ranked[0];
   return first ? { userId: first.userId, value: Math.round(first.average * 10) / 10, maps: first.maps } : null;
 }
+
+export interface PlayerTotal {
+  userId: string;
+  maps: number;
+  score: number;
+  kills: number;
+  plants: number;
+  defuses: number;
+}
+
+/** Totaux de chaque joueur sur ses maps. */
+export function playerTotals(rows: (SeasonStatLine & { user_id: string })[]): PlayerTotal[] {
+  const totals = new Map<string, PlayerTotal>();
+  for (const row of rows) {
+    const total = totals.get(row.user_id) ?? { userId: row.user_id, maps: 0, score: 0, kills: 0, plants: 0, defuses: 0 };
+    total.maps += 1;
+    total.score += row.score;
+    total.kills += row.kills;
+    total.plants += row.plants;
+    total.defuses += row.defuses;
+    totals.set(row.user_id, total);
+  }
+  return [...totals.values()];
+}
+
+/** Meilleur joueur d'une coupe : le plus gros score cumulé, puis le plus d'élim. */
+export function cupBest(rows: (SeasonStatLine & { user_id: string })[]): PlayerTotal | null {
+  return playerTotals(rows).sort((a, b) => b.score - a.score || b.kills - a.kills)[0] ?? null;
+}
+
+/** Classements de stats : moyennes par map à une décimale, joueurs d'au moins minMaps maps seulement. */
+export function statsBoard(rows: (SeasonStatLine & { user_id: string })[], minMaps = OBJECTIVE_MIN_MAPS) {
+  const average = (value: number, maps: number) => Math.round((value / maps) * 10) / 10;
+  return playerTotals(rows)
+    .filter((total) => total.maps >= minMaps)
+    .map((total) => ({
+      ...total,
+      avgKills: average(total.kills, total.maps),
+      avgScore: Math.round(total.score / total.maps),
+      avgObjectives: average(total.plants + total.defuses, total.maps),
+    }));
+}

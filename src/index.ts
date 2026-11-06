@@ -28,7 +28,7 @@ const PUBLIC_API_URL = (process.env.RENDER_EXTERNAL_URL || 'https://sixsence-bac
 import { commandsEnabled, handleInteraction, registerCommands, validSignature } from './services/discordCommands.js';
 import { pointsPreview, sweepMatches } from './services/matches.js';
 import { checkTeamQueueTimeouts, sweepTeamMatches, tryCreateTeamMatches } from './services/teamMatches.js';
-import { sweepTournaments } from './services/tournaments.js';
+import { sweepTournaments, announceCupBestPlayers } from './services/tournaments.js';
 import { sweepChallenges } from './services/challenges.js';
 import { sweepTeamSchedules } from './services/teamSchedules.js';
 import { awardPreviousMonthMvp, usernameOf } from './services/moderation.js';
@@ -398,6 +398,7 @@ const reminderTimer = live
       void welcomeNewPlayers();
       void sendCupReminders().catch((error) => console.warn('[rappels]', (error as Error).message));
       void remindCaptures().catch((error) => console.warn('[rappels]', (error as Error).message));
+      void announceCupBestPlayers().catch((error) => console.warn('[coupes]', (error as Error).message));
     }, 5 * 60_000)
   : undefined;
 // Cartes de visite : attribution rétroactive une seule fois (sans notification), puis
