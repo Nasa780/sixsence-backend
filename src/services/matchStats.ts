@@ -5,7 +5,7 @@ import { supabase } from '../supabase.js';
 import { dm, notifyStaff } from './discord.js';
 import { roundsToWin } from './teamMatchPolicy.js';
 import { logToDiscord } from './siteLog.js';
-import { STATS_WINDOW_MS, captureReminderText, captureReminderWindow, coversMatch, openMaps, parseRows, plausibleRows, sameCapture, statsByMatch, summarizeStats, validRow, type MatchKind, type SeasonStatLine, type StatRow } from './matchStatsPolicy.js';
+import { STATS_WINDOW_MS, captureReminderText, captureReminderWindow, coversMatch, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsByMatch, summarizeStats, validRow, type MatchKind, type SeasonStatLine, type StatRow } from './matchStatsPolicy.js';
 
 /**
  * Capture de fin de match (migrations 0065, 0066 et 0068). Le site lit la capture dans le navigateur et envoie Score,
@@ -202,14 +202,10 @@ export async function removeStats(kind: MatchKind, id: string, mapNo: number, us
   return matchStats(kind, id, userId);
 }
 
-/** Bilan d'un joueur sur la saison en cours (profil), chiffres de chaque match pour l'historique : les matchs annulés ne comptent pas. */
-export async function playerStats(userId: string) {
-  const { data: season } = await supabase.from('seasons').select('starts_at').eq('is_active', true).maybeSingle();
-  const start = (season as { starts_at: string } | null)?.starts_at;
-  const { data } = await supabase.from('match_player_stats').select('match_kind, match_id, score, kills, plants, defuses, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(2000);
-  const rows = (data ?? []) as (SeasonStatLine & { match_kind: MatchKind; match_id: string; created_at: string })[];
-  const idsOf = (kind: MatchKind) => [...new Set(rows.filter((row) => row.match_kind === kind).map((row) => row.match_id))];
-  const finished = async (table: string, ids: string[]) => {
+/** Garde les lignes des matchs terminés : un match annulé ne compte pas. */
+async function countedRows<Row extends { match_kind: MatchKind; match_id: string }>(rows: Row[]): Promise<Row[]> {
+  const finished = async (kind: MatchKind, table: string) => {
+    const ids = [...new Set(rows.filter((row) => row.match_kind === kind).map((row) => row.match_id))];
     const done = new Set<string>();
     for (let index = 0; index < ids.length; index += 100) {
       const { data: found } = await supabase.from(table).select('id').in('id', ids.slice(index, index + 100)).eq('status', 'completed');
@@ -217,8 +213,26 @@ export async function playerStats(userId: string) {
     }
     return done;
   };
-  const [ranked, division] = await Promise.all([finished('cod_matches', idsOf('classe')), finished('team_matches', idsOf('division'))]);
-  const counted = rows.filter((row) => (row.match_kind === 'classe' ? ranked : division).has(row.match_id));
+  const [ranked, division] = await Promise.all([finished('classe', 'cod_matches'), finished('division', 'team_matches')]);
+  return rows.filter((row) => (row.match_kind === 'classe' ? ranked : division).has(row.match_id));
+}
+
+/** Record de la Renommée : poses + désamorçages par map depuis le début de la saison, tous modes confondus. */
+export async function seasonObjectiveLeader() {
+  const { data: season } = await supabase.from('seasons').select('starts_at').eq('is_active', true).maybeSingle();
+  const start = (season as { starts_at: string } | null)?.starts_at;
+  if (!start) return null;
+  const { data } = await supabase.from('match_player_stats').select('match_kind, match_id, user_id, plants, defuses').gte('created_at', start).limit(10000);
+  return objectiveLeader(await countedRows((data ?? []) as { match_kind: MatchKind; match_id: string; user_id: string; plants: number; defuses: number }[]));
+}
+
+/** Bilan d'un joueur sur la saison en cours (profil), chiffres de chaque match pour l'historique : les matchs annulés ne comptent pas. */
+export async function playerStats(userId: string) {
+  const { data: season } = await supabase.from('seasons').select('starts_at').eq('is_active', true).maybeSingle();
+  const start = (season as { starts_at: string } | null)?.starts_at;
+  const { data } = await supabase.from('match_player_stats').select('match_kind, match_id, score, kills, plants, defuses, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(2000);
+  const rows = (data ?? []) as (SeasonStatLine & { match_kind: MatchKind; match_id: string; created_at: string })[];
+  const counted = await countedRows(rows);
   return { ...summarizeStats(counted.filter((row) => !start || row.created_at >= start)), matches: statsByMatch(counted) };
 }
 

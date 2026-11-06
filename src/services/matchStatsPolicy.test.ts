@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { captureReminderText, captureReminderWindow, coversMatch, maxRounds, openMaps, parseRows, plausibleRows, sameCapture, statsByMatch, summarizeStats, validRow } from './matchStatsPolicy.js';
+import { captureReminderText, captureReminderWindow, coversMatch, maxRounds, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsByMatch, summarizeStats, validRow } from './matchStatsPolicy.js';
 
 const row = (userId: string, score = 1570, kills = 10) => ({ userId, score, kills, plants: 1, defuses: 0 });
 
@@ -115,5 +115,21 @@ describe('stats de capture : historique', () => {
       x: { score: 200, kills: 10, plants: 2, defuses: 0 },
       y: line,
     });
+  });
+});
+
+describe('stats de capture : record des objectifs', () => {
+  const maps = (id: string, count: number, plants: number, defuses: number) => Array.from({ length: count }, () => ({ user_id: id, plants, defuses }));
+
+  it('écarte les joueurs sous le minimum de maps', () => {
+    assert.equal(objectiveLeader(maps('a', 9, 5, 5)), null);
+  });
+
+  it('combine poses et désamorçages en moyenne par map', () => {
+    assert.deepEqual(objectiveLeader([...maps('a', 10, 1, 1), ...maps('b', 10, 3, 0), ...maps('c', 12, 0, 0)]), { userId: 'b', value: 3, maps: 10 });
+  });
+
+  it('à égalité, garde le joueur qui a le plus de maps', () => {
+    assert.equal(objectiveLeader([...maps('a', 10, 1, 0), ...maps('b', 14, 1, 0)])?.userId, 'b');
   });
 });

@@ -129,3 +129,23 @@ export function statsByMatch(rows: MatchLine[]): Record<string, SeasonStatLine> 
   }
   return matches;
 }
+
+/** Maps minimum pour le record des objectifs : un seul bon match ne suffit pas. */
+export const OBJECTIVE_MIN_MAPS = 10;
+
+/** Meilleure moyenne de poses + désamorçages par map (une décimale). À égalité, le joueur qui a le plus de maps. */
+export function objectiveLeader(rows: { user_id: string; plants: number; defuses: number }[], minMaps = OBJECTIVE_MIN_MAPS): { userId: string; value: number; maps: number } | null {
+  const totals = new Map<string, { maps: number; objectives: number }>();
+  for (const row of rows) {
+    const total = totals.get(row.user_id) ?? { maps: 0, objectives: 0 };
+    total.maps += 1;
+    total.objectives += row.plants + row.defuses;
+    totals.set(row.user_id, total);
+  }
+  const ranked = [...totals]
+    .filter(([, total]) => total.maps >= minMaps && total.objectives > 0)
+    .map(([userId, total]) => ({ userId, average: total.objectives / total.maps, maps: total.maps }))
+    .sort((a, b) => b.average - a.average || b.maps - a.maps);
+  const first = ranked[0];
+  return first ? { userId: first.userId, value: Math.round(first.average * 10) / 10, maps: first.maps } : null;
+}
