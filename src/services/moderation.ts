@@ -142,6 +142,12 @@ export async function myArbitrations(matchId: string, userId: string): Promise<A
   ) ?? []) as ArbitrationRequest[];
 }
 
+/** Une demande d'arbitrage ouverte sur ce match, quel que soit le joueur qui l'a faite. */
+export async function hasOpenArbitration(matchId: string): Promise<boolean> {
+  const { count } = await supabase.from('cod_arbitration_requests').select('match_id', { count: 'exact', head: true }).eq('match_id', matchId).eq('status', 'open');
+  return (count ?? 0) > 0;
+}
+
 // --- Signalements -------------------------------------------------------------------
 
 export interface PlayerReport {

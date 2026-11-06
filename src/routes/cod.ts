@@ -7,7 +7,7 @@ import { HttpError, asyncHandler, uuidParam } from '../errors.js';
 import { bus } from '../events.js';
 import { notifyStaff } from '../services/discord.js';
 import { noticeResultDisputed, noticeResultReported } from '../services/matchNotices.js';
-import { ARBITRATION_REASONS, REPORT_REASONS, myArbitrations, reportPlayer, requestArbitration, usernameOf, voteMvp } from '../services/moderation.js';
+import { ARBITRATION_REASONS, REPORT_REASONS, hasOpenArbitration, myArbitrations, reportPlayer, requestArbitration, usernameOf, voteMvp } from '../services/moderation.js';
 import { supabase } from '../supabase.js';
 import { addProof, confirmMatch, correctMatch, getMatch, postMessage, reportMatch, resolveMatch, setGameCode, voteCancel } from '../services/matches.js';
 import { acceptReady, acceptWithToken } from '../services/readyAccept.js';
@@ -339,11 +339,14 @@ export function codRouter(hub: QueueHub): Router {
     asyncHandler(async (req, res) => {
       const matchId = uuidParam(req, 'id');
       const userId = currentUser(res).id;
-      const [vote, arbitrations] = await Promise.all([
+      const [vote, arbitrations, players] = await Promise.all([
         supabase.from('cod_mvp_votes').select('target_id').eq('match_id', matchId).eq('voter_id', userId).maybeSingle(),
         myArbitrations(matchId, userId),
+        codMatchPlayers(matchId),
       ]);
-      res.json({ myVote: (vote.data as { target_id: string } | null)?.target_id ?? null, arbitrations });
+      // Litige ouvert : les deux camps peuvent ajouter une capture, sans voir la demande de l'autre.
+      const disputeOpen = players.includes(userId) && (await hasOpenArbitration(matchId));
+      res.json({ myVote: (vote.data as { target_id: string } | null)?.target_id ?? null, arbitrations, disputeOpen });
     }),
   );
 
