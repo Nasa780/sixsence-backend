@@ -2,7 +2,7 @@ import { type NotificationCategory, recipientsFor } from './notificationPrefs.js
 import { config } from '../config.js';
 import { bus, type CodMatch } from '../events.js';
 import { supabase } from '../supabase.js';
-import { pointsLabel, resultCardUrl } from './resultCardPolicy.js';
+import { resultCardUrl } from './resultCardPolicy.js';
 import { sendMatchFound, updateClosed, updateStarted } from './matchFoundDm.js';
 
 /**
@@ -239,7 +239,6 @@ async function sweepOnce(): Promise<void> {
     if (match.status === 'completed' && match.winner && resultsChannelId && recent) {
       try {
         const names = await usernames([...match.team_a, ...match.team_b]);
-        const pointsOf = (ids: string[]) => pointsLabel(ids.flatMap((id) => (typeof match.points_changes?.[id] === 'number' ? [match.points_changes[id]!] : [])));
         const posted = (await discord(`/channels/${resultsChannelId}/messages`, {
           method: 'POST',
           body: {
@@ -259,8 +258,6 @@ async function sweepOnce(): Promise<void> {
                     b: 'Équipe 2',
                     playersA: match.team_a.map((id) => names.get(id) ?? 'Joueur'),
                     playersB: match.team_b.map((id) => names.get(id) ?? 'Joueur'),
-                    pointsA: pointsOf(match.team_a),
-                    pointsB: pointsOf(match.team_b),
                     winner: match.winner,
                   }),
                 },

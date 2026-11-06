@@ -1,7 +1,7 @@
 import { isReferee, refuseOwnMatch, roleOf } from '../auth.js';
 import { mayArbitrateOwnMatch } from '../roles.js';
 import { config } from '../config.js';
-import { pointsLabel, resultCardUrl } from './resultCardPolicy.js';
+import { resultCardUrl, signedPoints } from './resultCardPolicy.js';
 import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { discord, discordEnabled, dm, matchVoiceOverwrites, notifyStaff } from './discord.js';
@@ -1065,7 +1065,7 @@ async function sweepTeamDiscord(): Promise<void> {
         const state = seriesState(match.scores, match.best_of);
         const points = (side: Side) => {
           const value = match.points_changes?.[side];
-          return typeof value === 'number' ? pointsLabel([value]) : null;
+          return typeof value === 'number' ? signedPoints(value) : null;
         };
         // Match de coupe : nom de la coupe, tour et rouge des tournois (pas de points d'équipe en jeu).
         let cup: { name: string; round: string | null } | null = null;

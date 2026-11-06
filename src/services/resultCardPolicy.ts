@@ -11,7 +11,7 @@ export interface ResultCard {
   /** Joueurs de chaque équipe, en Classé (équipes sans nom). */
   playersA?: string[];
   playersB?: string[];
-  /** Points de chaque équipe (« +25 », « +50 à +100 »). */
+  /** Points de chaque équipe en Division (« +25 ») ; en Classé, ils restent sur la feuille de match. */
   pointsA?: string | null;
   pointsB?: string | null;
   /** Logos, en Division et en coupe. */
@@ -34,16 +34,7 @@ export interface BestLine {
   avatarUrl?: string | null;
 }
 
-const signed = (value: number) => `${value >= 0 ? '+' : ''}${value}`;
-
-/** Points d'une équipe : une valeur, ou de la plus petite à la plus grande perte ou le plus petit au plus grand gain (en Classé, ils dépendent du joueur). */
-export function pointsLabel(values: number[]): string | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => Math.abs(a) - Math.abs(b));
-  const low = sorted[0]!;
-  const high = sorted[sorted.length - 1]!;
-  return low === high ? signed(low) : `${signed(low)} à ${signed(high)}`;
-}
+export const signedPoints = (value: number) => `${value >= 0 ? '+' : ''}${value}`;
 
 export function resultCardUrl(siteUrl: string, card: ResultCard): string {
   const query = new URLSearchParams({ k: card.kind, l: card.label, a: card.a, b: card.b, w: card.winner });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { pointsLabel, resultCardUrl, withBestPlayer, withRoundScore } from './resultCardPolicy.js';
+import { resultCardUrl, signedPoints, withBestPlayer, withRoundScore } from './resultCardPolicy.js';
 
 describe('carte de résultat', () => {
   const division = {
@@ -45,11 +45,9 @@ describe('carte de résultat', () => {
 describe('carte de résultat : nouveautés', () => {
   const classe = resultCardUrl('https://s.fr', { kind: 'classe', label: 'Classé 4v4', a: 'Équipe 1', b: 'Équipe 2', winner: 'B' });
 
-  it('résume les points d’une équipe', () => {
-    assert.equal(pointsLabel([]), null);
-    assert.equal(pointsLabel([52, 52]), '+52');
-    assert.equal(pointsLabel([100, 50]), '+50 à +100');
-    assert.equal(pointsLabel([-15, -35, -25]), '-15 à -35');
+  it('signe les points d’une équipe', () => {
+    assert.equal(signedPoints(25), '+25');
+    assert.equal(signedPoints(-25), '-25');
   });
 
   it('écrit les points, les logos et le tour', () => {
