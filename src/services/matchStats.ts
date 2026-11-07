@@ -5,7 +5,7 @@ import { supabase } from '../supabase.js';
 import { discord, notifyStaff } from './discord.js';
 import { roundsToWin } from './teamMatchPolicy.js';
 import { logToDiscord } from './siteLog.js';
-import { withBestPlayer, withRoundScore } from './resultCardPolicy.js';
+import { isCardReady, withBestPlayer, withRoundScore } from './resultCardPolicy.js';
 import { STATS_WINDOW_MS, captureReminderText, coversMatch, cupBest, OBJECTIVE_MIN_MAPS, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsBoard, statsByMatch, summarizeStats, validRounds, validRow, type MatchKind, type SeasonStatLine, type StatRow } from './matchStatsPolicy.js';
 
 /**
@@ -74,6 +74,23 @@ function isOpen(info: MatchInfo): boolean {
 }
 
 /** Carte de résultat sur Discord : le meilleur joueur du match, dès qu'une capture le donne. Sans effet sur la capture si ça échoue. */
+/** Demande l'image au site jusqu'à trois fois : vrai quand elle est bien dessinée (et gardée en cache pour Discord). */
+async function cardReady(url: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 5000));
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+      await res.arrayBuffer();
+      if (isCardReady(res.status, res.headers.get('cache-control'))) return true;
+    } catch {
+      // Site injoignable : nouvel essai.
+    }
+  }
+  return false;
+}
+
+const retried = new Set<string>();
+
 export async function refreshResultCard(kind: MatchKind, id: string): Promise<void> {
   const channel = config.discord.resultsChannelId;
   if (!channel) return;
@@ -96,6 +113,16 @@ export async function refreshResultCard(kind: MatchKind, id: string): Promise<vo
   }
   // Rien de nouveau : pas d'écriture, Discord afficherait « (modifié) » pour rien.
   if (url === new URL(embed.image.url).toString()) return;
+  // Image ratée (police manquante) : l'ancienne carte reste, nouvel essai dans 5 minutes, une seule fois.
+  if (!(await cardReady(url))) {
+    console.warn('[stats] carte de résultat pas prête, ancienne carte gardée', id);
+    if (!retried.has(id)) {
+      retried.add(id);
+      setTimeout(() => void refreshResultCard(kind, id).catch(() => {}), 5 * 60_000).unref();
+    }
+    return;
+  }
+  retried.delete(id);
   await discord(`/channels/${channel}/messages/${messageId}`, { method: 'PATCH', body: { embeds: [{ ...embed, image: { url } }] } });
 }
 

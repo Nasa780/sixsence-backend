@@ -34,6 +34,14 @@ export interface BestLine {
   avatarUrl?: string | null;
 }
 
+/**
+ * Image bien dessinée : le site ne la met pas en cache quand une police manquait (pseudo stylisé dessiné en carrés).
+ * Une image ratée n'est jamais mise sur le message : l'ancienne carte reste.
+ */
+export function isCardReady(status: number, cacheControl: string | null): boolean {
+  return status === 200 && !/no-store/i.test(cacheControl ?? '');
+}
+
 /** Bouton « Voir la feuille de match » sous le résultat, sur Discord. */
 export const matchSheetButton = (url: string) => [{ type: 1, components: [{ type: 2, style: 5, label: 'Voir la feuille de match', url }] }];
 
