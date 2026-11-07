@@ -89,7 +89,8 @@ async function cardReady(url: string): Promise<boolean> {
   return false;
 }
 
-const retried = new Set<string>();
+/** Essais déjà programmés par match : jusqu'à trois, à 5, 10 puis 15 minutes. */
+const retried = new Map<string, number>();
 
 export async function refreshResultCard(kind: MatchKind, id: string): Promise<void> {
   const channel = config.discord.resultsChannelId;
@@ -113,12 +114,13 @@ export async function refreshResultCard(kind: MatchKind, id: string): Promise<vo
   }
   // Rien de nouveau : pas d'écriture, Discord afficherait « (modifié) » pour rien.
   if (url === new URL(embed.image.url).toString()) return;
-  // Image ratée (police manquante) : l'ancienne carte reste, nouvel essai dans 5 minutes, une seule fois.
+  // Image ratée (police manquante) : l'ancienne carte reste, nouvel essai à 5, 10 puis 15 minutes.
   if (!(await cardReady(url))) {
     console.warn('[stats] carte de résultat pas prête, ancienne carte gardée', id);
-    if (!retried.has(id)) {
-      retried.add(id);
-      setTimeout(() => void refreshResultCard(kind, id).catch(() => {}), 5 * 60_000).unref();
+    const tries = retried.get(id) ?? 0;
+    if (tries < 3) {
+      retried.set(id, tries + 1);
+      setTimeout(() => void refreshResultCard(kind, id).catch(() => {}), (tries + 1) * 5 * 60_000).unref();
     }
     return;
   }
