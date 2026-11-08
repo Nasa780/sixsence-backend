@@ -16,6 +16,7 @@ import {
   emptyRounds,
   firstRound,
   podium,
+  fourthPlace,
   podiumDouble,
   qualifiedTeams,
   readyEntries,
@@ -104,6 +105,12 @@ describe('Coupe Horus', () => {
     assert.deepEqual(podium(done, 2), { winner: 't1', finalist: 't2', third: 't3' });
   });
 
+  it('4e place : le perdant de la petite finale', () => {
+    const done = play([...firstRound(seeds(4), 4), ...emptyRounds(4, true)], 2, (a, b) => (a < b ? a : b));
+    assert.equal(fourthPlace(done, 4, 'single'), 't4');
+    assert.equal(fourthPlace(play([...firstRound(seeds(4), 4), ...emptyRounds(4)], 2, (a, b) => (a < b ? a : b)), 4, 'single'), null);
+  });
+
   it('sans petite finale : pas de 3e', () => {
     const done = play([...firstRound(seeds(4), 4), ...emptyRounds(4)], 2, (a, b) => (a < b ? a : b));
     assert.deepEqual(podium(done, 2), { winner: 't1', finalist: 't2', third: null });
@@ -176,6 +183,14 @@ describe('Coupe Horus en double élimination', () => {
     const result = podiumDouble(done, 8)!;
     assert.equal(result.winner, 't1');
     assert.ok(result.finalist);
+  });
+
+  it('4e place en double élimination : perdant du tour avant la finale des perdants', () => {
+    const done = playAll(doubleBracket(seeds(8), 8), 8);
+    const fourth = fourthPlace(done, 8, 'double');
+    const result = podiumDouble(done, 8)!;
+    assert.ok(fourth);
+    assert.ok(![result.winner, result.finalist, result.third].includes(fourth));
   });
 
   it('podium en attente tant que la grande finale n’est pas jouée', () => {

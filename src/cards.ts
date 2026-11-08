@@ -3,7 +3,7 @@
  * cards.test.ts). Le site dessine les cartes (src/lib/cards.js) à partir des mêmes clés.
  *
  * Familles : par défaut, rangs (rang atteint pendant la saison des cartes de rang, RANK_CARDS_SEASON ;
- * exclusives, nouvelles cartes à chaque saison), succès, saison (participant, top 10, champion ; exclusives),
+ * exclusives, nouvelles cartes à chaque saison), succès, saison (participant, top 10, champion, vainqueur du circuit ; exclusives),
  * MVP (MVP du mois : une carte par mois, regroupées ; MVP ×10), communauté, GTA 6.
  * Une carte obtenue est définitive, sauf Partenaire et Staff (retirées avec le badge ou le rôle).
  */
@@ -35,6 +35,8 @@ export interface CardStats {
   gtaEvents: number;
   /** Palier du pass de la saison en cours. */
   passLevel: number;
+  /** Saisons dont le joueur a gagné la grande finale du circuit (joueurs du check-in de l'équipe gagnante). */
+  circuitWins: number[];
 }
 
 export interface CardDef {
@@ -172,7 +174,8 @@ export const STATIC_CARDS: CardDef[] = [
 ];
 
 /**
- * Cartes d'une saison (exclusives, attribuées à la clôture) : participant, top 10, champion.
+ * Cartes d'une saison (exclusives) : participant, top 10, champion (attribuées à la clôture), vainqueur du circuit
+ * (dès la fin de la grande finale).
  */
 export function seasonCards(seasonId: number): CardDef[] {
   const of = (stats: CardStats) => stats.seasons.find((season) => season.id === seasonId);
@@ -207,14 +210,25 @@ export function seasonCards(seasonId: number): CardDef[] {
       exclusive: true,
       eligible: (s) => of(s)?.position === 1,
     },
+    {
+      key: `s${seasonId}-circuit`,
+      family: `Saison ${seasonId}`,
+      name: `Vainqueur du circuit S${seasonId}`,
+      condition: 'Gagner la grande finale du circuit',
+      rarity: 'legendaire',
+      exclusive: true,
+      eligible: (s) => (s.circuitWins ?? []).includes(seasonId),
+    },
   ];
 }
 
 /** Toutes les cartes qu'un joueur mérite, d'après ses statistiques. */
 export function eligibleKeys(stats: CardStats): string[] {
   const keys = STATIC_CARDS.filter((card) => card.eligible(stats)).map((card) => card.key);
-  for (const season of stats.seasons) {
-    for (const card of seasonCards(season.id)) if (card.eligible(stats)) keys.push(card.key);
+  // Saisons archivées, plus la saison en cours et celles d'une grande finale gagnée (carte du circuit avant la clôture).
+  const ids = new Set([...stats.seasons.map((season) => season.id), ...(stats.circuitWins ?? []), ...(stats.currentSeason.id ? [stats.currentSeason.id] : [])]);
+  for (const id of ids) {
+    for (const card of seasonCards(id)) if (card.eligible(stats)) keys.push(card.key);
   }
   return keys;
 }

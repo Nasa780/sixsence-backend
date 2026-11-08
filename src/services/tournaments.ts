@@ -3,7 +3,7 @@ import { HttpError, fromDbError, unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { postAnnouncement } from './announcements.js';
 import { parsePosterUrl, posterOf } from './cupPosters.js';
-import { circuitOrder } from './circuit.js';
+import { circuitOrder, circuitOutlook } from './circuit.js';
 import { CIRCUIT_POINTS, finalQualified, finalWithPlayIn, playInPairs } from './circuitPolicy.js';
 import { mapPool } from './maps.js';
 import { cupBestPlayer } from './matchStats.js';
@@ -42,6 +42,7 @@ import {
   isThirdPlace,
   podium,
   podiumDouble,
+  fourthPlace,
   qualifiedTeams,
   readyEntries,
   roundName,
@@ -598,6 +599,11 @@ export async function getTournament(id: string, viewerId: string | null) {
   }
   const people = new Map((await namesOf([...new Set([...rosterOf.values()].flat())])).map((person) => [person.id, person]));
   const bestPlayer = tournament.status === 'completed' ? await cupBestPlayer(id).catch(() => null) : null;
+  // Coupe Horus à venir ou en cours : place de chaque équipe au circuit et place en cas de victoire.
+  const outlook =
+    tournament.kind === 'horus' && (tournament.status === 'scheduled' || tournament.status === 'running')
+      ? await circuitOutlook(participants.map((p) => p.team_id)).catch(() => null)
+      : null;
 
   if (tournament.kind === 'anubis') return { ...publicView(), ...(await anubisView(tournament, participants, card, viewerId)) };
   return { ...publicView(), viewer };
@@ -635,6 +641,7 @@ export async function getTournament(id: string, viewerId: string | null) {
       reserve: tournament.kind === 'horus' && tournament.status === 'scheduled' && index >= tournament.size,
       bench: p.bench,
       players: (rosterOf.get(p.team_id) ?? []).map((userId) => people.get(userId)).filter(Boolean),
+      circuit: outlook?.get(p.team_id) ?? null,
     })),
     reserveSlots: tournament.kind === 'horus' ? reserveTeams(tournament.size) : 0,
     bracket: tournament.bracket,
@@ -643,8 +650,8 @@ export async function getTournament(id: string, viewerId: string | null) {
     rewards:
       tournament.kind === 'horus'
         ? {
-            division: { winner: CUP_BONUS.or, finalist: CUP_BONUS.argent, third: CUP_BONUS.bronze, present: CUP_BONUS.participation },
-            circuit: { winner: CIRCUIT_POINTS.winner, finalist: CIRCUIT_POINTS.finalist, third: CIRCUIT_POINTS.third, present: CIRCUIT_POINTS.present },
+            division: { winner: CUP_BONUS.or, finalist: CUP_BONUS.argent, third: CUP_BONUS.bronze, fourth: CUP_BONUS.quatrieme, present: CUP_BONUS.participation },
+            circuit: { winner: CIRCUIT_POINTS.winner, finalist: CIRCUIT_POINTS.finalist, third: CIRCUIT_POINTS.third, fourth: CIRCUIT_POINTS.fourth, present: CIRCUIT_POINTS.present },
             xp: { win: 500, loss: 150 },
           }
         : null,
@@ -1239,7 +1246,7 @@ export async function advanceTournament(id: string): Promise<void> {
     return;
   }
   const result = double ? podiumDouble(advanced, tournament.size) : podium(advanced, rounds);
-  if (result) await completeTournament(tournament, result.winner, result.finalist, result.third);
+  if (result) await completeTournament(tournament, result.winner, result.finalist, result.third, fourthPlace(advanced, tournament.size, tournament.bracket));
 }
 
 type CorrectedMatch = { id: string; tournament_id: string | null; team_a: string; team_b: string; winner: 'A' | 'B' | null; created_at: string };
@@ -1284,8 +1291,8 @@ export async function applyTournamentCorrection(match: CorrectedMatch, winner: '
   await advanceTournament(match.tournament_id);
 }
 
-async function completeTournament(tournament: TournamentRow, winner: string | null, finalist: string | null, third: string | null = null): Promise<void> {
-  if (isCup(tournament.kind)) return completeCup(tournament, winner, finalist, third);
+async function completeTournament(tournament: TournamentRow, winner: string | null, finalist: string | null, third: string | null = null, fourth: string | null = null): Promise<void> {
+  if (isCup(tournament.kind)) return completeCup(tournament, winner, finalist, third, fourth);
   const claimed = unwrap(
     await supabase
       .from('tournaments')
@@ -1317,6 +1324,11 @@ async function completeTournament(tournament: TournamentRow, winner: string | nu
   if (winnerTeam) {
     await announce(`🏆 **${tournament.name}** : victoire de **[${winnerTeam.tag}] ${winnerTeam.name}** ! Félicitations.\n${config.siteUrl}${PAGE}`);
     await giveWinnerRole(tournament, winnerRoster);
+    // Carte de visite « Vainqueur du circuit » (joueurs du check-in, sinon effectif figé), donnée tout de suite.
+    const winnerEntry = participants.find((p) => p.team_id === winner);
+    const players = winnerEntry?.match_roster?.length ? winnerEntry.match_roster : winnerRoster;
+    const { syncCards } = await import('./cards.js');
+    for (const userId of players) await syncCards(userId).catch((caught) => console.warn('[tournoi] carte du vainqueur impossible', (caught as Error).message));
   }
 }
 
@@ -1374,7 +1386,7 @@ export async function announceCupBestPlayers(now = Date.now()): Promise<void> {
  * Fin d'une Coupe Horus : trophées or / argent / bronze (fiche d'équipe, et profil des joueurs de l'équipe : cup_medals
  * kind horus), points de Division, rôle Discord, annonces.
  */
-async function completeCup(tournament: TournamentRow, winner: string | null, finalist: string | null, third: string | null): Promise<void> {
+async function completeCup(tournament: TournamentRow, winner: string | null, finalist: string | null, third: string | null, fourth: string | null = null): Promise<void> {
   const claimed = unwrap(
     await supabase
       .from('tournaments')
@@ -1398,7 +1410,7 @@ async function completeCup(tournament: TournamentRow, winner: string | null, fin
     const trophy = { tournamentId: tournament.id, kind: 'horus', name: tournament.name, season: tournament.season_id, place, date };
     unwrap(await supabase.from('teams').update({ trophies: [...(team.trophies ?? []), trophy] }).eq('id', teamId));
   }
-  // Points de Division : podium, et participation pour les autres équipes présentes.
+  // Points de Division : podium, 4e place, et participation pour les autres équipes présentes.
   const participants = (await participantsOf(tournament.id)).filter((p) => !p.forfeit);
   // Trophée aussi sur le profil des joueurs de l'équipe (joueurs du check-in, sinon effectif inscrit).
   const podiumNames = new Map(
@@ -1421,8 +1433,9 @@ async function completeCup(tournament: TournamentRow, winner: string | null, fin
   }
   for (const p of participants) {
     const placed = podiumPlaces.find(([teamId]) => teamId === p.team_id);
-    const points = placed ? placed[2] : CUP_BONUS.participation;
-    const reason = placed ? `${tournament.name} · ${placed[1]}` : `${tournament.name} · participation`;
+    const isFourth = !placed && p.team_id === fourth;
+    const points = placed ? placed[2] : isFourth ? CUP_BONUS.quatrieme : CUP_BONUS.participation;
+    const reason = placed ? `${tournament.name} · ${placed[1]}` : isFourth ? `${tournament.name} · 4e place` : `${tournament.name} · participation`;
     const { error } = await supabase.rpc('team_add_bonus', { p_team: p.team_id, p_tournament: tournament.id, p_points: points, p_reason: reason });
     if (error) console.error('[coupe] bonus impossible', error.message);
   }

@@ -15,8 +15,8 @@ export const TOURNAMENT_SIZES = [8, 16, 32] as const;
 export const CUP_SIZES = [4, 8, 16] as const;
 /** Une coupe se joue à partir de 4 équipes présentes au check-in. */
 export const CUP_MIN_TEAMS = 4;
-/** Points de Division gagnés en Coupe Horus. */
-export const CUP_BONUS = { or: 150, argent: 100, bronze: 75, participation: 50 } as const;
+/** Points de Division gagnés en Coupe Horus (4e place : perdant de la petite finale ou de la demi-finale des perdants). */
+export const CUP_BONUS = { or: 150, argent: 100, bronze: 75, quatrieme: 40, participation: 25 } as const;
 export const QUALIFY_MATCHES = 25;
 /**
  * Check-in : ouvert 2 h avant le début, fermé 15 min avant ; à la fermeture, tirage dévoilé (tableau,
@@ -173,6 +173,22 @@ export function podium(entries: BracketEntry[], rounds: number): { winner: strin
   const third = entries.find((entry) => isThirdPlace(entry, rounds));
   if (!settled(final) || (third && !settled(third))) return null;
   return { winner: final!.winner, finalist: final!.winner === final!.teamA ? final!.teamB : final!.teamA, third: third?.winner ?? null };
+}
+
+/**
+ * 4e place d'une coupe : perdant de la petite finale (élimination directe) ou du tour avant la finale des perdants
+ * (double élimination). Null sans petite finale, rencontre pas jouée ou gagnée sur une place vide.
+ */
+export function fourthPlace(entries: BracketEntry[], size: number, bracket: 'single' | 'double'): string | null {
+  const n = roundsFor(size);
+  const match =
+    bracket === 'double'
+      ? n >= 2
+        ? entries.find((entry) => entry.round === LOSERS_BASE + 2 * (n - 1) - 1 && entry.slot === 0)
+        : undefined
+      : entries.find((entry) => isThirdPlace(entry, n));
+  if (!match || match.status !== 'done' || !match.teamA || !match.teamB || !match.winner) return null;
+  return match.winner === match.teamA ? match.teamB : match.teamA;
 }
 
 // --- Double élimination (Coupe Horus) ------------------------------------------------------------
