@@ -1,6 +1,7 @@
 import { unwrap } from '../errors.js';
 import { supabase } from '../supabase.js';
-import { CIRCUIT_POINTS, DIVISION_SPOTS, circuitStandings } from './circuitPolicy.js';
+import { CIRCUIT_POINTS, DIVISION_SPOTS, circuitProjection, circuitStandings, type CircuitCup } from './circuitPolicy.js';
+import { fourthPlace, type BracketEntry } from './tournamentPolicy.js';
 
 /**
  * Circuit SixSence (GET /teams/circuit, page /cod/circuit) : classement des points gagnés dans les Coupes Horus
@@ -17,18 +18,49 @@ async function activeSeason() {
 
 async function compute() {
   const season = await activeSeason();
-  if (!season) return { season: null, cups: [], standings: [] as ReturnType<typeof circuitStandings> };
+  if (!season) return { season: null, cups: [], played: [] as CircuitCup[], standings: [] as ReturnType<typeof circuitStandings> };
   const cups = (unwrap(
-    await supabase.from('tournaments').select('id, name, status, starts_at, completed_at, winner_team, finalist_team, third_team').eq('kind', 'horus').eq('season_id', season.id).in('status', ['scheduled', 'running', 'completed']).order('starts_at'),
-  ) ?? []) as { id: string; name: string; status: string; starts_at: string; completed_at: string | null; winner_team: string | null; finalist_team: string | null; third_team: string | null }[];
+    await supabase.from('tournaments').select('id, name, status, starts_at, completed_at, winner_team, finalist_team, third_team, size, bracket').eq('kind', 'horus').eq('season_id', season.id).in('status', ['scheduled', 'running', 'completed']).order('starts_at'),
+  ) ?? []) as {
+    id: string;
+    name: string;
+    status: string;
+    starts_at: string;
+    completed_at: string | null;
+    winner_team: string | null;
+    finalist_team: string | null;
+    third_team: string | null;
+    size: number;
+    bracket: 'single' | 'double';
+  }[];
   const done = cups.filter((c) => c.status === 'completed');
   const present = done.length
     ? ((unwrap(await supabase.from('tournament_teams').select('tournament_id, team_id').in('tournament_id', done.map((c) => c.id)).not('checked_in_at', 'is', null)) ?? []) as { tournament_id: string; team_id: string }[])
     : [];
-  const standings = circuitStandings(
-    done.map((c) => ({ winner: c.winner_team, finalist: c.finalist_team, third: c.third_team, present: present.filter((p) => p.tournament_id === c.id).map((p) => p.team_id) })),
-  );
-  return { season, cups, standings };
+  // 4e place relue dans le tableau de chaque coupe (aussi pour les coupes jouées avant son ajout).
+  const entries = done.length
+    ? ((unwrap(await supabase.from('tournament_bracket').select('tournament_id, round, slot, team_a, team_b, winner, status').in('tournament_id', done.map((c) => c.id))) ?? []) as {
+        tournament_id: string;
+        round: number;
+        slot: number;
+        team_a: string | null;
+        team_b: string | null;
+        winner: string | null;
+        status: BracketEntry['status'];
+      }[])
+    : [];
+  const played: CircuitCup[] = done.map((c) => ({
+    winner: c.winner_team,
+    finalist: c.finalist_team,
+    third: c.third_team,
+    fourth: fourthPlace(
+      entries.filter((e) => e.tournament_id === c.id).map((e) => ({ round: e.round, slot: e.slot, teamA: e.team_a, teamB: e.team_b, winner: e.winner, status: e.status })),
+      c.size,
+      c.bracket,
+    ),
+    present: present.filter((p) => p.tournament_id === c.id).map((p) => p.team_id),
+  }));
+  return { season, cups, played, standings: circuitStandings(played) };
 }
 
 async function data() {
@@ -41,6 +73,11 @@ async function data() {
 export async function circuitOrder(): Promise<string[]> {
   cache = null;
   return (await data()).standings.map((s) => s.teamId);
+}
+
+/** Place au circuit des équipes d'une Coupe Horus à venir ou en cours, et place en cas de victoire (fiche de la coupe). */
+export async function circuitOutlook(teamIds: string[]) {
+  return circuitProjection((await data()).played, teamIds);
 }
 
 /** Page du circuit : barème, coupes de la saison, classement avec les zones de la grande finale. */

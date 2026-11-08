@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CIRCUIT_POINTS, circuitStandings, finalQualified, finalWithPlayIn, playInPairs } from './circuitPolicy.js';
+import { CIRCUIT_POINTS, circuitProjection, circuitStandings, finalQualified, finalWithPlayIn, playInPairs } from './circuitPolicy.js';
 
 test('points de circuit : podium et équipes présentes', () => {
   const standings = circuitStandings([
@@ -80,4 +80,24 @@ test('grande finale après le play-in : directs puis vainqueurs, sans doublon', 
     { teamId: 'c2', via: 'circuit' },
     { teamId: 'd2', via: 'playin' },
   ]);
+});
+
+test('4e place : plus de points qu une équipe seulement présente', () => {
+  const standings = circuitStandings([{ winner: 'a', finalist: 'b', third: 'c', fourth: 'd', present: ['a', 'b', 'c', 'd', 'e'] }]);
+  const byId = Object.fromEntries(standings.map((s) => [s.teamId, s]));
+  assert.equal(byId.d!.points, CIRCUIT_POINTS.fourth);
+  assert.equal(byId.e!.points, CIRCUIT_POINTS.present);
+  assert.equal(byId.d!.cups, 1);
+});
+
+test('projection : place actuelle et place en cas de victoire', () => {
+  const cups = [
+    { winner: 'a', finalist: 'b', third: 'c', present: ['a', 'b', 'c', 'd'] },
+    { winner: 'a', finalist: 'c', third: 'b', present: ['a', 'b', 'c'] },
+  ];
+  // a : 200 ; b : 120 ; c : 120 ; d : 15 ; e : rien. Les autres équipes de la coupe (d, e, b) comptent présentes (+15).
+  const projection = circuitProjection(cups, ['d', 'e', 'b']);
+  assert.deepEqual(projection.get('d'), { rank: 4, points: 15, ifWin: 4 });
+  assert.deepEqual(projection.get('e'), { rank: null, points: 0, ifWin: 4 });
+  assert.equal(projection.get('b')!.ifWin, 1);
 });

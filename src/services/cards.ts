@@ -38,7 +38,7 @@ interface MatchRow {
 
 /** Statistiques de toute la carrière d'un joueur (toutes saisons). */
 export async function computeStats(userId: string): Promise<CardStats & { calling_card: string }> {
-  const [profile, user, matches, seasons, mvpMonths, registrations] = await Promise.all([
+  const [profile, user, matches, seasons, mvpMonths, registrations, finals] = await Promise.all([
     supabase.from('cod_profiles').select('peak_points, points, badges, calling_card, xp, pass_xp_base').eq('user_id', userId).maybeSingle(),
     supabase.from('users').select('role').eq('id', userId).maybeSingle(),
     supabase
@@ -51,7 +51,23 @@ export async function computeStats(userId: string): Promise<CardStats & { callin
     supabase.from('season_results').select('season_id, position, points, peak_points, wins, losses').eq('user_id', userId),
     supabase.from('cod_monthly_mvp').select('month').eq('user_id', userId),
     supabase.from('gta_registrations').select('gta_events!inner(starts_at, ends_at, status)').eq('user_id', userId),
+    // Grandes finales du circuit (tournoi de saison) gagnées : équipe gagnante dont le joueur était aligné.
+    supabase
+      .from('tournament_teams')
+      .select('team_id, match_roster, frozen_roster, tournaments!inner(kind, status, winner_team, season_id)')
+      .eq('tournaments.kind', 'saison')
+      .eq('tournaments.status', 'completed')
+      .or(`match_roster.cs.{${userId}},frozen_roster.cs.{${userId}}`),
   ]);
+  const circuitWins = [
+    ...new Set(
+      ((finals.data ?? []) as unknown as { team_id: string; match_roster: string[] | null; frozen_roster: string[] | null; tournaments: { winner_team: string | null; season_id: number | null } | null }[])
+        .filter((row) => row.tournaments?.winner_team === row.team_id && row.tournaments.season_id !== null)
+        // Joueurs du check-in s'il y en a, sinon effectif figé.
+        .filter((row) => (row.match_roster?.length ? row.match_roster : row.frozen_roster ?? []).includes(userId))
+        .map((row) => row.tournaments!.season_id as number),
+    ),
+  ];
 
   const rows = (matches.data ?? []) as MatchRow[];
   const results = rows.map((match) => (match.winner === 'A' ? match.team_a : match.winner === 'B' ? match.team_b : []).includes(userId));
@@ -94,6 +110,7 @@ export async function computeStats(userId: string): Promise<CardStats & { callin
     team: role === 'admin' || role === 'staff' || role === 'arbitre',
     gtaEvents,
     passLevel: passLevel((p.xp ?? 0) - (p.pass_xp_base ?? 0)),
+    circuitWins,
     calling_card: p.calling_card ?? DEFAULT_CARD,
   };
 }

@@ -18,13 +18,14 @@ const base: CardStats = {
   team: false,
   gtaEvents: 0,
   passLevel: 0,
+  circuitWins: [],
 };
 const stats = (patch: Partial<CardStats>): CardStats => ({ ...base, ...patch });
 
 describe('cartes de visite', () => {
   it('catalogue : 30 cartes permanentes (case MVP du mois et pass compris) + 3 par saison = 33', () => {
     assert.equal(STATIC_CARDS.length, 30);
-    assert.equal(STATIC_CARDS.length + seasonCards(1).length, 33);
+    assert.equal(STATIC_CARDS.length + seasonCards(1).length, 34);
     assert.ok(STATIC_CARDS.some((card) => card.key === MVP_MONTH_CARD));
     assert.equal(new Set(STATIC_CARDS.map((card) => card.key)).size, STATIC_CARDS.length);
   });
@@ -126,5 +127,12 @@ describe('pass de saison', () => {
     assert.deepEqual(missingPassBadges(s(10)), ['s1-pass-bronze']);
     assert.deepEqual(missingPassBadges({ ...s(30), badges: ['s1-pass-bronze'] }), ['s1-pass-argent', 's1-pass-or']);
     assert.deepEqual(missingPassBadges(s(30, 2)), []);
+  });
+});
+
+describe('carte du vainqueur du circuit', () => {
+  it('donnée dès la grande finale gagnée, avant la clôture de la saison', () => {
+    assert.ok(eligibleKeys(stats({ circuitWins: [1], currentSeason: { id: 1, peak: 0 } })).includes('s1-circuit'));
+    assert.ok(!eligibleKeys(stats({ currentSeason: { id: 1, peak: 0 } })).includes('s1-circuit'));
   });
 });
