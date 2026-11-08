@@ -5,7 +5,7 @@ import { supabase } from '../supabase.js';
 import { discord, notifyStaff } from './discord.js';
 import { roundsToWin } from './teamMatchPolicy.js';
 import { logToDiscord } from './siteLog.js';
-import { withBestPlayer, withRoundScore } from './resultCardPolicy.js';
+import { isCardReady, withBestPlayer, withRoundScore } from './resultCardPolicy.js';
 import { STATS_WINDOW_MS, captureReminderText, coversMatch, cupBest, OBJECTIVE_MIN_MAPS, objectiveLeader, openMaps, parseRows, plausibleRows, sameCapture, statsBoard, statsByMatch, summarizeStats, validRounds, validRow, type MatchKind, type SeasonStatLine, type StatRow } from './matchStatsPolicy.js';
 
 /**
@@ -74,6 +74,24 @@ function isOpen(info: MatchInfo): boolean {
 }
 
 /** Carte de résultat sur Discord : le meilleur joueur du match, dès qu'une capture le donne. Sans effet sur la capture si ça échoue. */
+/** Demande l'image au site jusqu'à trois fois : vrai quand elle est bien dessinée (et gardée en cache pour Discord). */
+async function cardReady(url: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 5000));
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+      await res.arrayBuffer();
+      if (isCardReady(res.status, res.headers.get('cache-control'))) return true;
+    } catch {
+      // Site injoignable : nouvel essai.
+    }
+  }
+  return false;
+}
+
+/** Essais déjà programmés par match : jusqu'à trois, à 5, 10 puis 15 minutes. */
+const retried = new Map<string, number>();
+
 export async function refreshResultCard(kind: MatchKind, id: string): Promise<void> {
   const channel = config.discord.resultsChannelId;
   if (!channel) return;
@@ -96,6 +114,17 @@ export async function refreshResultCard(kind: MatchKind, id: string): Promise<vo
   }
   // Rien de nouveau : pas d'écriture, Discord afficherait « (modifié) » pour rien.
   if (url === new URL(embed.image.url).toString()) return;
+  // Image ratée (police manquante) : l'ancienne carte reste, nouvel essai à 5, 10 puis 15 minutes.
+  if (!(await cardReady(url))) {
+    console.warn('[stats] carte de résultat pas prête, ancienne carte gardée', id);
+    const tries = retried.get(id) ?? 0;
+    if (tries < 3) {
+      retried.set(id, tries + 1);
+      setTimeout(() => void refreshResultCard(kind, id).catch(() => {}), (tries + 1) * 5 * 60_000).unref();
+    }
+    return;
+  }
+  retried.delete(id);
   await discord(`/channels/${channel}/messages/${messageId}`, { method: 'PATCH', body: { embeds: [{ ...embed, image: { url } }] } });
 }
 

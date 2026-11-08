@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { matchSheetButton, resultCardUrl, signedPoints, withBestPlayer, withRoundScore } from './resultCardPolicy.js';
+import { isCardReady, matchSheetButton, resultCardUrl, signedPoints, withBestPlayer, withRoundScore } from './resultCardPolicy.js';
 
 describe('carte de résultat', () => {
   const division = {
@@ -74,5 +74,15 @@ describe('carte de résultat : nouveautés', () => {
     assert.equal(query.get('bd'), '1');
     assert.equal(query.get('ba'), 'https://x/a.png');
     assert.equal(new URL(withBestPlayer(query.size ? `https://s.fr/?${query}` : classe, null)).searchParams.has('ba'), false);
+  });
+});
+
+describe('carte de résultat : image prête', () => {
+  it('accepte une image gardée en cache', () => {
+    assert.equal(isCardReady(200, 'public, s-maxage=31536000, immutable'), true);
+  });
+  it('refuse une image ratée ou en erreur', () => {
+    assert.equal(isCardReady(200, 'no-store'), false);
+    assert.equal(isCardReady(500, 'public'), false);
   });
 });
