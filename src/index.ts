@@ -20,6 +20,7 @@ import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
 import { startDiscordGateway, stopDiscordGateway } from './services/discordGateway.js';
 import { memberMessagesEnabled, updateMemberCounter } from './services/discordMembers.js';
+import { refreshAllAvatars } from './services/avatars.js';
 import { readyToken } from './services/readyAccept.js';
 import { updateAborted, updateReady } from './services/matchFoundDm.js';
 
@@ -413,6 +414,14 @@ if (live && discordEnabled && memberMessagesEnabled) startDiscordGateway();
 // Nombre de membres dans le nom d'un salon, toutes les 10 minutes.
 const countMembers = () => void updateMemberCounter().catch((error) => console.warn('[discord] compteur de membres', (error as Error).message));
 const memberCountTimer = live && discordEnabled ? setInterval(countMembers, 10 * 60_000) : undefined;
+// Avatars Discord à jour sur le site : relus pour tous les joueurs toutes les 6 heures (et 2 min après le démarrage) ;
+// les membres du serveur sont aussi mis à jour tout de suite par le Gateway (services/avatars.ts).
+const refreshAvatars = () =>
+  void refreshAllAvatars()
+    .then((count) => count && console.log(`[avatars] ${count} avatar(s) mis à jour`))
+    .catch((error) => console.warn('[avatars]', (error as Error).message));
+const avatarTimer = live && discordEnabled ? setInterval(refreshAvatars, 6 * 60 * 60_000) : undefined;
+if (live && discordEnabled) setTimeout(refreshAvatars, 2 * 60_000);
 if (live && discordEnabled) countMembers();
 const cardsTimer = live ? setInterval(() => void syncAllCards().catch(() => {}), 60 * 60_000) : undefined;
 // Annonces Discord programmées : vérifiées chaque minute, et au démarrage (retard d'une mise en veille).
@@ -463,6 +472,7 @@ function shutdown(signal: string): void {
   clearInterval(cardsTimer);
   clearInterval(twitchTimer);
   clearInterval(memberCountTimer);
+  clearInterval(avatarTimer);
   clearInterval(scheduledTimer);
   clearInterval(readyTimer);
   clearInterval(queueTimer);
