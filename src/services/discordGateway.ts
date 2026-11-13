@@ -2,13 +2,13 @@ import { WebSocket, type RawData } from 'ws';
 import { config } from '../config.js';
 import { checkAuditAccess, onAuditEntry } from './discordModeration.js';
 import type { AuditEntry } from './discordModerationPolicy.js';
-import { applyDiscordAvatar } from './avatars.js';
+import { applyDiscordProfile } from './discordProfiles.js';
 import { onMemberAdd, onMemberRemove, syncMembers, type MemberEvent } from './discordMembers.js';
 import { logToDiscord } from './siteLog.js';
 
 /**
  * Connexion permanente du bot à Discord (Gateway), pour les seuls événements que l'API REST ne donne pas :
- * arrivées et départs du serveur, changements d'avatar des membres (recopiés sur le site), journal de modération. Reprise de session après une coupure, sinon reconnexion puis
+ * arrivées et départs du serveur, changements de pseudo et d'avatar des membres (recopiés sur le site), journal de modération. Reprise de session après une coupure, sinon reconnexion puis
  * rattrapage des membres (syncMembers).
  * Exige « Server Members Intent » dans le portail développeur, onglet Bot.
  */
@@ -73,9 +73,9 @@ function dispatch(type: string | null, data: unknown): void {
   } else if (type === 'GUILD_MEMBER_ADD' && (data as { guild_id?: string }).guild_id === config.discord.guildId) {
     guard(onMemberAdd(data as MemberEvent), 'bienvenue');
   } else if (type === 'GUILD_MEMBER_UPDATE' && (data as { guild_id?: string }).guild_id === config.discord.guildId) {
-    // Avatar Discord changé : recopié tout de suite sur le site (services/avatars.ts).
-    const { user } = data as { user?: { id: string; avatar?: string | null; bot?: boolean } };
-    if (user && !user.bot) guard(applyDiscordAvatar(user.id, user.avatar).then(() => undefined), 'avatar');
+    // Pseudo ou avatar Discord changé : recopié tout de suite sur le site (services/discordProfiles.ts).
+    const { user } = data as { user?: { id: string; username?: string; global_name?: string | null; avatar?: string | null; bot?: boolean } };
+    if (user && !user.bot) guard(applyDiscordProfile(user).then(() => undefined), 'pseudo et avatar');
   } else if (type === 'GUILD_MEMBER_REMOVE' && (data as { guild_id?: string }).guild_id === config.discord.guildId) {
     guard(onMemberRemove((data as MemberEvent).user), 'départ');
   } else if (type === 'GUILD_AUDIT_LOG_ENTRY_CREATE' && (data as AuditEntry).guild_id === config.discord.guildId) {
