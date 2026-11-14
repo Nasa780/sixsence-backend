@@ -15,6 +15,7 @@ import { codRouter } from './routes/cod.js';
 import { errorsRouter } from './routes/errors.js';
 import { gtaRouter } from './routes/gta.js';
 import { pushRouter } from './routes/push.js';
+import { messagesRouter } from './routes/messages.js';
 import { teamsRouter } from './routes/teams.js';
 import { describeError, reportError } from './services/alerts.js';
 import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './services/discord.js';
@@ -47,6 +48,7 @@ import { pushPublicKey, pushToUsers } from './services/push.js';
 import { noticeMatchAbandoned, noticeMatchFinished, noticeMatchMissed, remindStaff } from './services/matchNotices.js';
 import { syncAllCards, syncCards } from './services/cards.js';
 import { purgeOldNotifications } from './services/notificationInbox.js';
+import { purgeOldMessages } from './services/messages.js';
 import { announceNewStreams } from './services/twitchAnnounce.js';
 import { liveStreams, sweepTwitch, twitchEnabled, twitchStatus } from './services/twitchLive.js';
 import { supabase } from './supabase.js';
@@ -330,6 +332,7 @@ app.use('/cod', codRouter(hub));
 app.use('/gta', gtaRouter());
 app.use('/clips', clipsRouter());
 app.use('/push', pushRouter());
+app.use('/messages', messagesRouter());
 app.use('/teams', teamsRouter());
 app.use('/admin', adminRouter());
 app.use('/errors', errorsRouter());
@@ -392,8 +395,13 @@ const awardMvp = () =>
     .catch((error) => console.error('[mvp]', error));
 if (live) void awardMvp();
 const mvpTimer = live ? setInterval(awardMvp, 60 * 60_000) : undefined;
-// Centre de notifications : celles de plus de 30 jours supprimées, toutes les heures.
-const inboxTimer = live ? setInterval(() => void purgeOldNotifications(), 60 * 60_000) : undefined;
+// Centre de notifications et messagerie : notifications et messages de plus de 30 jours supprimés, toutes les heures.
+const inboxTimer = live
+  ? setInterval(() => {
+      void purgeOldNotifications();
+      void purgeOldMessages();
+    }, 60 * 60_000)
+  : undefined;
 // Rappels Discord 1 h avant les événements GTA 6, et bienvenue aux nouveaux inscrits.
 const reminderTimer = live
   ? setInterval(() => {

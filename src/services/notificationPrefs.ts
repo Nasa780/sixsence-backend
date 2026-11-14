@@ -6,7 +6,7 @@ import { supabase } from '../supabase.js';
  * catégories en notification (push) et en message privé Discord (dm). Un envoi sans catégorie part toujours
  * (sanctions, modération, retrait d'une équipe, messages de l'équipe SixSence).
  */
-export const NOTIFICATION_CATEGORIES = ['match_trouve', 'match', 'file', 'equipe', 'coupes', 'cartes', 'gta'] as const;
+export const NOTIFICATION_CATEGORIES = ['match_trouve', 'match', 'file', 'equipe', 'coupes', 'cartes', 'gta', 'messages'] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 export type NotificationChannel = 'push' | 'dm';
 
