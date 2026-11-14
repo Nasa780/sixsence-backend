@@ -33,6 +33,7 @@ export const REPORT_REASONS: Record<string, string> = {
   afk: 'Abandon ou AFK',
   smurf: 'Compte multiple',
   name: 'Pseudo ou avatar inapproprié',
+  spam: 'Spam ou arnaque',
   other: 'Autre',
 };
 
