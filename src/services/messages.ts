@@ -3,6 +3,7 @@ import { HttpError, fromDbError } from '../errors.js';
 import { supabase } from '../supabase.js';
 import { dm, notifyStaff } from './discord.js';
 import { REPORT_REASONS, reportPlayer } from './moderation.js';
+import { normalizeName, rankPlayers } from './playerSearch.js';
 import { pushToUsers } from './push.js';
 
 /**
@@ -281,10 +282,43 @@ export async function sendMessage(me: string, other: string, input: unknown) {
 export async function searchPlayers(me: string, query: unknown) {
   const text = typeof query === 'string' ? query.trim().slice(0, 40) : '';
   if (text.length < 2) return { players: [] };
-  const pattern = `%${text.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
-  const { data, error } = await supabase.from('users').select('id, username, avatar_url').ilike('username', pattern).neq('id', me).order('username').limit(10);
+  const players = await playerIndex();
+  // Même recherche que l'admin : pseudos stylisés ramenés à des lettres simples (« noxira » trouve « 𝑵ø𝒙𝒊ř𝒂 »),
+  // identifiant Activision compris. Une recherche faite seulement de symboles compare le pseudo tel quel.
+  const found = normalizeName(text)
+    ? rankPlayers(players, text)
+    : players.filter((player) => player.username.toLowerCase().includes(text.toLowerCase()));
+  return { players: found.filter((player) => player.id !== me).slice(0, 10).map((player) => card({ id: player.id, username: player.username, avatar_url: player.avatarUrl }, player.id)) };
+}
+
+interface IndexedPlayer {
+  id: string;
+  username: string;
+  avatarUrl: string | null;
+  activisionId: string | null;
+  points: number;
+}
+
+let indexCache: { at: number; players: IndexedPlayer[] } | null = null;
+
+/** Joueurs inscrits (pseudo, avatar, identifiant Activision, points), gardés une minute en mémoire. */
+async function playerIndex(): Promise<IndexedPlayer[]> {
+  if (indexCache && Date.now() - indexCache.at < 60_000) return indexCache.players;
+  const [{ data: users, error }, { data: profiles }] = await Promise.all([
+    supabase.from('users').select('id, username, avatar_url').limit(10000),
+    supabase.from('cod_profiles').select('user_id, activision_id, points').limit(10000),
+  ]);
   if (error) throw fromDbError(error);
-  return { players: ((data ?? []) as UserCard[]).map((user) => card(user, user.id)) };
+  const byUser = new Map(((profiles ?? []) as { user_id: string; activision_id: string | null; points: number }[]).map((row) => [row.user_id, row]));
+  const players = ((users ?? []) as UserCard[]).map((user) => ({
+    id: user.id,
+    username: user.username,
+    avatarUrl: user.avatar_url,
+    activisionId: byUser.get(user.id)?.activision_id ?? null,
+    points: byUser.get(user.id)?.points ?? 0,
+  }));
+  indexCache = { at: Date.now(), players };
+  return players;
 }
 
 /** Ménage : messages de plus de 30 jours supprimés, conversations vides ensuite. */
