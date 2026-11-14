@@ -66,7 +66,8 @@ export function codRouter(hub: QueueHub): Router {
   router.patch('/stats/:kind/:id/:mapNo/:userId', requireAuth, asyncHandler(async (req, res) => void res.json(await correctStats(parseKind(req.params.kind), uuidParam(req, 'id'), Number(req.params.mapNo), uuidParam(req, 'userId'), currentUser(res).id, req.body))));
   router.delete('/stats/:kind/:id/:mapNo', requireAuth, asyncHandler(async (req, res) => void res.json(await removeStats(parseKind(req.params.kind), uuidParam(req, 'id'), Number(req.params.mapNo), currentUser(res).id))));
   router.get('/capture-reminder', requireAuth, asyncHandler(async (_req, res) => void res.json({ reminder: await captureReminder(currentUser(res).id) })));
-  router.get('/stats-leaderboard', asyncHandler(async (_req, res) => void res.json(await statsLeaderboard())));
+  // ?mode=classe|division : un seul mode ; sans mode, tous modes confondus.
+  router.get('/stats-leaderboard', asyncHandler(async (req, res) => void res.json(await statsLeaderboard(req.query.mode ? parseKind(req.query.mode) : null))));
   router.get('/players/:id/stats', asyncHandler(async (req, res) => void res.json(await playerStats(uuidParam(req, 'id')))));
   router.get('/pass', optionalAuth, asyncHandler(async (_req, res) => void res.json(await seasonPass(viewerOf(res)?.id ?? null))));
   router.get('/players/:id/insights', optionalAuth, asyncHandler(async (req, res) => void res.json(await playerInsights(uuidParam(req, 'id'), viewerOf(res)?.id ?? null))));

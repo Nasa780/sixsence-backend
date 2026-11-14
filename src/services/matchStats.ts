@@ -321,21 +321,28 @@ export async function cupBestPlayer(tournamentId: string) {
   return best ? { ...best, ...(await playerCard(best.userId)) } : null;
 }
 
-let boardCache: { at: number; data: unknown } | null = null;
+const boardCache = new Map<string, { at: number; data: unknown }>();
 
-/** Classements de stats de la saison (GET /cod/stats-leaderboard), tous modes confondus : gardés une minute en mémoire. */
-export async function statsLeaderboard() {
-  if (boardCache && Date.now() - boardCache.at < 60_000) return boardCache.data;
+/**
+ * Classements de stats de la saison (GET /cod/stats-leaderboard), gardés une minute en mémoire.
+ * kind : seulement les matchs classés ou de Division ; sans kind, tous modes confondus.
+ */
+export async function statsLeaderboard(kind: MatchKind | null = null) {
+  const key = kind ?? 'tous';
+  const cached = boardCache.get(key);
+  if (cached && Date.now() - cached.at < 60_000) return cached.data;
   const { data: season } = await supabase.from('seasons').select('starts_at').eq('is_active', true).maybeSingle();
   const start = (season as { starts_at: string } | null)?.starts_at;
-  const { data } = start ? await supabase.from('match_player_stats').select('match_kind, match_id, user_id, score, kills, plants, defuses').gte('created_at', start).limit(10000) : { data: [] };
+  let query = supabase.from('match_player_stats').select('match_kind, match_id, user_id, score, kills, plants, defuses');
+  if (kind) query = query.eq('match_kind', kind);
+  const { data } = start ? await query.gte('created_at', start).limit(10000) : { data: [] };
   const board = statsBoard(await countedRows((data ?? []) as (SeasonStatLine & { match_kind: MatchKind; match_id: string; user_id: string })[]));
   const ids = board.map((row) => row.userId);
   const { data: users } = ids.length ? await supabase.from('users').select('id, username, avatar_url').in('id', ids) : { data: [] };
   const names = new Map(((users ?? []) as { id: string; username: string; avatar_url: string | null }[]).map((user) => [user.id, user]));
   const players = board.map(({ userId, ...row }) => ({ ...row, id: userId, username: names.get(userId)?.username ?? 'Joueur', avatarUrl: names.get(userId)?.avatar_url ?? null }));
   const result = { minMaps: OBJECTIVE_MIN_MAPS, players };
-  boardCache = { at: Date.now(), data: result };
+  boardCache.set(key, { at: Date.now(), data: result });
   return result;
 }
 
