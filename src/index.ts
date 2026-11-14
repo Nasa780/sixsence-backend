@@ -46,6 +46,7 @@ import { globalSearch } from './services/search.js';
 import { pushPublicKey, pushToUsers } from './services/push.js';
 import { noticeMatchAbandoned, noticeMatchFinished, noticeMatchMissed, remindStaff } from './services/matchNotices.js';
 import { syncAllCards, syncCards } from './services/cards.js';
+import { purgeOldNotifications } from './services/notificationInbox.js';
 import { announceNewStreams } from './services/twitchAnnounce.js';
 import { liveStreams, sweepTwitch, twitchEnabled, twitchStatus } from './services/twitchLive.js';
 import { supabase } from './supabase.js';
@@ -391,6 +392,8 @@ const awardMvp = () =>
     .catch((error) => console.error('[mvp]', error));
 if (live) void awardMvp();
 const mvpTimer = live ? setInterval(awardMvp, 60 * 60_000) : undefined;
+// Centre de notifications : celles de plus de 30 jours supprimées, toutes les heures.
+const inboxTimer = live ? setInterval(() => void purgeOldNotifications(), 60 * 60_000) : undefined;
 // Rappels Discord 1 h avant les événements GTA 6, et bienvenue aux nouveaux inscrits.
 const reminderTimer = live
   ? setInterval(() => {
@@ -478,6 +481,7 @@ function shutdown(signal: string): void {
   clearInterval(queueTimer);
   clearInterval(discordTimer);
   clearInterval(mvpTimer);
+  clearInterval(inboxTimer);
   clearInterval(reminderTimer);
   hub.close();
   server.close(() => process.exit(0));

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { currentUser, requireAuth } from '../auth.js';
 import { HttpError, asyncHandler } from '../errors.js';
+import { inbox, markRead } from '../services/notificationInbox.js';
 import { getPrefs, setPrefs } from '../services/notificationPrefs.js';
 import { pushPublicKey, subscribe, unsubscribe } from '../services/push.js';
 
@@ -56,6 +57,23 @@ export function pushRouter(): Router {
     requireAuth,
     asyncHandler(async (req, res) => {
       res.json(await setPrefs(currentUser(res).id, req.body));
+    }),
+  );
+
+  // Centre de notifications (cloche du site) : 30 dernières et nombre de non lues ; marquer comme lues.
+  router.get(
+    '/inbox',
+    requireAuth,
+    asyncHandler(async (_req, res) => {
+      res.json(await inbox(currentUser(res).id));
+    }),
+  );
+
+  router.post(
+    '/inbox/read',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      res.json(await markRead(currentUser(res).id, req.body));
     }),
   );
 

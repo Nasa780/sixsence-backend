@@ -1,3 +1,4 @@
+import { recordNotifications } from './notificationInbox.js';
 import { type NotificationCategory, recipientsFor } from './notificationPrefs.js';
 import webpush from 'web-push';
 import { config } from '../config.js';
@@ -115,10 +116,13 @@ export interface PushMessage {
 
 /** Envoie une notification à tous les appareils des joueurs donnés (au mieux, sans erreur). */
 export async function pushToUsers(userIds: string[], message: PushMessage): Promise<void> {
-  if (userIds.length === 0 || !(await pushPublicKey())) return;
+  // Centre de notifications du site : gardée pour chaque joueur, même sans push activé ni préférence
+  // (en parallèle de l'envoi, pour ne pas retarder « Match trouvé »).
+  const recorded = recordNotifications(userIds, message);
+  if (userIds.length === 0 || !(await pushPublicKey())) return recorded;
   const { category, ...notification } = message;
   const recipients = await recipientsFor(userIds, category, 'push');
-  if (recipients.length === 0) return;
+  if (recipients.length === 0) return recorded;
   const { data } = await supabase.from('push_subscriptions').select('id, endpoint, p256dh, auth').in('user_id', recipients);
   const subscriptions = (data ?? []) as { id: number; endpoint: string; p256dh: string; auth: string }[];
   const payload = JSON.stringify(notification);
@@ -142,4 +146,5 @@ export async function pushToUsers(userIds: string[], message: PushMessage): Prom
       }
     }),
   );
+  await recorded;
 }
