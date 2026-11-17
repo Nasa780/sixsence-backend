@@ -22,6 +22,7 @@ import { discordEnabled, onMatchFound, onMatchStart, sweepDiscord } from './serv
 import { startDiscordGateway, stopDiscordGateway } from './services/discordGateway.js';
 import { memberMessagesEnabled, updateMemberCounter } from './services/discordMembers.js';
 import { refreshAllDiscordProfiles } from './services/discordProfiles.js';
+import { noteLaunchDayVisit } from './services/launchDay.js';
 import { readyToken } from './services/readyAccept.js';
 import { updateAborted, updateReady } from './services/matchFoundDm.js';
 
@@ -265,6 +266,8 @@ app.post('/presence', (req: Request, res: Response) => {
     markPresent(id);
     recordVisit(id);
   }
+  // Jour 1 de GTA 6 : badge et carte « Jour 1 · Vice City » au joueur connecté (48 h seulement).
+  noteLaunchDayVisit(req.headers.authorization);
   res.json({ online: onlineVisitors() });
 });
 

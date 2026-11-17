@@ -171,6 +171,8 @@ export const STATIC_CARDS: CardDef[] = [
   { key: 'staff-6', family: 'Communauté', name: 'Staff', condition: "Membre de l'équipe", rarity: 'rare', removable: true, eligible: (s) => s.team },
   { key: 'premiere-viree', family: 'GTA 6', name: 'Première virée', condition: '1 événement GTA 6', rarity: 'commune', ...count((s) => s.gtaEvents, 1) },
   { key: 'habitue', family: 'GTA 6', name: 'Habitué', condition: '5 événements GTA 6', rarity: 'rare', ...count((s) => s.gtaEvents, 5) },
+  // Jour 1 de GTA 6 : connecté au site les 19 ou 20 novembre 2026 (badge posé par services/launchDay.ts).
+  { key: 'gta6-jour1', family: 'GTA 6', name: 'Jour 1 · Vice City', condition: 'Connecté au site le jour de la sortie de GTA 6 (19 ou 20 novembre 2026)', rarity: 'legendaire', exclusive: true, eligible: (s) => s.badges.includes('gta6-jour1') },
 ];
 
 /**

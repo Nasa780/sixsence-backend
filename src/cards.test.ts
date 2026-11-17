@@ -23,9 +23,9 @@ const base: CardStats = {
 const stats = (patch: Partial<CardStats>): CardStats => ({ ...base, ...patch });
 
 describe('cartes de visite', () => {
-  it('catalogue : 30 cartes permanentes (case MVP du mois et pass compris) + 3 par saison = 33', () => {
-    assert.equal(STATIC_CARDS.length, 30);
-    assert.equal(STATIC_CARDS.length + seasonCards(1).length, 34);
+  it('catalogue : 31 cartes permanentes (case MVP du mois, pass et Jour 1 GTA 6 compris) + cartes de saison', () => {
+    assert.equal(STATIC_CARDS.length, 31);
+    assert.equal(STATIC_CARDS.length + seasonCards(1).length, 35);
     assert.ok(STATIC_CARDS.some((card) => card.key === MVP_MONTH_CARD));
     assert.equal(new Set(STATIC_CARDS.map((card) => card.key)).size, STATIC_CARDS.length);
   });
@@ -134,5 +134,16 @@ describe('carte du vainqueur du circuit', () => {
   it('donnée dès la grande finale gagnée, avant la clôture de la saison', () => {
     assert.ok(eligibleKeys(stats({ circuitWins: [1], currentSeason: { id: 1, peak: 0 } })).includes('s1-circuit'));
     assert.ok(!eligibleKeys(stats({ currentSeason: { id: 1, peak: 0 } })).includes('s1-circuit'));
+  });
+});
+
+describe('carte Jour 1 de GTA 6', () => {
+  it('débloquée par le badge gta6-jour1, exclusive et légendaire', () => {
+    const card = STATIC_CARDS.find((item) => item.key === 'gta6-jour1');
+    assert.ok(card);
+    assert.equal(card.rarity, 'legendaire');
+    assert.equal(card.exclusive, true);
+    assert.ok(eligibleKeys(stats({ badges: ['gta6-jour1'] })).includes('gta6-jour1'));
+    assert.ok(!eligibleKeys(stats({ badges: [] })).includes('gta6-jour1'));
   });
 });
