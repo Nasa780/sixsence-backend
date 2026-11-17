@@ -56,7 +56,7 @@ export const RULES_EMBEDS = [
     description: [
       '• Les rôles **Staff 6** et **Arbitre 6** encadrent le serveur.',
       '• Une question ou un problème ? Ouvre un ticket : le staff te répond en privé.',
-      '• Le règlement du classé sera publié au lancement de la saison.',
+      `• Le règlement des matchs (Classé, Division, tournois) est sur le site : ${config.siteUrl}/reglement`,
       '',
       '*Bon jeu à tous. ⚡*',
     ].join('\n'),
